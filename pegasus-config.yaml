@@ -1,0 +1,45 @@
+default_context:
+  _pegasus_version: 2024.8.2
+  ai_chat_mode: none
+  ai_image_mode: none
+  author_name: Avery Pawelek
+  ci: github_actions
+  css_framework: tailwind
+  css_theme: default
+  database: postgres
+  deploy_platform: none
+  description: Web application for The Link.ai
+  docker_setup: default
+  domain_name: thelink.ai
+  email: avery.pawelek@thelink.ai
+  enable_github_login: n
+  enable_google_login: y
+  enable_twitter_login: n
+  front_end_framework: react
+  include_static_files: y
+  marketing_email_platform: none
+  post_process: y
+  project_name: The Link
+  project_slug: the_link
+  standalone_front_end: vite
+  stripe_payment_mode: checkout
+  subscription_billing_model: per_unit
+  subscription_pricing_ui: in_app
+  use_2fa: y
+  use_admin_docs: y
+  use_api_auth: y
+  use_api_keys: y
+  use_async_example: y
+  use_cloud_media_storage: n
+  use_debug_toolbar: y
+  use_docker: y
+  use_ecommerce_example: y
+  use_examples: y
+  use_health_checks: y
+  use_impersonation: y
+  use_sentry: y
+  use_subscriptions: y
+  use_teams: y
+  use_teams_example: y
+  use_translations: y
+  use_wagtail: n
