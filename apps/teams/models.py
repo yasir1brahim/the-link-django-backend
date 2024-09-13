@@ -24,10 +24,19 @@ class Team(SubscriptionModelBase, BaseModel):
     slug = models.SlugField(unique=True)
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="teams", through="Membership")
 
-    # your team customizations go here.
+    member_limit = models.IntegerField(default=None, null=True, blank=True)
+    project_limit = models.IntegerField(default=None, null=True, blank=True)
+
+    is_enterprise = models.BooleanField(default=False)
+    enterprise_billing_notes = models.TextField(blank=True)
+    entitlements = models.ManyToManyField("deliverables.Entitlement", blank=True)
 
     def __str__(self):
         return self.name
+
+    class Meta:
+        verbose_name = "Company"
+        verbose_name_plural = "Companies"
 
     @property
     def email(self):

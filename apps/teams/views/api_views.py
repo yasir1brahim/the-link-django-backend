@@ -9,7 +9,7 @@ from apps.api.permissions import IsAuthenticatedOrHasUserAPIKey
 from ..invitations import send_invitation
 from ..models import Team, Invitation
 from ..permissions import TeamAccessPermissions, TeamModelAccessPermissions
-from ..roles import is_admin, is_member
+from ..roles import is_admin, is_member, ROLE_ADMIN
 from ..serializers import TeamSerializer, InvitationSerializer
 
 
@@ -33,7 +33,7 @@ class TeamViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         # ensure logged in user is set on the model during creation
         team = serializer.save()
-        team.members.add(self.request.user, through_defaults={"role": "admin"})
+        team.members.add(self.request.user, through_defaults={"role": ROLE_ADMIN})
 
 
 @extend_schema(tags=["teams"])

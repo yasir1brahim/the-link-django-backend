@@ -29,6 +29,7 @@ class TeamAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
     search_fields = ["name", "slug"]
     inlines = (MembershipInlineAdmin,)
+    filter_horizontal = ("entitlements",)
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)

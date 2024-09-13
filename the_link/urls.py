@@ -72,6 +72,8 @@ urlpatterns = [
     path("stripe/", include("djstripe.urls", namespace="djstripe")),
     # hijack urls for impersonation
     path("hijack/", include("hijack.urls", namespace="hijack")),
+    # Deliverables URLs
+    path("api/deliverables/", include("apps.deliverables.urls")),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 if settings.ENABLE_DEBUG_TOOLBAR:

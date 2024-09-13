@@ -99,6 +99,7 @@ PROJECT_APPS = [
     "apps.web",
     "apps.teams.apps.TeamConfig",
     "apps.teams_example.apps.TeamsExampleConfig",
+    "apps.deliverables.apps.DeliverablesConfig",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PEGASUS_APPS + PROJECT_APPS
