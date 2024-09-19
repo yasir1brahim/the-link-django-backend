@@ -1,0 +1,464 @@
+@import "./helpers/variables";
+// floating labels starts here
+
+.form-group {
+	position: relative;
+	margin-bottom: 20px;
+	width: 100%;
+
+	.text-label {
+		top: 50%;
+		left: 0;
+		color: #676F74;
+		margin: 0;
+		z-index: 0;
+		padding: 0 12px;
+		position: absolute;
+		font-size: 14px;
+		line-height: 20px;
+		-webkit-transform: translateY(-50%);
+		transform: translateY(-50%);
+		-webkit-transition: .3s all;
+		transition: .3s all;
+	}
+
+	input {
+		width: 100%;
+		color: #212121;
+		height: 56px;
+		border: solid #E2E2E2;
+		z-index: 0;
+		padding: 20px 12px 6px;
+		position: relative;
+		min-width: auto;
+		font-size: 0.875rem;
+		border-width: 0 0 2px 0 !important;
+		border-radius: 3px 3px 0 0;
+		background-color: #F8F8FA !important;
+		max-height: 50px;
+
+		&:not(:placeholder-shown) {
+			+ {
+				label {
+					top: 16px;
+					font-size: 70%;
+				}
+			}
+		}
+
+		&:focus {
+			outline: none;
+			-webkit-box-shadow: none;
+			box-shadow: none;
+
+			&::-webkit-input-placeholder {
+				color: #999;
+			}
+
+			&:-ms-input-placeholder {
+				color: #999;
+			}
+
+			&::-ms-input-placeholder {
+				color: #999;
+			}
+
+			&::placeholder {
+				color: #999;
+			}
+
+			+ {
+				label {
+					top: 16px;
+					color: $primary;
+					font-size: 70%;
+				}
+			}
+		}
+
+		&::-webkit-input-placeholder {
+			color: transparent;
+		}
+
+		&:-ms-input-placeholder {
+			color: transparent;
+		}
+
+		&::-ms-input-placeholder {
+			color: transparent;
+		}
+
+		&::placeholder {
+			color: transparent;
+		}
+
+		+input {
+			background-color: transparent !important;
+		}
+	}
+
+	textarea {
+		width: 100%;
+		color: #212121;
+		height: 100px;
+		border: solid $border-color;
+		z-index: 0;
+		padding: 20px 16px 6px;
+		position: relative;
+		min-width: auto;
+		font-size: 0.875rem;
+		border-width: 0 0 2px 0 !important;
+		border-radius: 4px 4px 0 0;
+		background-color: #F2F7F6 !important;
+
+		+.text-label {
+			top: 25px;
+		}
+
+		&:not(:placeholder-shown) {
+			+ {
+				label {
+					top: 12px;
+					color: $primary;
+					font-size: 70%;
+				}
+			}
+		}
+
+		&:focus {
+			outline: none;
+			-webkit-box-shadow: none;
+			box-shadow: none;
+
+			&::-webkit-input-placeholder {
+				color: #999;
+			}
+
+			&:-ms-input-placeholder {
+				color: #999;
+			}
+
+			&::-ms-input-placeholder {
+				color: #999;
+			}
+
+			&::placeholder {
+				color: #999;
+			}
+
+			+ {
+				label {
+					top: 12px;
+					color: $primary;
+					font-size: 70%;
+				}
+			}
+		}
+
+		&::-webkit-input-placeholder {
+			color: transparent;
+		}
+
+		&:-ms-input-placeholder {
+			color: transparent;
+		}
+
+		&::-ms-input-placeholder {
+			color: transparent;
+		}
+
+		&::placeholder {
+			color: transparent;
+		}
+	}
+
+	&.search {
+		.form-control {
+			background-image: url("#{$assetPath}search.svg");
+			background-size: 20px;
+			background-position: calc(100% - 14px) 50%;
+			background-repeat: no-repeat;
+			padding-right: 40px;
+		}
+	}
+	.typehead-label {
+		margin: 4px;
+	}
+	.has-typehead {
+		&.is-focused {
+			.text-label {
+				color: $primary  !important;
+			}
+		}
+
+		&.empty {
+			.text-label {
+				top: 50%;
+				color: #6e6e6e;
+				font-size: 1rem;
+			}
+		}
+
+		&.is-focused.empty {
+			.text-label {
+				top: 16px;
+				font-size: 70%;
+			}
+		}
+
+		.text-label {
+			top: 16px;
+			font-size: 70%;
+			pointer-events: none;
+		}
+
+		:readonly,
+		[readonly] {
+			cursor: not-allowed;
+			opacity: 0.5;
+		}
+
+		&.is-disabled {
+			cursor: not-allowed;
+			opacity: 0.5;
+
+			.rbt {
+				pointer-events: none;
+			}
+
+			input,
+			[disabled],
+			:disabled,
+			.disabled,
+			:readonly,
+			[readonly] {
+				pointer-events: none;
+			}
+		}
+
+		.rbt {
+			.rbt-menu {
+				.dropdown-item {
+
+					&.active,
+					&:active {
+						background-color: #f2f7f6;
+					}
+				}
+			}
+		}
+	}
+
+	.has-calendar {
+		&.is-focused {
+			.text-label {
+				color: $primary  !important;
+			}
+		}
+
+		&.empty {
+			.text-label {
+				top: 50%;
+				color: #6e6e6e;
+				font-size: 1rem;
+			}
+		}
+
+		&.is-focused.empty {
+			.text-label {
+				top: 16px;
+				font-size: 70%;
+			}
+		}
+
+		.text-label {
+			top: 16px;
+			font-size: 70%;
+			pointer-events: none;
+		}
+
+		:readonly,
+		[readonly] {
+			cursor: not-allowed;
+			opacity: 0.5;
+		}
+
+		&.is-disabled {
+			cursor: not-allowed;
+			opacity: 0.5;
+
+			.react-datepicker-wrapper {
+				pointer-events: none;
+			}
+
+			input,
+			[disabled],
+			:disabled,
+			.disabled,
+			:readonly,
+			[readonly] {
+				pointer-events: none;
+			}
+		}
+	}
+
+	.helper-text {
+		color: #9e9e9e;
+		padding: 0 16px;
+		position: absolute;
+		font-size: 0.75rem;
+		margin-top: 4px;
+		line-height: 1rem;
+
+		&.has-error {
+			color: #F44336;
+		}
+	}
+
+	.has-icon {
+		top: 50%;
+		right: 16px;
+		z-index: 1;
+		display: inline-block;
+		position: absolute;
+		transform: translate(0, -50%);
+		pointer-events: none;
+
+		&.icon-dropdown {
+			width: 8px;
+			height: 12px;
+			background: url('#{$assetPath}back.svg') no-repeat center;
+			transform: translate(0, -50%) rotate(-90deg);
+		}
+
+		&.icon-calendar {
+			width: 24px;
+			height: 24px;
+			background: url('#{$assetPath}calendar.svg') no-repeat center;
+			transform: translate(0, -50%);
+		}
+	}
+}
+
+// .has-float-label {
+// 	position: relative;
+// 	display: block;
+// 	margin: 0 !important;
+// 	width: 100%;
+// 	.placeholder {
+// 		position: absolute;
+// 		background-color: $white;
+// 		padding: 0 5px;
+// 		left: 15px;
+// 		top: -10px;
+// 		cursor: text;
+// 		z-index: 2;
+// 		@include text-style($primary, $font-size-sm, 400);
+// 		@include vendor-prefix(transition, all 150ms ease);
+// 		.hide-placeholder {
+// 			display: none;
+// 		}
+// 		.hide-text {
+// 			display: none;
+// 		}
+// 	}
+// 	&.has-error{
+// 		.form-control{
+// 			border-color: $danger !important;
+// 		}
+// 	}
+// 	&.search {
+// 		.form-control {
+// 			// background-image: url("#{$assetPath}search.svg");
+// 			background-size: 20px;
+// 			background-position: calc(100% - 14px) 50%;
+// 			background-repeat: no-repeat;
+// 			padding-right: 40px;
+// 		}
+// 	}
+
+// 	.disabled, :disabled {
+// 		+ .placeholder {
+// 			background-color: transparent;
+// 			&:after {
+// 				height: 1px;
+// 				background: $white;
+// 				content: '';
+// 				top: -25px;
+// 				width: calc(100% + 8px);
+// 				display: inline-block;
+// 				left: -4px;
+// 				position: relative;
+// 				z-index: -1;
+// 			}
+// 		}
+// 	}
+// }
+
+// .empty {
+// 	.placeholder {
+// 		top: $input-height/2; //50%;
+// 		transform: translateY(-50%);
+// 		background: none;
+// 		@include text-style($gray-600, $font-size-base, 400);
+// 		z-index: 1;
+// 		.hide-placeholder {
+// 			color: $gray-200;
+// 			font-style: italic;
+// 			display: inline-block;
+// 		}
+// 		.hide-text {
+// 			display: inline;
+// 		}
+// 		&:after {
+// 			display: none !important;
+// 		}
+// 	}
+// 	select{
+// 		color: $white;
+// 		-webkit-transition: none;
+// 		transition: none;
+// 		option{
+// 			color: $gray-800;
+// 		}
+// 		&[disabled] {
+// 			background-color: $cararra;
+// 		}
+// 	}
+// }
+
+// .input-group {
+// 	.has-float-label {
+// 		-webkit-box-flex: 1;
+// 		-webkit-flex-grow: 1;
+// 		-ms-flex-positive: 1;
+// 		flex-grow: 1;
+// 		margin-bottom: 0;
+// 		display: -webkit-box;
+// 		display: -webkit-flex;
+// 		display: -ms-flexbox;
+// 		display: flex;
+// 		-webkit-box-orient: vertical;
+// 		-webkit-box-direction: normal;
+// 		-webkit-flex-direction: column;
+// 		-ms-flex-direction: column;
+// 		flex-direction: column;
+// 		-webkit-box-pack: center;
+// 		-webkit-justify-content: center;
+// 		-ms-flex-pack: center;
+// 		justify-content: center;
+// 		.form-control {
+// 			width: 100%;
+// 			border-radius: 0.25rem;
+// 		}
+// 	}
+// }
+// .input-group .has-float-label:not(:last-child), .input-group .has-float-label:not(:last-child) .form-control {
+// 	border-bottom-right-radius: 0;
+// 	border-top-right-radius: 0;
+// 	border-right: 0;
+// }
+// .input-group .has-float-label:not(:first-child), .input-group .has-float-label:not(:first-child) .form-control {
+// 	border-bottom-left-radius: 0;
+// 	border-top-left-radius: 0;
+// }

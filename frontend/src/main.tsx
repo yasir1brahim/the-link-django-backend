@@ -7,7 +7,7 @@ import {
 import App from './pages/App.tsx'
 import './index.css'
 import ErrorPage from "./error-page.tsx";
-import LoginPage from "./pages/Login.tsx";
+import LoginPage from "./pages/Login.jsx";
 import OtpPage from "./pages/Otp.tsx";
 import {AuthProvider} from "./auth/authprovider";
 import Profile from "./pages/dashboard/Profile";

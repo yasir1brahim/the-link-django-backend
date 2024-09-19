@@ -19,7 +19,8 @@ class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.all()
     serializer_class = ProjectSerializer
     permission_classes = [IsAuthenticated, ProjectAccessPermissions]
-    
+    # lookup_field = 'pk'
+
     def get_queryset(self):
         return self.queryset.filter(members=self.request.user)
 
@@ -27,24 +28,5 @@ class ProjectViewSet(viewsets.ModelViewSet):
         team = serializer.validated_data["team"]
         if not self.request.user.is_member_of_team(team):
             raise PermissionDenied()
-        project = serializer.save()
-        project.members.add(self.request.user, through_defaults={"role": ROLE_PROJECT_ADMIN})
-
-
-
-
-
-
-class CanCreateProject(BasePermission):
-    def has_permission(self, request, view):
-        return request.user.is_admin_for_team(request.team)
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated, CanCreateProject])
-def create_project(request):
-    serializer = ProjectSerializer(data=request.data)
-    if serializer.is_valid():
         serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+

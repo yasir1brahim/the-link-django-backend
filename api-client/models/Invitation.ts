@@ -13,12 +13,12 @@
  */
 
 import { mapValues } from '../runtime';
-import type { RoleEnum } from './RoleEnum';
+import type { Role9aaEnum } from './Role9aaEnum';
 import {
-    RoleEnumFromJSON,
-    RoleEnumFromJSONTyped,
-    RoleEnumToJSON,
-} from './RoleEnum';
+    Role9aaEnumFromJSON,
+    Role9aaEnumFromJSONTyped,
+    Role9aaEnumToJSON,
+} from './Role9aaEnum';
 
 /**
  * 
@@ -46,10 +46,10 @@ export interface Invitation {
     email: string;
     /**
      * 
-     * @type {RoleEnum}
+     * @type {Role9aaEnum}
      * @memberof Invitation
      */
-    role?: RoleEnum;
+    role?: Role9aaEnum;
     /**
      * 
      * @type {string}
@@ -88,7 +88,7 @@ export function InvitationFromJSONTyped(json: any, ignoreDiscriminator: boolean)
         'id': json['id'],
         'team': json['team'],
         'email': json['email'],
-        'role': json['role'] == null ? undefined : RoleEnumFromJSON(json['role']),
+        'role': json['role'] == null ? undefined : Role9aaEnumFromJSON(json['role']),
         'invitedBy': json['invited_by'],
         'isAccepted': json['is_accepted'] == null ? undefined : json['is_accepted'],
     };
@@ -102,7 +102,7 @@ export function InvitationToJSON(value?: Omit<Invitation, 'id'|'invited_by'> | n
         
         'team': value['team'],
         'email': value['email'],
-        'role': RoleEnumToJSON(value['role']),
+        'role': Role9aaEnumToJSON(value['role']),
         'is_accepted': value['isAccepted'],
     };
 }

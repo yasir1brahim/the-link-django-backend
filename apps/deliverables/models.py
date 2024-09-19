@@ -4,11 +4,23 @@ from django.conf import settings
 
 
 class Project(BaseModel):
+    PROJECT_STATUS_OPEN = "open"
+    PROJECT_STATUS_CLOSED = "closed"
+    PROJECT_STATUS_CHOICES = (
+        (PROJECT_STATUS_OPEN, "Open"),
+        (PROJECT_STATUS_CLOSED, "Closed"),
+    )
+
     name = models.CharField(max_length=256)
     description = models.TextField(blank=True)
     team = models.ForeignKey("teams.Team", on_delete=models.CASCADE)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="projects", through="ProjectMembership")
+
+    is_archived = models.BooleanField(default=False)
+    status = models.CharField(max_length=256, choices=PROJECT_STATUS_CHOICES, default=PROJECT_STATUS_OPEN)
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
 
     entitlements = models.ManyToManyField("Entitlement", blank=True)
 
@@ -30,9 +42,13 @@ PROJECT_MEMBERSHIP_ROLE_CHOICES = (
 )
 
 class ProjectMembership(BaseModel):
-    project = models.ForeignKey("Project", on_delete=models.CASCADE)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    project = models.ForeignKey("Project", on_delete=models.CASCADE, related_name="project_memberships")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="project_memberships")
     role = models.CharField(max_length=256, choices=PROJECT_MEMBERSHIP_ROLE_CHOICES)
+
+    class Meta:
+        # Ensure a user can only be associated with a project once.
+        unique_together = ("project", "user")
 
 
 class Entitlement(BaseModel):

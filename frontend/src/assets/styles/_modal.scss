@@ -1,0 +1,1157 @@
+@import './helpers/variables';
+
+.modal {
+    .modal-dialog {
+        .modal-content {
+            .modal-header {
+                padding: 24px 24px 16px 24px;
+                border-bottom: 0;
+
+                h5 {
+                    font-weight: bold;
+                }
+            }
+
+            .modal-body {
+                padding: 24px;
+                padding-top: 0;
+
+                .modal-footer {
+                    bottom: 0;
+                    z-index: 1;
+                    padding: 0px 0 24px;
+                    position: sticky;
+                    background-color: #fff;
+                    justify-content: flex-start;
+                    border-top:none !important;
+                    button {
+                        margin: 0;
+                        display: inline-block;
+                        min-width: 120px;
+
+                        &:not(:first-of-type) {
+                            margin-left: 12px;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Create New Service Contract
+        &.create-new-contract {
+            .modal-content {
+                .modal-header {
+                    align-items: center;
+                }
+
+                .modal-body {
+                    overflow: auto;
+                    max-height: 500px;
+                    padding-bottom: 0;
+
+                    .upload-documents {
+                        .select-File {
+                            input {
+                                width: 0;
+                                height: 0;
+                                padding: 0;
+                                opacity: 0;
+
+                                +label {
+                                    width: 100%;
+                                    margin: 0;
+                                    display: flex;
+                                    cursor: pointer;
+                                    border: 1px dashed $primary;
+                                    padding: 16px;
+                                    align-items: center;
+                                    justify-content: space-between;
+                                    background-color: #F2F7F6;
+
+                                    p {
+                                        color: #212121;
+                                        font-size: 1rem;
+                                        margin-bottom: 8px;
+
+                                        span {
+                                            color: #6e6e6e;
+                                            display: block;
+                                            font-size: 0.75rem;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        .uploaded-documents-list {
+                            margin-top: 8px;
+
+                            .uf-list {
+                                display: flex;
+                                flex-wrap: wrap;
+                                align-items: center;
+                                justify-content: flex-start;
+
+                                .uf-detail {
+                                    height: 36px;
+                                    border: 1px solid $border-color;
+                                    margin: 0 10px 10px 0;
+                                    display: flex;
+                                    padding: 6px 16px 6px 6px;
+                                    align-items: center;
+                                    border-radius: 2px;
+                                    justify-content: flex-start;
+                                    background-color: #F2F7F6;
+
+                                    .uf-image {
+                                        width: 24px;
+                                        height: 24px;
+                                        display: inline-block;
+                                        margin-right: 6px;
+                                        background-size: contain !important;
+
+                                        &-png {
+                                            background: url('#{$assetPath}file-png.svg') no-repeat center;
+                                        }
+
+                                        &-pdf {
+                                            background: url('#{$assetPath}file-pdf.svg') no-repeat center;
+                                        }
+
+                                        &-jpg {
+                                            background: url('#{$assetPath}file-jpg.svg') no-repeat center;
+                                        }
+
+                                        &-gif {
+                                            background: url('#{$assetPath}file-pdf.svg') no-repeat center;
+                                        }
+                                    }
+
+                                    .uf-name {
+                                        color: #212121;
+                                        font-size: $font-size-sm;
+                                        line-height: 1.25rem;
+                                        margin-right: 16px;
+                                    }
+
+                                    .uf-close {
+                                        width: 8px;
+                                        height: 8px;
+                                        cursor: pointer;
+                                        display: inline-block;
+                                        background: url('#{$assetPath}close.svg') no-repeat center;
+                                        background-size: 8px;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    .fields-wrapper {
+                        .fields-addition {
+                            .addition-left {
+                                border: 1px dashed $primary;
+                                padding: 16px;
+
+                                .al-heading {
+                                    display: flex;
+                                    align-items: center;
+                                    border-bottom: 1px solid $border-color;
+                                    margin-bottom: 10px;
+                                    padding-bottom: 10px;
+                                    justify-content: space-between;
+
+                                    a {
+                                        text-decoration: underline;
+                                    }
+                                }
+
+                                .al-body {
+                                    .add-tag-content {
+                                        display: flex;
+                                        flex-wrap: wrap;
+                                        align-items: center;
+                                        justify-content: flex-start;
+
+                                        .add-tag {
+                                            cursor: pointer;
+                                            border: 1px solid $primary;
+                                            margin: 0 8px 8px 0;
+                                            padding: 0 4px;
+                                            display: flex;
+                                            border-radius: 4px;
+                                            align-items: center;
+                                            justify-content: center;
+
+                                            .icon-add {
+                                                width: 16px;
+                                                height: 16px;
+                                                background: url('#{$assetPath}plus.svg') no-repeat center;
+                                                margin-left: 8px;
+                                            }
+                                        }
+                                    }
+
+                                    .add-new-tag {
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: flex-start;
+
+                                        .add-new-input {
+                                            display: flex;
+                                            align-items: center;
+                                            justify-content: space-between;
+
+                                            input {
+                                                border: 1px solid $border-color !important;
+                                                height: 33px;
+                                                flex: 1;
+                                                padding: 0 16px;
+
+                                                &::placeholder {
+                                                    color: #c2c2c2 !important;
+                                                }
+                                            }
+
+                                            .add-new-buttons {
+                                                margin-left: 8px;
+
+                                                button {
+                                                    padding: 6px;
+
+                                                    .new-save {
+                                                        width: 16px;
+                                                        height: 16px;
+                                                        background: url('#{$assetPath}checkmark.svg') no-repeat center;
+                                                    }
+
+                                                    .new-cancel {
+                                                        width: 16px;
+                                                        height: 16px;
+                                                        background: url('#{$assetPath}close.svg') no-repeat center;
+                                                    }
+
+                                                    &:not(:last-of-type) {
+                                                        margin-right: 8px;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            .addition-right {
+                                border: 1px dashed $primary;
+                                padding: 16px;
+
+                                .al-heading {
+                                    display: flex;
+                                    align-items: center;
+                                    border-bottom: 1px solid $border-color;
+                                    margin-bottom: 10px;
+                                    padding-bottom: 10px;
+                                    justify-content: space-between;
+
+                                    a {
+                                        text-decoration: underline;
+                                    }
+                                }
+
+                                .al-body {
+                                    .add-tag-content {
+                                        display: flex;
+                                        flex-wrap: wrap;
+                                        align-items: center;
+                                        justify-content: flex-start;
+
+                                        .add-tag {
+                                            cursor: pointer;
+                                            border: 1px solid $primary;
+                                            margin: 0 8px 8px 0;
+                                            padding: 0 4px;
+                                            display: flex;
+                                            line-height: 25px;
+                                            border-radius: 4px;
+                                            align-items: center;
+                                            justify-content: center;
+
+                                            .icon-remove {
+                                                width: 18px;
+                                                height: 18px;
+                                                background: url('#{$assetPath}close.svg') no-repeat center;
+                                                margin-left: 8px;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    .modal-footer {
+                        bottom: 0;
+                        padding: 12px 0;
+                        position: sticky;
+                        background-color: #fff;
+                        justify-content: space-between;
+
+                        button {
+                            display: inline-block;
+                            min-width: 108px;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Create New Service Ticket
+        &.create-new-ticket {
+            .modal-content {
+                .modal-header {
+                    align-items: center;
+                }
+
+                .modal-body {
+                    overflow: auto;
+                    max-height: 500px;
+                    padding-bottom: 0;
+
+                    .fields-wrapper {
+                        .fields-addition {
+                            .addition-left {
+                                border: 1px dashed $primary;
+                                padding: 16px;
+
+                                .al-heading {
+                                    display: flex;
+                                    align-items: center;
+                                    border-bottom: 1px solid $border-color;
+                                    margin-bottom: 10px;
+                                    padding-bottom: 10px;
+                                    justify-content: space-between;
+
+                                    a {
+                                        text-decoration: underline;
+                                    }
+                                }
+
+                                .al-body {
+                                    .add-tag-content {
+                                        display: flex;
+                                        flex-wrap: wrap;
+                                        align-items: center;
+                                        justify-content: flex-start;
+
+                                        .add-tag {
+                                            cursor: pointer;
+                                            border: 1px solid $primary;
+                                            margin: 0 8px 8px 0;
+                                            padding: 0 4px;
+                                            display: flex;
+                                            border-radius: 4px;
+                                            align-items: center;
+                                            justify-content: center;
+
+                                            .icon-add {
+                                                width: 16px;
+                                                height: 16px;
+                                                background: url('#{$assetPath}plus.svg') no-repeat center;
+                                                margin-left: 8px;
+                                            }
+                                        }
+                                    }
+
+                                    .add-new-tag {
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: flex-start;
+
+                                        .add-new-input {
+                                            display: flex;
+                                            align-items: center;
+                                            justify-content: space-between;
+
+                                            input {
+                                                border: 1px solid $border-color !important;
+                                                height: 33px;
+                                                flex: 1;
+                                                padding: 0 16px;
+
+                                                &::placeholder {
+                                                    color: #c2c2c2 !important;
+                                                }
+                                            }
+
+                                            .add-new-buttons {
+                                                margin-left: 8px;
+
+                                                button {
+                                                    padding: 6px;
+
+                                                    .new-save {
+                                                        width: 16px;
+                                                        height: 16px;
+                                                        background: url('#{$assetPath}checkmark.svg') no-repeat center;
+                                                    }
+
+                                                    .new-cancel {
+                                                        width: 16px;
+                                                        height: 16px;
+                                                        background: url('#{$assetPath}close.svg') no-repeat center;
+                                                    }
+
+                                                    &:not(:last-of-type) {
+                                                        margin-right: 8px;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            .addition-right {
+                                border: 1px dashed $primary;
+                                padding: 16px;
+
+                                .al-heading {
+                                    display: flex;
+                                    align-items: center;
+                                    border-bottom: 1px solid $border-color;
+                                    margin-bottom: 10px;
+                                    padding-bottom: 10px;
+                                    justify-content: space-between;
+
+                                    a {
+                                        text-decoration: underline;
+                                    }
+                                }
+
+                                .al-body {
+                                    .add-tag-content {
+                                        display: flex;
+                                        flex-wrap: wrap;
+                                        align-items: center;
+                                        justify-content: flex-start;
+
+                                        .add-tag {
+                                            cursor: pointer;
+                                            border: 1px solid $primary;
+                                            margin: 0 8px 8px 0;
+                                            padding: 0 4px;
+                                            display: flex;
+                                            line-height: 25px;
+                                            border-radius: 4px;
+                                            align-items: center;
+                                            justify-content: center;
+
+                                            .icon-remove {
+                                                width: 18px;
+                                                height: 18px;
+                                                background: url('#{$assetPath}close.svg') no-repeat center;
+                                                margin-left: 8px;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    .modal-footer {
+                        bottom: 0;
+                        padding: 12px 0;
+                        position: sticky;
+                        background-color: #fff;
+                        justify-content: space-between;
+
+                        button {
+                            display: inline-block;
+                            min-width: 108px;
+                        }
+                    }
+                }
+            }
+        }
+
+        // New Customer
+        &.new-customer {
+            .modal-content {
+                .modal-header {
+                    align-items: center;
+                }
+
+                .modal-body {
+                    overflow: auto;
+                    max-height: 500px;
+                    padding-bottom: 0;
+
+                    .create-customer-form {
+                        .create-customer-content {
+                            display: flex;
+                            align-items: flex-start;
+                            justify-content: flex-start;
+
+                            .cc-left {
+                                display: flex;
+                                align-items: center;
+                                justify-content: flex-start;
+
+                                .upload-documents {
+                                    position: relative;
+
+                                    &:hover {
+                                        .select-File {
+                                            label {
+                                                height: 100%;
+                                                background-color: rgba(0, 0, 0, 0.4);
+                                            }
+                                        }
+                                    }
+
+                                    .image-holder {
+                                        width: 190px;
+                                        height: 190px;
+                                        display: flex;
+                                        align-items: center;
+                                        border-radius: 4px;
+                                        justify-content: center;
+                                        background-color: #c4c4c4;
+
+                                        .dummy-image {
+                                            width: 61px;
+                                            height: 61px;
+                                            object-fit: contain;
+                                            background-color: #c4c4c4;
+                                        }
+
+                                        .uploaded-image {
+                                            width: 190px;
+                                            height: 190px;
+                                            object-fit: contain;
+                                        }
+                                    }
+
+                                    .select-File {
+                                        top: 0;
+                                        left: 0;
+                                        right: 0;
+                                        bottom: 0;
+                                        width: 190px;
+                                        height: 190px;
+                                        position: absolute;
+                                        overflow: hidden;
+
+                                        input {
+                                            width: 0;
+                                            height: 0;
+                                            padding: 0;
+                                            opacity: 0;
+
+                                            +label {
+                                                width: 100%;
+                                                height: calc(100% + 29px);
+                                                margin: 0;
+                                                display: flex;
+                                                cursor: pointer;
+                                                align-items: flex-end;
+                                                border-radius: 4px;
+                                                justify-content: center;
+                                                background-color: transparent;
+                                                transition: all 0.3s ease-in-out;
+
+                                                .upload-text {
+                                                    width: 100%;
+                                                    height: 29px;
+                                                    background-color: $primary;
+
+                                                    span {
+                                                        color: $white;
+                                                        font-size: 0.875rem;
+                                                        margin-left: 4px;
+                                                        font-weight: normal;
+                                                    }
+
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    .uploaded-documents-list {
+                                        margin-top: 8px;
+
+                                        .uf-list {
+                                            display: flex;
+                                            flex-wrap: wrap;
+                                            align-items: center;
+                                            justify-content: flex-start;
+
+                                            .uf-detail {
+                                                height: 36px;
+                                                border: 1px solid $border-color;
+                                                margin: 0 10px 10px 0;
+                                                display: flex;
+                                                padding: 6px 16px 6px 6px;
+                                                align-items: center;
+                                                border-radius: 2px;
+                                                justify-content: flex-start;
+                                                background-color: #F2F7F6;
+
+                                                .uf-image {
+                                                    width: 24px;
+                                                    height: 24px;
+                                                    display: inline-block;
+                                                    margin-right: 6px;
+                                                    background-size: contain !important;
+
+                                                    &-png {
+                                                        background: url('#{$assetPath}file-png.svg') no-repeat center;
+                                                    }
+
+                                                    &-pdf {
+                                                        background: url('#{$assetPath}file-pdf.svg') no-repeat center;
+                                                    }
+
+                                                    &-jpg {
+                                                        background: url('#{$assetPath}file-jpg.svg') no-repeat center;
+                                                    }
+
+                                                    &-gif {
+                                                        background: url('#{$assetPath}file-pdf.svg') no-repeat center;
+                                                    }
+                                                }
+
+                                                .uf-name {
+                                                    color: #212121;
+                                                    font-size: $font-size-sm;
+                                                    line-height: 1.25rem;
+                                                    margin-right: 16px;
+                                                }
+
+                                                .uf-close {
+                                                    width: 8px;
+                                                    height: 8px;
+                                                    cursor: pointer;
+                                                    display: inline-block;
+                                                    background: url('#{$assetPath}close.svg') no-repeat center;
+                                                    background-size: 8px;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            .cc-right {
+                                width: 100%;
+                                padding-left: 30px;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // New User
+        &.new-user {
+            .modal-content {
+                .modal-header {
+                    align-items: center;
+                }
+
+                .modal-body {
+                    overflow: auto;
+                    max-height: 500px;
+                    padding-bottom: 0;
+
+                    .create-customer-form {
+                        .create-customer-content {
+                            display: flex;
+                            align-items: flex-start;
+                            justify-content: flex-start;
+
+                            .cc-left {
+                                display: flex;
+                                align-items: center;
+                                justify-content: flex-start;
+
+                                .upload-documents {
+                                    position: relative;
+
+                                    &:hover {
+                                        .select-File {
+                                            label {
+                                                height: 100%;
+                                                background-color: rgba(0, 0, 0, 0.4);
+                                            }
+                                        }
+                                    }
+
+                                    .image-holder {
+                                        width: 190px;
+                                        height: 190px;
+                                        display: flex;
+                                        align-items: center;
+                                        border-radius: 4px;
+                                        justify-content: center;
+                                        background-color: #c4c4c4;
+
+                                        .dummy-image {
+                                            width: 61px;
+                                            height: 61px;
+                                            object-fit: contain;
+                                            background-color: #c4c4c4;
+                                        }
+
+                                        .uploaded-image {
+                                            width: 190px;
+                                            height: 190px;
+                                            object-fit: contain;
+                                        }
+                                    }
+
+                                    .select-File {
+                                        top: 0;
+                                        left: 0;
+                                        right: 0;
+                                        bottom: 0;
+                                        width: 190px;
+                                        height: 190px;
+                                        position: absolute;
+                                        overflow: hidden;
+
+                                        input {
+                                            width: 0;
+                                            height: 0;
+                                            padding: 0;
+                                            opacity: 0;
+
+                                            +label {
+                                                width: 100%;
+                                                height: calc(100% + 29px);
+                                                margin: 0;
+                                                display: flex;
+                                                cursor: pointer;
+                                                align-items: flex-end;
+                                                border-radius: 4px;
+                                                justify-content: center;
+                                                background-color: transparent;
+                                                transition: all 0.3s ease-in-out;
+
+                                                .upload-text {
+                                                    width: 100%;
+                                                    height: 29px;
+                                                    background-color: $primary;
+
+                                                    span {
+                                                        color: $white;
+                                                        font-size: 0.875rem;
+                                                        margin-left: 4px;
+                                                        font-weight: normal;
+                                                    }
+
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    .uploaded-documents-list {
+                                        margin-top: 8px;
+
+                                        .uf-list {
+                                            display: flex;
+                                            flex-wrap: wrap;
+                                            align-items: center;
+                                            justify-content: flex-start;
+
+                                            .uf-detail {
+                                                height: 36px;
+                                                border: 1px solid $border-color;
+                                                margin: 0 10px 10px 0;
+                                                display: flex;
+                                                padding: 6px 16px 6px 6px;
+                                                align-items: center;
+                                                border-radius: 2px;
+                                                justify-content: flex-start;
+                                                background-color: #F2F7F6;
+
+                                                .uf-image {
+                                                    width: 24px;
+                                                    height: 24px;
+                                                    display: inline-block;
+                                                    margin-right: 6px;
+                                                    background-size: contain !important;
+
+                                                    &-png {
+                                                        background: url('#{$assetPath}file-png.svg') no-repeat center;
+                                                    }
+
+                                                    &-pdf {
+                                                        background: url('#{$assetPath}file-pdf.svg') no-repeat center;
+                                                    }
+
+                                                    &-jpg {
+                                                        background: url('#{$assetPath}file-jpg.svg') no-repeat center;
+                                                    }
+
+                                                    &-gif {
+                                                        background: url('#{$assetPath}file-pdf.svg') no-repeat center;
+                                                    }
+                                                }
+
+                                                .uf-name {
+                                                    color: #212121;
+                                                    font-size: $font-size-sm;
+                                                    line-height: 1.25rem;
+                                                    margin-right: 16px;
+                                                }
+
+                                                .uf-close {
+                                                    width: 8px;
+                                                    height: 8px;
+                                                    cursor: pointer;
+                                                    display: inline-block;
+                                                    background: url('#{$assetPath}close.svg') no-repeat center;
+                                                    background-size: 8px;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            .cc-right {
+                                width: 100%;
+                                padding-left: 30px;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // New Project
+        &.new-project {
+            .modal-content {
+                .modal-header {
+                    align-items: center;
+                }
+
+                .modal-body {
+                    // overflow: auto;
+                    max-height: 500px;
+                    padding-bottom: 0;
+
+                    .create-project-form {
+                        .customer-dp-container {
+                            width: 112px;
+                            height: 112px;
+                            display: flex;
+                            padding: 10px;
+                            background: #F1F1F1;
+                            align-items: center;
+                            margin-right: 16px;
+                            border-radius: 4px;
+                            justify-content: center;
+
+                            >img {
+                                object-fit: cover;
+                                max-width: 100%;
+                            }
+                        }
+
+                        .customer-profile {
+                            flex: 1;
+
+                            .text-label-value {
+                                display: flex;
+                                align-items: flex-start;
+                                justify-content: flex-start;
+
+                                >* {
+                                    font-size: 0.875rem;
+
+                                    &.text-label {
+                                        color: $primary;
+                                    }
+
+                                    &.text-value {
+                                        color: #212121;
+                                        margin-left: 0px;
+                                        font-weight: bold;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    .create-project-content {
+                        margin-top: 24px;
+
+                        .users-section {
+                            border-top: 1px solid $border-color;
+                            padding-top: 24px;
+                        }
+                    }
+                }
+            }
+        }
+
+        // New Project
+        &.upload-doc-popup {
+            .modal-content {
+                .modal-header {
+                    align-items: center;
+                }
+
+                .modal-body {
+                    overflow: auto;
+                    max-height: 500px;
+                    padding-bottom: 0;
+
+                    .upload-document-form {
+                        .upload-document-content {
+                            .select-File {
+                                border: 1px dashed $border-color;
+
+                                input {
+                                    width: 0;
+                                    height: 0;
+                                    padding: 0;
+                                    opacity: 0;
+
+                                    +label {
+                                        width: 100%;
+                                        height: calc(100% + 29px);
+                                        margin: 0;
+                                        display: flex;
+                                        cursor: pointer;
+                                        align-items: flex-end;
+                                        border-radius: 4px;
+                                        justify-content: center;
+                                        background-color: transparent;
+                                        transition: all 0.3s ease-in-out;
+
+                                        .upload-text {
+                                            width: 100%;
+                                            height: 194px;
+                                            flex-direction: column;
+                                            background-color: transparent;
+
+                                            small {
+                                                color: #ED1164;
+                                                font-size: 0.625rem;
+                                                margin-top: 8px;
+                                                font-weight: bold;
+                                                text-transform: uppercase;
+                                            }
+
+                                            span {
+                                                color: #9d9d9d;
+                                                font-size: 0.75rem;
+                                                margin-top: 8px;
+                                                font-weight: normal;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            .uploaded-file-list {
+                                margin: 48px 0 32px;
+
+                                .uploaded-file {
+                                    border: 1px solid $border-color;
+                                    padding: 16px;
+                                    border-radius: 8px;
+
+                                    span {
+                                        color: $primary;
+                                        font-size: 0.75rem;
+                                        line-height: 15px;
+                                    }
+
+                                    small {
+                                        color: #9d9d9d;
+                                        font-size: 0.75rem;
+                                        line-height: 15px;
+                                    }
+
+                                    &:not(:first-of-type) {
+                                        margin-top: 24px;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .submit-accent {
+                        color: #d5e83e !important;
+                    }
+                    .error-upload {
+                        margin: 60px 0;
+
+                        svg {
+                            margin: 0 0 12px;
+                        }
+
+                        h5 {
+                            color: $primary;
+                            font-size: 1.5rem;
+                            line-height: 29px;
+                        }
+
+                        p {
+                            color: $text-base-color;
+                            margin: 8px 0 20px;
+                            font-size: 1rem;
+                        }
+                    }
+
+                    .success-upload {
+                        margin: 32px 0;
+
+                        svg {
+                            margin: 0 0 12px;
+                        }
+
+                        h5 {
+                            color: $primary;
+                            font-size: 1.5rem;
+                            line-height: 29px;
+                        }
+
+                        p {
+                            color: $text-base-color;
+                            margin: 8px 0 20px;
+                            font-size: 1rem;
+                        }
+
+                        .doc-content-table {
+                            width: 100%;
+                            border: 1px solid rgba($primary, 0.1);
+                            display: inline-block;
+                            max-width: 384px;
+                            border-radius: 8px;
+                            margin-bottom: 32px;
+
+                            li {
+                                color: $text-base-color;
+                                height: 40px;
+                                display: flex;
+                                padding: 0 16px;
+                                align-items: center;
+                                justify-content: flex-start;
+
+                                >* {
+                                    width: 50%;
+                                    text-align: left;
+
+                                    &:first-child {
+                                        width: 80%;
+                                    }
+                                }
+
+                                &:not(:last-of-type) {
+                                    border-bottom: 1px solid rgba($primary, 0.1);
+                                }
+                            }
+
+                            .doc-content-heading {
+                                background-color: rgba($primary, 0.1);
+                                border-radius: 8px 8px 0 0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Updating List of admin
+        &.updatelist-admin {
+            .modal-content {
+                .modal-header {
+                    align-items: center;
+                }
+
+                .modal-body {
+                    overflow: auto;
+                    max-height: 500px;
+                    padding-bottom: 0;
+
+                    .custom-control {
+                        margin-bottom: 1rem;
+                    }
+
+                    .modal-footer {
+                        padding-bottom: 24px;
+                    }
+                }
+            }
+        }
+
+        // Detailinfo of admin
+        &.detailinfo-admin {
+            .modal-content {
+                .modal-header {
+                    align-items: center;
+                }
+
+                .modal-body {
+                    overflow: auto;
+                    max-height: 500px;
+                    padding-bottom: 0;
+
+                    .customer-profile-details {
+                        margin-bottom: 20px;
+
+                        .customer-dp-container {
+                            width: 112px;
+                            height: 112px;
+                            display: flex;
+                            padding: 10px;
+                            background: #f1f1f1;
+                            align-items: center;
+                            margin-right: 16px;
+                            border-radius: 4px;
+                            justify-content: center;
+
+                            >img {
+                                object-fit: cover;
+                                max-width: 100%;
+                            }
+                        }
+
+                        .customer-profile {
+                            flex: 1;
+
+                            .text-label-value {
+                                display: flex;
+                                align-items: flex-start;
+                                justify-content: flex-start;
+
+                                >* {
+                                    font-size: 0.875rem;
+
+                                    &.text-label {
+                                        color: #999;
+                                    }
+
+                                    &.text-value {
+                                        color: #212121;
+                                        margin-left: 4px;
+                                        font-weight: bold;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    .modal-footer {
+                        padding-bottom: 24px;
+                    }
+                }
+            }
+        }
+    }
+}

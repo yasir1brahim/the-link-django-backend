@@ -13,12 +13,12 @@
  */
 
 import { mapValues } from '../runtime';
-import type { RoleEnum } from './RoleEnum';
+import type { Role9aaEnum } from './Role9aaEnum';
 import {
-    RoleEnumFromJSON,
-    RoleEnumFromJSONTyped,
-    RoleEnumToJSON,
-} from './RoleEnum';
+    Role9aaEnumFromJSON,
+    Role9aaEnumFromJSONTyped,
+    Role9aaEnumToJSON,
+} from './Role9aaEnum';
 
 /**
  * 
@@ -46,10 +46,10 @@ export interface PatchedInvitation {
     email?: string;
     /**
      * 
-     * @type {RoleEnum}
+     * @type {Role9aaEnum}
      * @memberof PatchedInvitation
      */
-    role?: RoleEnum;
+    role?: Role9aaEnum;
     /**
      * 
      * @type {string}
@@ -84,7 +84,7 @@ export function PatchedInvitationFromJSONTyped(json: any, ignoreDiscriminator: b
         'id': json['id'] == null ? undefined : json['id'],
         'team': json['team'] == null ? undefined : json['team'],
         'email': json['email'] == null ? undefined : json['email'],
-        'role': json['role'] == null ? undefined : RoleEnumFromJSON(json['role']),
+        'role': json['role'] == null ? undefined : Role9aaEnumFromJSON(json['role']),
         'invitedBy': json['invited_by'] == null ? undefined : json['invited_by'],
         'isAccepted': json['is_accepted'] == null ? undefined : json['is_accepted'],
     };
@@ -98,7 +98,7 @@ export function PatchedInvitationToJSON(value?: Omit<PatchedInvitation, 'id'|'in
         
         'team': value['team'],
         'email': value['email'],
-        'role': RoleEnumToJSON(value['role']),
+        'role': Role9aaEnumToJSON(value['role']),
         'is_accepted': value['isAccepted'],
     };
 }

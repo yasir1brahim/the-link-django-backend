@@ -13,12 +13,12 @@
  */
 
 import { mapValues } from '../runtime';
-import type { RoleEnum } from './RoleEnum';
+import type { Role9aaEnum } from './Role9aaEnum';
 import {
-    RoleEnumFromJSON,
-    RoleEnumFromJSONTyped,
-    RoleEnumToJSON,
-} from './RoleEnum';
+    Role9aaEnumFromJSON,
+    Role9aaEnumFromJSONTyped,
+    Role9aaEnumToJSON,
+} from './Role9aaEnum';
 
 /**
  * 
@@ -58,10 +58,10 @@ export interface Membership {
     readonly displayName: string;
     /**
      * 
-     * @type {RoleEnum}
+     * @type {Role9aaEnum}
      * @memberof Membership
      */
-    role: RoleEnum;
+    role: Role9aaEnum;
 }
 
 /**
@@ -92,7 +92,7 @@ export function MembershipFromJSONTyped(json: any, ignoreDiscriminator: boolean)
         'firstName': json['first_name'],
         'lastName': json['last_name'],
         'displayName': json['display_name'],
-        'role': RoleEnumFromJSON(json['role']),
+        'role': Role9aaEnumFromJSON(json['role']),
     };
 }
 
@@ -102,7 +102,7 @@ export function MembershipToJSON(value?: Omit<Membership, 'id'|'user_id'|'first_
     }
     return {
         
-        'role': RoleEnumToJSON(value['role']),
+        'role': Role9aaEnumToJSON(value['role']),
     };
 }
 
