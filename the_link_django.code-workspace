@@ -1,10 +1,10 @@
 {
 	"folders": [
 		{
-			"path": "../.."
+			"path": "."
 		},
 		{
-			"path": "../../../LogManager/api"
+			"path": "../the-link-web-app"
 		}
 	],
 	"settings": {}

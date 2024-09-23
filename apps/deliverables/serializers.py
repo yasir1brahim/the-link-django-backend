@@ -20,8 +20,10 @@ class ProjectSerializer(serializers.ModelSerializer):
                    'user_limit', 'status', 'start_date', 'end_date', 'is_archived']
 
     members = ProjectMembershipSerializer(source="project_memberships", many=True)
+    team = serializers.ReadOnlyField(source="team.id")
     owner = CustomUserSerializer()
     entitlements = serializers.SerializerMethodField()
+    user_limit = serializers.ReadOnlyField()
 
     def get_entitlements(self, obj):
         project_level_entitlements = obj.entitlements.values_list('code_name', flat=True)
