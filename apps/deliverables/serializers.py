@@ -4,13 +4,14 @@ from apps.users.serializers import CustomUserSerializer
 
 
 class ProjectMembershipSerializer(serializers.ModelSerializer):
-    user_id = serializers.ReadOnlyField(source="user.id")
+    user_id = serializers.PrimaryKeyRelatedField(source="user.id", queryset=CustomUserSerializer.Meta.model.objects.all())
     first_name = serializers.ReadOnlyField(source="user.first_name")
     last_name = serializers.ReadOnlyField(source="user.last_name")
+    display_name = serializers.ReadOnlyField(source="user.get_display_name")
 
     class Meta:
         model = ProjectMembership
-        fields = ['user_id', 'first_name', 'last_name', 'role']
+        fields = ['user_id', 'first_name', 'last_name', 'display_name', 'role']
 
 
 class ProjectSerializer(serializers.ModelSerializer):
@@ -44,5 +45,38 @@ class ProjectSerializer(serializers.ModelSerializer):
             for member in members:
                 if not member.is_member_of_team(team):
                     raise serializers.ValidationError("All members must be a member of the team.")
-        
         return data
+    
+    def update(self, instance, validated_data):
+        print(validated_data)
+        memberships_data = validated_data.pop('project_memberships', [])
+        # Update project fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update project memberships
+        existing_members = {membership.user.id: membership for membership in instance.project_memberships.all()}
+        new_members = []
+
+        for membership_data in memberships_data:
+            user_id = membership_data.get('user').get('id').id
+            role = membership_data.get('role')
+
+            if user_id in existing_members:
+                # Update existing membership
+                membership = existing_members.pop(user_id)
+                membership.role = role
+                membership.save()
+            else:
+                # Create new membership
+                new_members.append(ProjectMembership(user_id=user_id, project=instance, role=role))
+
+        # Remove memberships not in the update data
+        for membership in existing_members.values():
+            membership.delete()
+
+        # Add new memberships
+        ProjectMembership.objects.bulk_create(new_members)
+
+        return instance
