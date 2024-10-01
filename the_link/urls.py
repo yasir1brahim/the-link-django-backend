@@ -37,7 +37,7 @@ team_urlpatterns = [
     path("", include(web_team_urls)),
     path("subscription/", include(subscriptions_team_urls)),
     path("team/", include(single_team_urls)),
-    path("example/", include("apps.teams_example.urls")),
+    # path("example/", include("apps.teams_example.urls")),
 ]
 
 urlpatterns = [
@@ -45,7 +45,7 @@ urlpatterns = [
     # redirect Django admin login to main login page
     path("admin/login/", RedirectView.as_view(pattern_name="account_login")),
     path("admin/", admin.site.urls),
-    path("dashboard/", include("apps.dashboard.urls")),
+    # path("dashboard/", include("apps.dashboard.urls")),
     path("i18n/", include("django.conf.urls.i18n")),
     path("jsi18n/", JavaScriptCatalog.as_view(), name="javascript-catalog"),
     path("sitemap.xml", sitemap, {"sitemaps": sitemaps}, name="django.contrib.sitemaps.views.sitemap"),
@@ -53,12 +53,12 @@ urlpatterns = [
     path("accounts/", include("allauth.urls")),
     path("users/", include("apps.users.urls")),
     path("subscriptions/", include("apps.subscriptions.urls")),
-    path("ecommerce/", include("apps.ecommerce.urls")),
+    # path("ecommerce/", include("apps.ecommerce.urls")),
     path("teams/", include("apps.teams.urls")),
     path("", include("apps.web.urls")),
-    path("pegasus/", include("pegasus.apps.examples.urls")),
-    path("pegasus/employees/", include("pegasus.apps.employees.urls")),
-    path("group-chat/", include("apps.group_chat.urls")),
+    # path("pegasus/", include("pegasus.apps.examples.urls")),
+    # path("pegasus/employees/", include("pegasus.apps.employees.urls")),
+    # path("group-chat/", include("apps.group_chat.urls")),
     path("support/", include("apps.support.urls")),
     path("celery-progress/", include("celery_progress.urls")),
     # auth API

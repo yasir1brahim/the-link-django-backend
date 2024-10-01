@@ -1,6 +1,9 @@
 from rest_framework import serializers
 from .models import Project, ProjectMembership, PROJECT_MEMBERSHIP_ROLE_CHOICES
 from apps.users.serializers import CustomUserSerializer
+from apps.users.models import CustomUser
+from apps.teams.models import Team
+from drf_spectacular.utils import extend_schema_field
 
 
 class ProjectMembershipSerializer(serializers.ModelSerializer):
@@ -14,7 +17,7 @@ class ProjectMembershipSerializer(serializers.ModelSerializer):
         fields = ['user_id', 'first_name', 'last_name', 'display_name', 'role']
 
 
-class ProjectSerializer(serializers.ModelSerializer):
+class BaseProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = ['id', 'name', 'description', 'team', 'owner', 'members', 'entitlements',
@@ -32,6 +35,13 @@ class ProjectSerializer(serializers.ModelSerializer):
             return project_level_entitlements
         else:
             return obj.team.entitlements.values_list('code_name', flat=True)
+
+
+
+
+class ProjectWriteSerializer(BaseProjectSerializer):
+    owner = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all())
+    team = serializers.PrimaryKeyRelatedField(queryset=Team.objects.all())
 
     def validate(self, data):
         owner = data.get('owner')
@@ -52,6 +62,7 @@ class ProjectSerializer(serializers.ModelSerializer):
         memberships_data = validated_data.pop('project_memberships', [])
         # Update project fields
         for attr, value in validated_data.items():
+            print(attr, value)
             setattr(instance, attr, value)
         instance.save()
 
@@ -80,3 +91,17 @@ class ProjectSerializer(serializers.ModelSerializer):
         ProjectMembership.objects.bulk_create(new_members)
 
         return instance
+
+    def create(self, validated_data):
+        memberships_data = validated_data.pop('project_memberships', [])
+        project = Project.objects.create(**validated_data)
+
+        for membership_data in memberships_data:
+            ProjectMembership.objects.create(project=project, **membership_data)
+
+        return project
+
+
+
+class ProjectReadSerializer(BaseProjectSerializer):
+    pass

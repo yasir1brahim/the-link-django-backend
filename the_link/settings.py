@@ -83,22 +83,22 @@ THIRD_PARTY_APPS = [
 ]
 
 PEGASUS_APPS = [
-    "pegasus.apps.examples.apps.PegasusExamplesConfig",
-    "pegasus.apps.employees.apps.PegasusEmployeesConfig",
+    # "pegasus.apps.examples.apps.PegasusExamplesConfig",
+    # "pegasus.apps.employees.apps.PegasusEmployeesConfig",
 ]
 
 # Put your project-specific apps here
 PROJECT_APPS = [
     "apps.authentication.apps.AuthenticationConfig",
-    "apps.group_chat",
+    # "apps.group_chat",
     "apps.subscriptions.apps.SubscriptionConfig",
     "apps.users.apps.UserConfig",
-    "apps.dashboard.apps.DashboardConfig",
+    # "apps.dashboard.apps.DashboardConfig",
     "apps.api.apps.APIConfig",
-    "apps.ecommerce.apps.ECommerceConfig",
+    # "apps.ecommerce.apps.ECommerceConfig",
     "apps.web",
     "apps.teams.apps.TeamConfig",
-    "apps.teams_example.apps.TeamsExampleConfig",
+    # "apps.teams_example.apps.TeamsExampleConfig",
     "apps.deliverables.apps.DeliverablesConfig",
 ]
 
