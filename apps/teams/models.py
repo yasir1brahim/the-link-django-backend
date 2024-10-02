@@ -95,7 +95,7 @@ class Invitation(BaseModel):
     )
 
     def get_url(self) -> str:
-        return settings.FRONTEND_ACCEPT_INVITATION_URL.format(settings.FRONTEND_BASE_URL, self.id)
+        return f"{settings.FRONTEND_BASE_URL}/accept-invitation/?team_id={self.team.id}&invitation_id={self.id}"
 
 
 class BaseTeamModel(BaseModel):

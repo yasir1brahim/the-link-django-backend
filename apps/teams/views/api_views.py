@@ -3,14 +3,30 @@ from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
-
+from rest_framework.permissions import AllowAny, BasePermission
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
 from apps.api.permissions import IsAuthenticatedOrHasUserAPIKey
 
-from ..invitations import send_invitation
+from ..invitations import send_invitation, process_invitation
 from ..models import Team, Invitation
 from ..permissions import TeamAccessPermissions, TeamModelAccessPermissions
 from ..roles import is_admin, is_member, ROLE_ADMIN
 from ..serializers import TeamSerializer, InvitationSerializer
+
+
+class AnonymousRetrieveOnlyPermission(BasePermission):
+    def has_permission(self, request, view):
+        if view.action == 'retrieve':
+            return True
+        return request.user.is_authenticated
+    
+    def has_object_permission(self, request, view, obj):
+        if view.action == 'retrieve':
+            return True
+        return request.user.is_authenticated and request.user.is_member_of_team(obj.team)
+
 
 
 @extend_schema_view(
@@ -48,15 +64,11 @@ class TeamViewSet(viewsets.ModelViewSet):
 class InvitationViewSet(viewsets.ModelViewSet):
     queryset = Invitation.objects.all()
     serializer_class = InvitationSerializer
-    permission_classes = (IsAuthenticatedOrHasUserAPIKey, TeamModelAccessPermissions)
+    permission_classes = (AnonymousRetrieveOnlyPermission,)
 
     @property
     def team(self):
-        team = get_object_or_404(Team, id=self.kwargs["team_id"])
-        if is_member(self.request.user, team):
-            return team
-        else:
-            raise PermissionDenied()
+        return get_object_or_404(Team, id=self.kwargs["team_id"])
 
     def _ensure_team_match(self, team):
         if team != self.team:
@@ -93,3 +105,21 @@ class InvitationViewSet(viewsets.ModelViewSet):
 
         invitation = serializer.save(invited_by=self.request.user)
         send_invitation(invitation)
+
+
+@api_view(['POST'])
+def api_accept_invitation(request, team_id, invitation_id):
+    print(request)
+    print(team_id)
+    print(invitation_id)
+    invitation = get_object_or_404(Invitation, id=invitation_id)
+
+    if invitation.is_accepted:
+        return Response({'detail': 'Invitation already accepted.'}, status=status.HTTP_400_BAD_REQUEST)
+    user = request.user
+    if is_member(user, invitation.team):
+        return Response({'detail': 'User is already a member of the team.'}, status=status.HTTP_400_BAD_REQUEST)
+    process_invitation(invitation, user)
+    invitation.is_accepted = True
+    invitation.save()
+    return Response({'detail': 'Invitation accepted.'}, status=status.HTTP_200_OK)

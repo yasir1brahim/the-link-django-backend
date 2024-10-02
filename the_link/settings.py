@@ -388,7 +388,6 @@ REST_AUTH = {
 }
 
 FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
-FRONTEND_ACCEPT_INVITATION_URL = "{}/accept-invitation/{}"
 
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:5173", FRONTEND_BASE_URL])
 
