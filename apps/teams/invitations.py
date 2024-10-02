@@ -14,7 +14,7 @@ def send_invitation(invitation):
         "project_name": project_name,
     }
     send_mail(
-        subject=_("You're invited to {}!").format(project_name),
+        subject=_("Invitation to {}!").format(project_name),
         message=render_to_string("teams/email/invitation.txt", context=email_context),
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[invitation.email],

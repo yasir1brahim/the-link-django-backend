@@ -95,7 +95,7 @@ class Invitation(BaseModel):
     )
 
     def get_url(self) -> str:
-        return absolute_url(reverse("teams:accept_invitation", args=[self.id]))
+        return settings.FRONTEND_ACCEPT_INVITATION_URL.format(settings.FRONTEND_BASE_URL, self.id)
 
 
 class BaseTeamModel(BaseModel):
