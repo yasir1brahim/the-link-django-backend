@@ -52,7 +52,7 @@ class InvitationViewSet(viewsets.ModelViewSet):
 
     @property
     def team(self):
-        team = get_object_or_404(Team, slug=self.kwargs["team_slug"])
+        team = get_object_or_404(Team, id=self.kwargs["team_id"])
         if is_member(self.request.user, team):
             return team
         else:

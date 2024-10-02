@@ -55,7 +55,7 @@ class Team(SubscriptionModelBase, BaseModel):
 
     @property
     def dashboard_url(self) -> str:
-        return reverse("web_team:home", args=[self.slug])
+        return reverse("web_team:home", args=[self.id])
 
 
 class Membership(BaseModel):
