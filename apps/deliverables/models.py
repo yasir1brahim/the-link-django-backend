@@ -61,3 +61,18 @@ class Entitlement(BaseModel):
     
     def __str__(self):
         return self.readable_name
+    
+
+class UploadedFile(BaseModel):
+    project = models.ForeignKey("Project", on_delete=models.CASCADE)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+
+    document_path = models.CharField(max_length=256)
+    parsed_document_path = models.CharField(max_length=256, blank=True, null=True)
+    name = models.CharField(max_length=256)
+    md5 = models.CharField(max_length=256)
+    processing_status = models.CharField(max_length=256)
+
+
+    def __str__(self):
+        return self.file.name

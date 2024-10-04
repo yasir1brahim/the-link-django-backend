@@ -534,3 +534,6 @@ LOGGING = {
         },
     },
 }
+
+
+BACKEND_CALLBACK_URL = env("BACKEND_CALLBACK_URL", default="http://localhost:8000")

@@ -37,8 +37,6 @@ class BaseProjectSerializer(serializers.ModelSerializer):
             return obj.team.entitlements.values_list('code_name', flat=True)
 
 
-
-
 class ProjectWriteSerializer(BaseProjectSerializer):
     owner = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all())
     team = serializers.PrimaryKeyRelatedField(queryset=Team.objects.all())
@@ -105,3 +103,8 @@ class ProjectWriteSerializer(BaseProjectSerializer):
 
 class ProjectReadSerializer(BaseProjectSerializer):
     pass
+
+
+class FileUploadSerializer(serializers.Serializer):
+    files = serializers.ListField(child=serializers.FileField())
+    project_id = serializers.IntegerField()

@@ -10,4 +10,5 @@ router.register(r'projects', views.ProjectViewSet, basename='project')
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('upload_file', views.upload_file, name='upload_file'),
 ]

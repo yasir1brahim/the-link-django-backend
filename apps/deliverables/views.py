@@ -1,3 +1,8 @@
+import os
+import time
+import logging
+from werkzeug.utils import secure_filename
+
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
@@ -12,9 +17,9 @@ from rest_framework.exceptions import PermissionDenied, ValidationError as DRFVa
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 
-from .serializers import ProjectReadSerializer, ProjectWriteSerializer
+from .serializers import ProjectReadSerializer, ProjectWriteSerializer, FileUploadSerializer
 from rest_framework import viewsets
-from .models import Entitlement, Project, ROLE_PROJECT_ADMIN
+from .models import Entitlement, Project, ROLE_PROJECT_ADMIN, Document
 from apps.teams.models import Team
 from .permissions import ProjectAccessPermissions
 
@@ -66,4 +71,61 @@ class ProjectViewSet(viewsets.ModelViewSet):
         if not self.request.user.is_member_of_team(team):
             raise PermissionDenied()
         serializer.save()
+
+
+
+def create_temp_dir():
+    dir_path = os.getcwd() + '/uploads/'
+    if not os.path.exists(dir_path):
+        os.mkdir(dir_path)
+    dir_path += str(int(time.time())) + '/'
+    if os.path.exists(dir_path):
+        for f in os.listdir(dir_path):
+            os.remove(os.path.join(dir_path, f))
+        logging.debug("Temp files deleted")
+    else:
+        os.mkdir(dir_path)
+    return dir_path
+
+
+@extend_schema(
+    request=FileUploadSerializer,
+    responses={200: {'description': 'File uploaded successfully'}},
+    description="Upload a file to the server.",
+    methods=["POST"]
+)
+@api_view(['POST'])
+def upload_file(request):
+    serializer = FileUploadSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    project_id = serializer.validated_data['project_id']
+    user = request.user
+    files = serializer.validated_data['files']
+
+    if not files:
+        return Response({'detail': 'No files provided'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    temp_base_dir = create_temp_dir()
+
+    for file in files:
+        try:
+            filename = secure_filename(f'project_{project_id}_{file.name}')
+            document_path = f'original/{filename}'
+            parsed_document_path = f'parsed/{filename}'
+
+            Document.objects.create(
+                file=file,
+                project_id=project_id,
+                uploaded_by=user,
+                name=filename,
+                path=document_path,
+                parsed_path=parsed_document_path,
+                status='uploaded',
+            )
+        except Exception as e:
+            logging.error(f"Error uploading file: {e}")
+            return Response({'detail': 'Error uploading file'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response({'detail': 'File uploaded successfully'}, status=status.HTTP_200_OK)
 
