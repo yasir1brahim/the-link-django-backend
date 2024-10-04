@@ -1,7 +1,7 @@
 from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema, extend_schema_view
-from rest_framework import viewsets
+from rest_framework import viewsets, mixins
 from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
 from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.decorators import api_view
@@ -10,10 +10,10 @@ from rest_framework import status
 from apps.api.permissions import IsAuthenticatedOrHasUserAPIKey
 
 from ..invitations import send_invitation, process_invitation
-from ..models import Team, Invitation
+from ..models import Team, Invitation, Membership
 from ..permissions import TeamAccessPermissions, TeamModelAccessPermissions
 from ..roles import is_admin, is_member, ROLE_ADMIN
-from ..serializers import TeamSerializer, InvitationSerializer
+from ..serializers import TeamSerializer, InvitationSerializer, MembershipSerializer
 
 
 class AnonymousRetrieveOnlyPermission(BasePermission):
@@ -50,6 +50,26 @@ class TeamViewSet(viewsets.ModelViewSet):
         # ensure logged in user is set on the model during creation
         team = serializer.save()
         team.members.add(self.request.user, through_defaults={"role": ROLE_ADMIN})
+
+
+@extend_schema_view(
+    update=extend_schema(operation_id="memberships_update"),
+    partial_update=extend_schema(operation_id="memberships_partial_update"),
+    destroy=extend_schema(operation_id="memberships_destroy"),
+)
+class MembershipViewSet(
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet
+):
+    queryset = Membership.objects.all()
+    serializer_class = MembershipSerializer
+    permission_classes = (IsAuthenticatedOrHasUserAPIKey, TeamModelAccessPermissions)
+
+    def get_queryset(self):
+        # filter queryset based on logged in user
+        return self.queryset.filter(team__in=self.request.user.teams.all())
+
 
 
 @extend_schema(tags=["teams"])

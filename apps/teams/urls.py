@@ -31,6 +31,7 @@ team_urlpatterns = (
 # DRF config for API views (required for React Teams, implementation, optional otherwise)
 router = routers.DefaultRouter()
 router.register("api/teams", views.TeamViewSet)
+router.register("api/memberships", views.MembershipViewSet)
 urlpatterns += router.urls
 
 single_team_router = routers.DefaultRouter()
