@@ -1,7 +1,6 @@
 import os
 import time
 import logging
-from werkzeug.utils import secure_filename
 
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse
@@ -17,9 +16,9 @@ from rest_framework.exceptions import PermissionDenied, ValidationError as DRFVa
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 
-from .serializers import ProjectReadSerializer, ProjectWriteSerializer, FileUploadSerializer
+from .serializers import ProjectReadSerializer, ProjectWriteSerializer, FileUploadSerializer, SubmittalItemReadSerializer, SubmittalItemWriteSerializer
 from rest_framework import viewsets
-from .models import Entitlement, Project, ROLE_PROJECT_ADMIN, Document
+from .models import Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem
 from apps.teams.models import Team
 from .permissions import ProjectAccessPermissions
 
@@ -70,7 +69,26 @@ class ProjectViewSet(viewsets.ModelViewSet):
         team = serializer.validated_data["team"]
         if not self.request.user.is_member_of_team(team):
             raise PermissionDenied()
-        serializer.save()
+        serializer.save(created_by=self.request.user)
+
+
+class SubmittalItemViewSet(viewsets.ModelViewSet):
+    queryset = SubmittalItem.objects.all()
+    permission_classes = [IsAuthenticated, ProjectAccessPermissions]
+    def get_serializer_class(self):
+        if self.action in ['list', 'retrieve']:
+            return SubmittalItemReadSerializer
+        return SubmittalItemWriteSerializer
+
+    def get_queryset(self):
+        project_id = self.kwargs.get('project_id')
+        return self.queryset.filter(project_id=project_id)
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'))
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.user)
 
 
 
@@ -111,11 +129,11 @@ def upload_file(request):
 
     for file in files:
         try:
-            filename = secure_filename(f'project_{project_id}_{file.name}')
+            filename = f'project_{project_id}_{file.name}_{int(time.time())}'
             document_path = f'original/{filename}'
             parsed_document_path = f'parsed/{filename}'
 
-            Document.objects.create(
+            UploadedFile.objects.create(
                 file=file,
                 project_id=project_id,
                 uploaded_by=user,

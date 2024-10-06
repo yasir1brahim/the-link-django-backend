@@ -3,6 +3,7 @@ from .models import Project, ProjectMembership, PROJECT_MEMBERSHIP_ROLE_CHOICES
 from apps.users.serializers import CustomUserSerializer
 from apps.users.models import CustomUser
 from apps.teams.models import Team
+from apps.deliverables.models import SubmittalItem, UploadedFile, SpecSection
 from drf_spectacular.utils import extend_schema_field
 
 
@@ -108,3 +109,31 @@ class ProjectReadSerializer(BaseProjectSerializer):
 class FileUploadSerializer(serializers.Serializer):
     files = serializers.ListField(child=serializers.FileField())
     project_id = serializers.IntegerField()
+
+
+class SubmittalItemReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubmittalItem
+        fields = '__all__'
+
+
+class SubmittalItemWriteSerializer(serializers.ModelSerializer):
+    document = serializers.PrimaryKeyRelatedField(queryset=UploadedFile.objects.all())
+    spec_section = serializers.PrimaryKeyRelatedField(queryset=SpecSection.objects.all())
+    updated_by = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all())
+
+    class Meta:
+        model = SubmittalItem
+        fields = [
+            'document',
+            'spec_section',
+            'paragraph_number',
+            'submittal_type',
+            'submittal_description',
+            'submittal_content',
+            'submittal_number',
+            'text_location',
+            'additional_text_locations',
+            'updated_by',
+        ]
+

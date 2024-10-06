@@ -7,6 +7,7 @@ app_name = "deliverables"
 
 router = DefaultRouter()
 router.register(r'projects', views.ProjectViewSet, basename='project')
+router.register(r'<int:project_id>/submittal-items', views.SubmittalItemViewSet, basename='submittal-item')
 
 urlpatterns = [
     path('', include(router.urls)),

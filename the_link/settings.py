@@ -537,3 +537,9 @@ LOGGING = {
 
 
 BACKEND_CALLBACK_URL = env("BACKEND_CALLBACK_URL", default="http://localhost:8000")
+
+LEGACY_DB_HOST = env("LEGACY_DB_HOST", default="deliverables-dev.cdrdfhibqqqq.us-east-1.rds.amazonaws.com")
+LEGACY_DB_PORT = env("LEGACY_DB_PORT", default="3306")
+LEGACY_DB_USER = env("LEGACY_DB_USER", default="admin")
+LEGACY_DB_PASSWORD = env("LEGACY_DB_PASSWORD", default="")
+LEGACY_DB_NAME = env("LEGACY_DB_NAME", default="logmaker")

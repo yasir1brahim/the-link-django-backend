@@ -20,6 +20,8 @@ class CustomUser(AbstractUser):
     Add additional fields to the user model here.
     """
 
+    legacy_id = models.IntegerField(blank=True, null=True)
+
     avatar = models.FileField(upload_to=_get_avatar_filename, blank=True, validators=[validate_profile_picture])
     language = models.CharField(max_length=10, blank=True, null=True)
     timezone = models.CharField(max_length=100, blank=True, default="")
