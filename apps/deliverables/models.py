@@ -124,6 +124,7 @@ class SubmittalItem(BaseModel):
     document = models.ForeignKey("UploadedFile", on_delete=models.CASCADE)
     spec_section = models.ForeignKey("SpecSection", on_delete=models.CASCADE)
     paragraph_number = models.CharField(max_length=256)
+    heirarchical_paragraph_number = models.CharField(max_length=256, default="", blank=True)
     submittal_type = models.CharField(max_length=256)
     submittal_description = models.CharField(max_length=256)
     submittal_content = models.TextField()
@@ -142,16 +143,42 @@ class SubmittalItem(BaseModel):
     parsing_method = models.CharField(max_length=256)
     parsing_version = models.CharField(max_length=256)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['spec_section']),
+            models.Index(fields=['submittal_type']),
+            models.Index(fields=['submittal_description']),
+        ]
+
+    def convert_paragraph_number_to_heirarchical_number(self):
+        split_paragraph_number = self.paragraph_number.split('-')
+        period_separated_parts = split_paragraph_number[0]
+        if len(split_paragraph_number) > 1:
+            appendage = split_paragraph_number[1]
+        else:
+            appendage = ""
+
+        period_separated_parts = [part.zfill(5) for part in period_separated_parts.split('.')]
+        heirarchical_period_part = '.'.join(period_separated_parts)
+        if appendage:
+            return heirarchical_period_part + '-' + appendage
+        else:
+            return heirarchical_period_part
+        
+    def save(self, *args, **kwargs):
+        self.heirarchical_paragraph_number = self.convert_paragraph_number_to_heirarchical_number()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.document.name} - {self.spec_section.masterformat_section.masterformat_number} - {self.paragraph_number}: {self.submittal_description}"
     
+
 class SubmittalItemList(BaseModel):
     name = models.CharField(max_length=256)
     description = models.TextField(blank=True)
     project = models.ForeignKey("Project", on_delete=models.CASCADE)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, blank=True, null=True)
-    submittals = models.ManyToManyField("SubmittalItem", blank=True)
+    submittals = models.ManyToManyField("SubmittalItem", blank=True, related_name="submittal_lists")
 
     def __str__(self):
         return self.name

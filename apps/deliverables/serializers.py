@@ -1,3 +1,6 @@
+import json
+import boto3
+
 from rest_framework import serializers
 from .models import Project, ProjectMembership, PROJECT_MEMBERSHIP_ROLE_CHOICES
 from apps.users.serializers import CustomUserSerializer
@@ -5,7 +8,16 @@ from apps.users.models import CustomUser
 from apps.teams.models import Team
 from apps.deliverables.models import SubmittalItem, UploadedFile, SpecSection, SubmittalItemList
 from drf_spectacular.utils import extend_schema_field
+from django.conf import settings
 
+from .constants import masterformat_to_section_title_map
+
+s3 = boto3.client(
+    "s3",
+    region_name=settings.AWS_REGION,
+    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
+)
 
 class ProjectMembershipSerializer(serializers.ModelSerializer):
     user_id = serializers.PrimaryKeyRelatedField(source="user.id", queryset=CustomUserSerializer.Meta.model.objects.all())
@@ -30,7 +42,7 @@ class BaseProjectSerializer(serializers.ModelSerializer):
     entitlements = serializers.SerializerMethodField()
     user_limit = serializers.ReadOnlyField()
 
-    def get_entitlements(self, obj):
+    def get_entitlements(self, obj) -> list[str]:
         project_level_entitlements = obj.entitlements.values_list('code_name', flat=True)
         if project_level_entitlements:
             return project_level_entitlements
@@ -111,10 +123,30 @@ class FileUploadSerializer(serializers.Serializer):
     project_id = serializers.IntegerField()
 
 
+
 class SubmittalItemReadSerializer(serializers.ModelSerializer):
+    additional_text_locations = serializers.JSONField()
+    text_loc = serializers.JSONField(source='text_location')
+    section_title = serializers.SerializerMethodField()
+    doc_link = serializers.SerializerMethodField()
+
+    def get_section_title(self, obj):
+        return obj.spec_section.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(obj.spec_section.masterformat_section.masterformat_number, 'Custom Title')
+        
+    def get_doc_link(self, obj):
+        # TBL-76: Older documents using the legacy parsing approach have a full cloudfront URL stored in the doc_link column.
+        # New documents just store the S3 object key in the doc_link column. To handle this, we return the Cloudfront URL if it exists,
+        # and if not, we return a presigned URL generated from the S3 object key
+        if obj.document.document_path.startswith("https://") and "cloudfront.net" in obj.document.document_path:
+            return obj.document.document_path
+        else:
+            return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.document.document_path}, ExpiresIn=3600)
+            
+
     class Meta:
         model = SubmittalItem
         fields = '__all__'
+
 
 
 class SubmittalItemWriteSerializer(serializers.ModelSerializer):
@@ -138,7 +170,7 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
         ]
 
 
-class SavedSubmittalListSerializer(serializers.ModelSerializer):
+class SubmittalItemListSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubmittalItemList
         fields = '__all__'

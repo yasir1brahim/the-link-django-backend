@@ -1,4 +1,5 @@
 import datetime
+import json
 
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
@@ -21,7 +22,7 @@ class Command(BaseImportCommand):
 
 
     def get_legacy_logs(self, cursor):
-        cursor.execute("SELECT * FROM all_logs ORDER BY id ASC")
+        cursor.execute("SELECT * FROM all_logs ORDER BY id DESC")
          # Get the column names from cursor description
         columns = [col[0] for col in cursor.description]
         
@@ -68,7 +69,11 @@ class Command(BaseImportCommand):
             )
             spec_section.save()
         return spec_section
+    
 
+    def convert_to_valid_json(self, text):
+        text = text.replace("'", '"')
+        return json.loads(text)
 
     def map_legacy_log_to_submittal_item(self, log, project, document):
         print("LOG", log)
@@ -80,13 +85,13 @@ class Command(BaseImportCommand):
         submittal_item.document = document
         submittal_item.spec_section = self.get_or_create_spec_section(log['spec_section'], document)
 
-        submittal_item.paragraph_number = log['para_no']
+        submittal_item.paragraph_number = log['para_no'] or ""
         submittal_item.submittal_type = log['type']
         submittal_item.submittal_description = log['item_desc']
         submittal_item.submittal_content = log['para_context']
         submittal_item.submittal_number = log['submittal_number']
-        submittal_item.text_location = log['text_loc']
-        submittal_item.additional_text_locations = log['additional_text_locations']
+        submittal_item.text_location = self.convert_to_valid_json(log['text_loc'])
+        submittal_item.additional_text_locations = self.convert_to_valid_json(log['additional_text_locations'])
         submittal_item.updated_by = self.get_or_create_user(log['updated_by'])
         return submittal_item
 
