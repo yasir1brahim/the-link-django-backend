@@ -126,9 +126,19 @@ class FileUploadSerializer(serializers.Serializer):
 
 class SubmittalItemReadSerializer(serializers.ModelSerializer):
     additional_text_locations = serializers.JSONField()
-    text_loc = serializers.JSONField(source='text_location')
-    section_title = serializers.SerializerMethodField()
+    doc_id = serializers.IntegerField(source='document.id')
     doc_link = serializers.SerializerMethodField()
+    full_edit = serializers.SerializerMethodField()
+    id = serializers.IntegerField()
+    item_desc = serializers.CharField(source='submittal_description')
+    para_context = serializers.CharField(source='submittal_content')
+    para_no = serializers.CharField(source='paragraph_number')
+    project_id = serializers.IntegerField(source='project.id')
+    section_title = serializers.SerializerMethodField()
+    spec_section = serializers.CharField(source='spec_section.masterformat_section.masterformat_number')
+    submittal_number = serializers.CharField()
+    text_loc = serializers.JSONField(source='text_location')
+    type = serializers.CharField(source='submittal_type')
 
     def get_section_title(self, obj):
         return obj.spec_section.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(obj.spec_section.masterformat_section.masterformat_number, 'Custom Title')
@@ -142,11 +152,29 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
         else:
             return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.document.document_path}, ExpiresIn=3600)
             
+    def get_full_edit(self, obj):
+        if obj.updated_by.id != 1:
+            return "true"
+        return "false"
 
     class Meta:
         model = SubmittalItem
-        fields = '__all__'
-
+        fields = [
+            'additional_text_locations',
+            'doc_id',
+            'doc_link',
+            'full_edit',
+            'id',
+            'item_desc',
+            'para_context',
+            'para_no',
+            'project_id',
+            'section_title',
+            'spec_section',
+            'submittal_number',
+            'text_loc',
+            'type',
+        ]
 
 
 class SubmittalItemWriteSerializer(serializers.ModelSerializer):
