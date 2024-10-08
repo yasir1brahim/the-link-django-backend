@@ -3,7 +3,7 @@ from .models import Project, ProjectMembership, PROJECT_MEMBERSHIP_ROLE_CHOICES
 from apps.users.serializers import CustomUserSerializer
 from apps.users.models import CustomUser
 from apps.teams.models import Team
-from apps.deliverables.models import SubmittalItem, UploadedFile, SpecSection
+from apps.deliverables.models import SubmittalItem, UploadedFile, SpecSection, SubmittalItemList
 from drf_spectacular.utils import extend_schema_field
 
 
@@ -137,3 +137,8 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             'updated_by',
         ]
 
+
+class SavedSubmittalListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubmittalItemList
+        fields = '__all__'

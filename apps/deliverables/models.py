@@ -61,7 +61,7 @@ class ProjectMembership(BaseModel):
 
 class Entitlement(BaseModel):
     """
-    An entitlement is a feature or resource that a user or project can have.
+    An entitlement is a feature or resource that a user or project can have access to.
     """
     code_name = models.CharField(max_length=256)
     readable_name = models.CharField(max_length=256)
@@ -99,6 +99,7 @@ class MasterFormatSection(BaseModel):
 class SpecSection(BaseModel):
     masterformat_section = models.ForeignKey("MasterFormatSection", on_delete=models.CASCADE)
     document = models.ForeignKey("UploadedFile", on_delete=models.CASCADE)
+    processing_status = models.CharField(max_length=256, blank=True, null=True)
 
     def __str__(self):
         return f"{self.document.name} - {self.masterformat_section.masterformat_number}"
@@ -144,3 +145,13 @@ class SubmittalItem(BaseModel):
 
     def __str__(self):
         return f"{self.document.name} - {self.spec_section.masterformat_section.masterformat_number} - {self.paragraph_number}: {self.submittal_description}"
+    
+class SubmittalItemList(BaseModel):
+    name = models.CharField(max_length=256)
+    description = models.TextField(blank=True)
+    project = models.ForeignKey("Project", on_delete=models.CASCADE)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, blank=True, null=True)
+    submittals = models.ManyToManyField("SubmittalItem", blank=True)
+
+    def __str__(self):
+        return self.name

@@ -1,6 +1,8 @@
 from django.contrib import admin
 from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
-    SavedSubmittalItemList, UploadedFile, SpecSection, MasterFormatSection)
+    SavedSubmittalItemList, UploadedFile, SpecSection, MasterFormatSection,
+    SubmittalItemList,
+)
 
 
 class ProjectMembershipInlineAdmin(admin.TabularInline):
@@ -77,4 +79,11 @@ class SpecSectionAdmin(admin.ModelAdmin):
 class MasterFormatSectionAdmin(admin.ModelAdmin):
     list_display = ["id", "masterformat_number", "masterformat_description"]
     search_fields = ["masterformat_number", "masterformat_description"]
+
+@admin.register(SubmittalItemList)
+class SubmittalItemListAdmin(admin.ModelAdmin):
+    list_display = ["id", "project", "name", "created_by"]
+    list_filter = ["project", "created_by"]
+    search_fields = ["project__name", "name", "created_by__email"]
+    filter_horizontal = ("submittals",)
 
