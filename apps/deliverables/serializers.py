@@ -112,10 +112,32 @@ class ProjectWriteSerializer(BaseProjectSerializer):
 
         return project
 
+class DocumentSubsectionSerializer(serializers.ModelSerializer):
+    masterformat_number = serializers.CharField(source="masterformat_section.masterformat_number")
+    class Meta:
+        model = SpecSection
+        fields = ['id', 'masterformat_number', 'processing_status']
 
+class DocumentSerializer(serializers.ModelSerializer):
+    document_id = serializers.IntegerField(source="id")
+    document_name = serializers.CharField(source="name")
+    document_status = serializers.CharField(source="processing_status")
+    document_subsections = DocumentSubsectionSerializer(source="specsection_set", many=True)
+    
+    class Meta:
+        model = UploadedFile
+        fields = ['document_id', 'document_name', 'document_status', 'created_at', 'updated_at', 'document_subsections']
 
 class ProjectReadSerializer(BaseProjectSerializer):
-    pass
+    doc_parsed = serializers.SerializerMethodField()
+    document_details = DocumentSerializer(source="uploadedfile_set", many=True)
+
+    def get_doc_parsed(self, obj):
+        return obj.uploadedfile_set.count()
+    
+    class Meta:
+        model = Project
+        fields = BaseProjectSerializer.Meta.fields + ['doc_parsed', 'document_details']
 
 
 class FileUploadSerializer(serializers.Serializer):
