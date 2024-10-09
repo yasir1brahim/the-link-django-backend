@@ -181,6 +181,20 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
 
+    def _get_sel_filter_vals(self, result_queryset):
+        return {
+            'item_desc': result_queryset.values_list('submittal_description', flat=True).distinct().order_by(),
+            'para_no': result_queryset.values_list('paragraph_number', flat=True).distinct().order_by(),
+            'spec_section': result_queryset.values_list('spec_section__masterformat_section__masterformat_number', flat=True).distinct().order_by(),
+            'type': result_queryset.values_list('submittal_type', flat=True).distinct().order_by(),
+        }
+
+    def _get_submittal_heading_lov(self, result_queryset):
+        return result_queryset.values_list('submittal_type', flat=True).distinct().order_by()
+
+    def _get_submittal_type_lov(self, result_queryset):
+        return result_queryset.values_list('submittal_description', flat=True).distinct().order_by()
+
     @extend_schema(
         parameters=[
             OpenApiParameter(
@@ -219,7 +233,32 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         ]
     )
     def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            data = self.get_paginated_response(serializer.data).data
+        else:
+            serializer = self.get_serializer(queryset, many=True)
+            data = serializer.data
+
+
+        response_data = {
+            'sel_filter_vals': self._get_sel_filter_vals(queryset),
+            'log_id_list': [log.id for log in queryset],
+            'message': data['results'],
+            'total_count': data['count'],
+            'submittal_heading_lov': self._get_submittal_heading_lov(queryset),
+            'submittal_type_lov': self._get_submittal_type_lov(queryset),
+        }
+
+        if page is not None:
+            response_data['next'] = data['next']
+            response_data['previous'] = data['previous']
+
+
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 
