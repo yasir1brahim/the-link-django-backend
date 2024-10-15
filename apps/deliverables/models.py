@@ -145,6 +145,7 @@ class SubmittalItem(BaseModel):
 
     class Meta:
         indexes = [
+            models.Index(fields=['project']),
             models.Index(fields=['spec_section']),
             models.Index(fields=['submittal_type']),
             models.Index(fields=['submittal_description']),

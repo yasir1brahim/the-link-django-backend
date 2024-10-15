@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import BasePermission
 from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
+from rest_framework.pagination import PageNumberPagination
 
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
@@ -73,9 +74,16 @@ class ProjectViewSet(viewsets.ModelViewSet):
         serializer.save(created_by=self.request.user)
 
 
+class SubmittalItemPagination(PageNumberPagination):
+    page_query_param = 'page_number'
+    page_size_query_param = 'limit'
+    max_page_size = 100
+
+
 class SubmittalItemViewSet(viewsets.ModelViewSet):
     queryset = SubmittalItem.objects.all()
     permission_classes = [IsAuthenticated, ProjectAccessPermissions]
+    pagination_class = SubmittalItemPagination
     def get_serializer_class(self):
         if self.action in ['list', 'retrieve']:
             return SubmittalItemReadSerializer
@@ -88,11 +96,11 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
     
     def apply_filter(self, queryset, filter_key, filter_values):
         if filter_key == 'spec_section':
-            queryset = queryset.filter(spec_section__masterformat_section__masterformat_number__icontains=filter_values)
+            queryset = queryset.filter(spec_section__masterformat_section__masterformat_number__in=filter_values)
         elif filter_key == 'type':
-            queryset = queryset.filter(submittal_type__icontains=filter_values)
+            queryset = queryset.filter(submittal_type__in=filter_values)
         elif filter_key == 'item_desc':
-            queryset = queryset.filter(submittal_description__icontains=filter_values)
+            queryset = queryset.filter(submittal_description__in=filter_values)
         return queryset
 
     def apply_order(self, queryset, order_col, order):
@@ -107,19 +115,6 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             order_string += "submittal_content"
         return queryset.order_by(order_string)
 
-    def process_filters_to_python_object(self, filters_string):
-        # filter string is of the format:
-        # filters[exported]=true&filters[spec_section]=123,abc&filters[type]=123,456&filters[item_desc]=123
-        filters = {}
-        for filter in filters_string.split('&'):
-            raw_key, value = filter.split('=')
-            key = raw_key.split('[')[1].split(']')[0]
-            if key == 'exported':
-                filters[key] = value == 'true'
-            else:
-                filters[key] = value.split(',')
-        return filters
-
     def get_queryset(self):
         project_id = self.kwargs.get('project_id')
 
@@ -127,11 +122,17 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         order_col = self.request.query_params.get('order_col')
         order = self.request.query_params.get('order') or 'asc'
         list_id = self.request.query_params.get('list_id')
+
         filters = {}
         try:
-            filters_string = self.request.query_params.get('filters')
-            if filters_string:
-                filters = self.process_filters_to_python_object(filters_string)
+            if self.request.query_params.get('filters[exported]'):
+                filters['exported'] = self.request.query_params.get('filters[exported]').split(',')
+            if self.request.query_params.get('filters[item_desc]'):
+                filters['item_desc'] = self.request.query_params.get('filters[item_desc]').split(',')
+            if self.request.query_params.get('filters[spec_section]'):
+                filters['spec_section'] = self.request.query_params.get('filters[spec_section]').split(',')
+            if self.request.query_params.get('filters[type]'):
+                filters['type'] = self.request.query_params.get('filters[type]').split(',')
         except Exception as e:
             raise DRFValidationError(f"Invalid filters: {e}")
 
@@ -188,6 +189,17 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             'spec_section': result_queryset.values_list('spec_section__masterformat_section__masterformat_number', flat=True).distinct().order_by(),
             'type': result_queryset.values_list('submittal_type', flat=True).distinct().order_by(),
         }
+    
+    def _get_all_filter_vals(self):
+        project_id = self.kwargs.get('project_id')
+        queryset = self.queryset.filter(project_id=project_id)
+        queryset = queryset.exclude(submittal_type='Unclassified', spec_section__masterformat_section__masterformat_number__regex='^0[012]\\d+')
+        return {
+            'item_desc': queryset.values_list('submittal_description', flat=True).distinct().order_by(),
+            'para_no': queryset.values_list('paragraph_number', flat=True).distinct().order_by(),
+            'spec_section': queryset.values_list('spec_section__masterformat_section__masterformat_number', flat=True).distinct().order_by(),
+            'type': queryset.values_list('submittal_type', flat=True).distinct().order_by(),
+        }
 
     def _get_submittal_heading_lov(self, result_queryset):
         return result_queryset.values_list('submittal_type', flat=True).distinct().order_by()
@@ -229,6 +241,18 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
                 description='ID of the list to filter submittal items',
                 required=False,
                 type=OpenApiTypes.INT
+            ),
+            OpenApiParameter(
+                name='page_number',
+                description='Page number',
+                required=False,
+                type=OpenApiTypes.INT
+            ),
+            OpenApiParameter(
+                name='limit',
+                description='Number of items per page',
+                required=False,
+                type=OpenApiTypes.INT
             )
         ]
     )
@@ -246,6 +270,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
 
         response_data = {
             'sel_filter_vals': self._get_sel_filter_vals(queryset),
+            'all_filter_vals': self._get_all_filter_vals(),
             'log_id_list': [log.id for log in queryset],
             'message': data['results'],
             'total_count': data['count'],
