@@ -121,8 +121,8 @@ class SubmittalItem(BaseModel):
     legacy_updated_at = models.DateTimeField(blank=True, null=True)
 
     project = models.ForeignKey("Project", on_delete=models.CASCADE)
-    document = models.ForeignKey("UploadedFile", on_delete=models.CASCADE)
-    spec_section = models.ForeignKey("SpecSection", on_delete=models.CASCADE)
+    document = models.ForeignKey("UploadedFile", on_delete=models.CASCADE, blank=True, null=True)
+    masterformat_section = models.ForeignKey("MasterFormatSection", on_delete=models.CASCADE)
     paragraph_number = models.CharField(max_length=256)
     heirarchical_paragraph_number = models.CharField(max_length=256, default="", blank=True)
     submittal_type = models.CharField(max_length=256)
@@ -146,7 +146,7 @@ class SubmittalItem(BaseModel):
     class Meta:
         indexes = [
             models.Index(fields=['project']),
-            models.Index(fields=['spec_section']),
+            models.Index(fields=['masterformat_section']),
             models.Index(fields=['submittal_type']),
             models.Index(fields=['submittal_description']),
         ]
@@ -171,7 +171,7 @@ class SubmittalItem(BaseModel):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.document.name} - {self.spec_section.masterformat_section.masterformat_number} - {self.paragraph_number}: {self.submittal_description}"
+        return f"{self.document.name} - {self.masterformat_section.masterformat_number} - {self.paragraph_number}: {self.submittal_description}"
     
 
 class SubmittalItemList(BaseModel):

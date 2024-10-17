@@ -22,7 +22,7 @@ from .serializers import (ProjectReadSerializer, ProjectWriteSerializer, FileUpl
 from rest_framework import viewsets
 from .models import Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList
 from apps.teams.models import Team
-from .permissions import ProjectAccessPermissions
+from .permissions import ProjectAccessPermissions, SubmittalItemAccessPermissions
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -82,7 +82,7 @@ class SubmittalItemPagination(PageNumberPagination):
 
 class SubmittalItemViewSet(viewsets.ModelViewSet):
     queryset = SubmittalItem.objects.all()
-    permission_classes = [IsAuthenticated, ProjectAccessPermissions]
+    permission_classes = [IsAuthenticated, SubmittalItemAccessPermissions]
     pagination_class = SubmittalItemPagination
     def get_serializer_class(self):
         if self.action in ['list', 'retrieve']:
@@ -96,7 +96,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
     
     def apply_filter(self, queryset, filter_key, filter_values):
         if filter_key == 'spec_section':
-            queryset = queryset.filter(spec_section__masterformat_section__masterformat_number__in=filter_values)
+            queryset = queryset.filter(masterformat_section__masterformat_number__in=filter_values)
         elif filter_key == 'type':
             queryset = queryset.filter(submittal_type__in=filter_values)
         elif filter_key == 'item_desc':
@@ -106,7 +106,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
     def apply_order(self, queryset, order_col, order):
         order_string = "-" if order == "desc" else ""
         if order_col == 'spec_section':
-            order_string += "spec_section__masterformat_section__masterformat_number"
+            order_string += "masterformat_section__masterformat_number"
         elif order_col == 'type':
             order_string += "submittal_type"
         elif order_col == 'item_desc':
@@ -137,11 +137,11 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             raise DRFValidationError(f"Invalid filters: {e}")
 
         queryset = self.queryset.filter(project_id=project_id)
-        queryset = queryset.exclude(submittal_type='Unclassified', spec_section__masterformat_section__masterformat_number__regex='^0[012]\\d+')
+        queryset = queryset.exclude(submittal_type='Unclassified', masterformat_section__masterformat_number__regex='^0[012]\\d+')
 
         if search:
             queryset = queryset.filter(
-                Q(spec_section__masterformat_section__masterformat_number__icontains=search) | 
+                Q(masterformat_section__masterformat_number__icontains=search) | 
                 Q(submittal_description__icontains=search) | 
                 Q(submittal_type__icontains=search) |
                 Q(submittal_content__icontains=search)
@@ -166,7 +166,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             queryset = self.apply_order(queryset, order_col, order)
         else:
             queryset = queryset.order_by(
-                'spec_section__masterformat_section__masterformat_number',
+                'masterformat_section__masterformat_number',
                 'heirarchical_paragraph_number'
             )
         
@@ -186,18 +186,18 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         return {
             'item_desc': result_queryset.values_list('submittal_description', flat=True).distinct().order_by(),
             'para_no': result_queryset.values_list('paragraph_number', flat=True).distinct().order_by(),
-            'spec_section': result_queryset.values_list('spec_section__masterformat_section__masterformat_number', flat=True).distinct().order_by(),
+            'spec_section': result_queryset.values_list('masterformat_section__masterformat_number', flat=True).distinct().order_by(),
             'type': result_queryset.values_list('submittal_type', flat=True).distinct().order_by(),
         }
     
     def _get_all_filter_vals(self):
         project_id = self.kwargs.get('project_id')
         queryset = self.queryset.filter(project_id=project_id)
-        queryset = queryset.exclude(submittal_type='Unclassified', spec_section__masterformat_section__masterformat_number__regex='^0[012]\\d+')
+        queryset = queryset.exclude(submittal_type='Unclassified', masterformat_section__masterformat_number__regex='^0[012]\\d+')
         return {
             'item_desc': queryset.values_list('submittal_description', flat=True).distinct().order_by(),
             'para_no': queryset.values_list('paragraph_number', flat=True).distinct().order_by(),
-            'spec_section': queryset.values_list('spec_section__masterformat_section__masterformat_number', flat=True).distinct().order_by(),
+            'spec_section': queryset.values_list('masterformat_section__masterformat_number', flat=True).distinct().order_by(),
             'type': queryset.values_list('submittal_type', flat=True).distinct().order_by(),
         }
 

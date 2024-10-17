@@ -51,7 +51,7 @@ class Command(BaseImportCommand):
             document.save()
         return document
     
-    def get_or_create_spec_section(self, masterformat_number, document):
+    def get_or_create_masterformat_section(self, masterformat_number, document):
         masterformat_number_record = MasterFormatSection.objects.filter(masterformat_number=masterformat_number).first()
         if not masterformat_number_record:
             print("Creating masterformat number record:", masterformat_number)
@@ -59,21 +59,18 @@ class Command(BaseImportCommand):
                 masterformat_number=masterformat_number,
             )
             masterformat_number_record.save()
-        spec_section = SpecSection.objects.filter(masterformat_section=masterformat_number_record, document=document).first()
-        if not spec_section:
-            print("Creating spec section record:", masterformat_number_record)
-            spec_section = SpecSection(
-                masterformat_section=masterformat_number_record,
-                document=document,
-                processing_status = "PROCESSED",
-            )
-            spec_section.save()
-        return spec_section
+        return masterformat_number_record
     
 
     def convert_to_valid_json(self, text):
+        if text is None:
+            return []
         text = text.replace("'", '"')
-        return json.loads(text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            print(f"Error decoding JSON: {text}")
+            return []
 
     def map_legacy_log_to_submittal_item(self, log, project, document):
         print("LOG", log)
@@ -83,7 +80,7 @@ class Command(BaseImportCommand):
 
         submittal_item.project = project
         submittal_item.document = document
-        submittal_item.spec_section = self.get_or_create_spec_section(log['spec_section'], document)
+        submittal_item.masterformat_section = self.get_or_create_masterformat_section(log['spec_section'], document)
 
         submittal_item.paragraph_number = log['para_no'] or ""
         submittal_item.submittal_type = log['type']

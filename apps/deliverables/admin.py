@@ -42,16 +42,16 @@ class ProjectAdmin(admin.ModelAdmin):
 
 @admin.register(SubmittalItem)
 class SubmittalItemAdmin(admin.ModelAdmin):
-    list_display = ["id", "project", "document", "spec_section", "paragraph_number", "submittal_type", "submittal_description"]
-    list_filter = ["project", "document", "spec_section", "paragraph_number", "submittal_type", "submittal_description"]
-    search_fields = ["project__name", "document__name", "spec_section__masterformat_section__masterformat_number", "paragraph_number", "submittal_type", "submittal_description"]
+    list_display = ["id", "project", "document", "masterformat_section", "paragraph_number", "submittal_type", "submittal_description"]
+    list_filter = ["project", "document", "masterformat_section", "paragraph_number", "submittal_type", "submittal_description"]
+    search_fields = ["project__name", "document__name", "masterformat_section__masterformat_number", "paragraph_number", "submittal_type", "submittal_description"]
 
 
 class SubmittalItemInlineAdmin(admin.TabularInline):
     model = SubmittalItem
-    list_display = ["id", "project", "document", "spec_section", "paragraph_number", "submittal_type", "submittal_description"]
-    list_filter = ["project", "document", "spec_section", "paragraph_number", "submittal_type", "submittal_description"]
-    search_fields = ["project__name", "document__name", "spec_section__masterformat_section__masterformat_number", "paragraph_number", "submittal_type", "submittal_description"]
+    list_display = ["id", "project", "document", "masterformat_section", "paragraph_number", "submittal_type", "submittal_description"]
+    list_filter = ["project", "document", "masterformat_section", "paragraph_number", "submittal_type", "submittal_description"]
+    search_fields = ["project__name", "document__name", "masterformat_section__masterformat_number", "paragraph_number", "submittal_type", "submittal_description"]
 
 
 @admin.register(SavedSubmittalItemList)
