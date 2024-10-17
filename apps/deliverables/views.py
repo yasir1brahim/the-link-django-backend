@@ -284,6 +284,14 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
 
 
         return Response(response_data, status=status.HTTP_200_OK)
+    
+
+    def destroy(self, request, *args, **kwargs):
+        ids = request.data.get('ids', [])
+        if ids:
+            deleted_count, _ = SubmittalItem.objects.filter(id__in=ids).delete()
+            return Response({'deleted_count': deleted_count})
+        return super().destroy(request, *args, **kwargs)
 
 
 
