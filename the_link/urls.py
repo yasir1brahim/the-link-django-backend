@@ -27,7 +27,8 @@ from apps.teams.urls import team_urlpatterns as single_team_urls
 from apps.subscriptions.urls import team_urlpatterns as subscriptions_team_urls
 from apps.web.urls import team_urlpatterns as web_team_urls
 from apps.web.sitemaps import StaticViewSitemap
-
+from apps.deliverables.urls import single_project_urlpatterns
+from apps.deliverables.urls import urlpatterns as deliverables_urls
 sitemaps = {
     "static": StaticViewSitemap(),
 }
@@ -73,7 +74,8 @@ urlpatterns = [
     # hijack urls for impersonation
     path("hijack/", include("hijack.urls", namespace="hijack")),
     # Deliverables URLs
-    path("api/deliverables/", include("apps.deliverables.urls")),
+    path("api/deliverables/", include(deliverables_urls)),
+    path("api/deliverables/<int:project_id>/", include(single_project_urlpatterns)),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 if settings.ENABLE_DEBUG_TOOLBAR:

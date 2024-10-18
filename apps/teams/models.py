@@ -20,6 +20,8 @@ class Team(SubscriptionModelBase, BaseModel):
     A Team, with members.
     """
 
+    legacy_account_id = models.IntegerField(blank=True, null=True)
+    legacy_customer_id = models.IntegerField(blank=True, null=True)
     name = models.CharField(max_length=100)
     slug = models.SlugField(unique=True)
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="teams", through="Membership")
@@ -30,6 +32,13 @@ class Team(SubscriptionModelBase, BaseModel):
     is_enterprise = models.BooleanField(default=False)
     enterprise_billing_notes = models.TextField(blank=True)
     entitlements = models.ManyToManyField("deliverables.Entitlement", blank=True)
+
+    legacy_logo_url = models.CharField(max_length=256, blank=True, null=True)
+    legacy_admin_id = models.IntegerField(blank=True, null=True)
+    legacy_status = models.CharField(max_length=256, blank=True, null=True)
+    
+    procore_id = models.IntegerField(blank=True, null=True)
+    procore_name = models.CharField(max_length=256, blank=True, null=True)
 
     def __str__(self):
         return self.name

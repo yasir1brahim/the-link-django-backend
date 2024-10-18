@@ -1,10 +1,23 @@
+import json
+import boto3
+
 from rest_framework import serializers
 from .models import Project, ProjectMembership, PROJECT_MEMBERSHIP_ROLE_CHOICES
 from apps.users.serializers import CustomUserSerializer
 from apps.users.models import CustomUser
 from apps.teams.models import Team
+from apps.deliverables.models import SubmittalItem, UploadedFile, SpecSection, SubmittalItemList, MasterFormatSection
 from drf_spectacular.utils import extend_schema_field
+from django.conf import settings
 
+from .constants import masterformat_to_section_title_map
+
+s3 = boto3.client(
+    "s3",
+    region_name=settings.AWS_REGION,
+    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
+)
 
 class ProjectMembershipSerializer(serializers.ModelSerializer):
     user_id = serializers.PrimaryKeyRelatedField(source="user.id", queryset=CustomUserSerializer.Meta.model.objects.all())
@@ -29,14 +42,12 @@ class BaseProjectSerializer(serializers.ModelSerializer):
     entitlements = serializers.SerializerMethodField()
     user_limit = serializers.ReadOnlyField()
 
-    def get_entitlements(self, obj):
+    def get_entitlements(self, obj) -> list[str]:
         project_level_entitlements = obj.entitlements.values_list('code_name', flat=True)
         if project_level_entitlements:
             return project_level_entitlements
         else:
             return obj.team.entitlements.values_list('code_name', flat=True)
-
-
 
 
 class ProjectWriteSerializer(BaseProjectSerializer):
@@ -101,7 +112,149 @@ class ProjectWriteSerializer(BaseProjectSerializer):
 
         return project
 
+class DocumentSubsectionSerializer(serializers.ModelSerializer):
+    masterformat_number = serializers.CharField(source="masterformat_section.masterformat_number")
+    class Meta:
+        model = SpecSection
+        fields = ['id', 'masterformat_number', 'processing_status']
 
+class DocumentSerializer(serializers.ModelSerializer):
+    document_id = serializers.IntegerField(source="id")
+    document_name = serializers.CharField(source="name")
+    document_status = serializers.CharField(source="processing_status")
+    document_subsections = DocumentSubsectionSerializer(source="specsection_set", many=True)
+    
+    class Meta:
+        model = UploadedFile
+        fields = ['document_id', 'document_name', 'document_status', 'created_at', 'updated_at', 'document_subsections']
 
 class ProjectReadSerializer(BaseProjectSerializer):
-    pass
+    doc_parsed = serializers.SerializerMethodField()
+    document_details = DocumentSerializer(source="uploadedfile_set", many=True)
+
+    def get_doc_parsed(self, obj):
+        return obj.uploadedfile_set.count()
+    
+    class Meta:
+        model = Project
+        fields = BaseProjectSerializer.Meta.fields + ['doc_parsed', 'document_details']
+
+
+class FileUploadSerializer(serializers.Serializer):
+    files = serializers.ListField(child=serializers.FileField())
+    project_id = serializers.IntegerField()
+
+
+
+class SubmittalItemReadSerializer(serializers.ModelSerializer):
+    additional_text_locations = serializers.JSONField()
+    doc_id = serializers.IntegerField(source='document.id', allow_null=True)
+    doc_link = serializers.SerializerMethodField()
+    full_edit = serializers.SerializerMethodField()
+    id = serializers.IntegerField()
+    item_desc = serializers.CharField(source='submittal_description')
+    para_context = serializers.CharField(source='submittal_content')
+    para_no = serializers.CharField(source='paragraph_number')
+    project_id = serializers.IntegerField(source='project.id')
+    section_title = serializers.SerializerMethodField()
+    spec_section = serializers.CharField(source='masterformat_section.masterformat_number')
+    submittal_number = serializers.CharField()
+    text_loc = serializers.JSONField(source='text_location')
+    type = serializers.CharField(source='submittal_type')
+
+    def get_section_title(self, obj):
+        return obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(obj.masterformat_section.masterformat_number, 'Custom Title')
+        
+    def get_doc_link(self, obj):
+        # TBL-76: Older documents using the legacy parsing approach have a full cloudfront URL stored in the doc_link column.
+        # New documents just store the S3 object key in the doc_link column. To handle this, we return the Cloudfront URL if it exists,
+        # and if not, we return a presigned URL generated from the S3 object key
+        if not obj.document:
+            return ""
+        if obj.document.document_path.startswith("https://") and "cloudfront.net" in obj.document.document_path:
+            return obj.document.document_path
+        else:
+            return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.document.document_path}, ExpiresIn=3600)
+            
+    def get_full_edit(self, obj):
+        try:
+            if obj.updated_by.id != 1:
+                return "true"
+        except AttributeError:
+            return "false"
+        return "false"
+
+    class Meta:
+        model = SubmittalItem
+        fields = [
+            'additional_text_locations',
+            'doc_id',
+            'doc_link',
+            'full_edit',
+            'id',
+            'item_desc',
+            'para_context',
+            'para_no',
+            'project_id',
+            'section_title',
+            'spec_section',
+            'submittal_number',
+            'text_loc',
+            'type',
+        ]
+
+
+class SubmittalItemWriteSerializer(serializers.ModelSerializer):
+    document = serializers.PrimaryKeyRelatedField(queryset=UploadedFile.objects.all(), required=False)
+    updated_by = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(), required=False)
+
+    spec_section = serializers.CharField(required=False)
+    item_desc = serializers.CharField(required=False)
+    para_context = serializers.CharField(required=False)
+    para_no = serializers.CharField(required=False)
+    type = serializers.CharField(required=False)
+
+    def create(self, validated_data):
+        mf_section = MasterFormatSection.objects.get(masterformat_number=validated_data.get('spec_section'))
+        return SubmittalItem.objects.create(
+            project_id=validated_data.get('project_id'),
+            updated_by=validated_data.get('updated_by'),
+            submittal_description=validated_data.get('item_desc'),
+            submittal_content=validated_data.get('para_context'),
+            paragraph_number=validated_data.get('para_no'),
+            submittal_type=validated_data.get('type'),
+            masterformat_section=mf_section,
+        )
+
+    def update(self, instance, validated_data):
+        if validated_data.get('spec_section'):
+            mf_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=validated_data.get('spec_section'))
+        instance.masterformat_section = mf_section
+        if validated_data.get('item_desc'):
+            instance.submittal_description = validated_data.get('item_desc')
+        if validated_data.get('para_context'):
+            instance.submittal_content = validated_data.get('para_context')
+        if validated_data.get('para_no'):
+            instance.paragraph_number = validated_data.get('para_no')
+        if validated_data.get('type'):
+            instance.submittal_type = validated_data.get('type')
+        instance.save()
+        return instance
+
+    class Meta:
+        model = SubmittalItem
+        fields = [
+            'document',
+            'updated_by',
+            'spec_section',
+            'item_desc',
+            'para_context',
+            'para_no',
+            'type',
+        ]
+
+
+class SubmittalItemListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubmittalItemList
+        fields = '__all__'

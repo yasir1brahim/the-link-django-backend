@@ -411,6 +411,16 @@ SPECTACULAR_SETTINGS = {
             "ApiKeyAuth": [],
         }
     ],
+    "ENUM_NAME_OVERRIDES": {
+        "ProjectMembershipRole": "apps.deliverables.models.PROJECT_MEMBERSHIP_ROLE_CHOICES",
+        "TeamMembershipRole": "apps.teams.roles.ROLE_CHOICES",
+        "ProjectStatus": "apps.deliverables.models.Project.PROJECT_STATUS_CHOICES",
+    }
+}
+
+ENUM_NAME_OVERRIDES = {
+    "apps.deliverables.models.ProjectMembership.role": "ProjectMembershipRole",
+    "apps.teams.models.TeamMembership.role": "TeamMembershipRole"
 }
 
 # Celery setup (using redis)
@@ -534,3 +544,20 @@ LOGGING = {
         },
     },
 }
+
+
+BACKEND_CALLBACK_URL = env("BACKEND_CALLBACK_URL", default="http://localhost:8000")
+
+LEGACY_DB_HOST = env("LEGACY_DB_HOST", default="deliverables-dev.cdrdfhibqqqq.us-east-1.rds.amazonaws.com")
+LEGACY_DB_PORT = env("LEGACY_DB_PORT", default="3306")
+LEGACY_DB_USER = env("LEGACY_DB_USER", default="admin")
+LEGACY_DB_PASSWORD = env("LEGACY_DB_PASSWORD", default="")
+LEGACY_DB_NAME = env("LEGACY_DB_NAME", default="logmaker")
+
+AWS_REGION = env("AWS_REGION", default="us-east-1")
+AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default="")
+AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY", default="")
+S3_BUCKET = env("S3_BUCKET", default="")
+LAMBDA_FUNCTION_URL = env("LAMBDA_FUNCTION_URL", default="")
+ENVIRONMENT = env("ENVIRONMENT", default="")
+BACKEND_CALLBACK_URL = env("BACKEND_CALLBACK_URL", default="")
