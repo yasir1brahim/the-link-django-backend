@@ -6,14 +6,16 @@ import boto3
 import shutil
 import requests
 import json
+import re
 from datetime import datetime
+
 from django.conf import settings
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q, Func, F
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import BasePermission
@@ -26,10 +28,16 @@ from drf_spectacular.types import OpenApiTypes
 from .serializers import (ProjectReadSerializer, ProjectWriteSerializer, FileUploadSerializer, SubmittalItemReadSerializer, SubmittalItemWriteSerializer,
                           SubmittalItemListSerializer)
 from rest_framework import viewsets
-from .models import Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList
+from .models import Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList, MasterFormatSection, SpecSection
 from apps.teams.models import Team
 from .permissions import ProjectAccessPermissions, SubmittalItemAccessPermissions
+import logging
+from typing import TypedDict, Optional, List
+from enum import Enum
 
+
+
+logger = logging.getLogger(__name__)
 
 s3 = boto3.client(
     "s3",
@@ -37,6 +45,67 @@ s3 = boto3.client(
     aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
     aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
 )
+
+
+class ParsingMethod(str, Enum):
+    REGEX_SUBMITTAL = "REGEX_SUBMITTAL"
+    REGEX_PRODUCT_DATA = "REGEX_PRODUCT_DATA"
+    AI_SUBMITTAL = "AI_SUBMITTAL"
+    UNKNOWN = "UNKNOWN"
+
+class SubmittalInfo(TypedDict):
+    submittal_type: str
+    submittal_description: str
+    submittal_text: str
+    llm_submittal_type: str
+    master_format_section_number: str
+    contextual_text: str
+    section: str
+    page_no: int
+    parsing_method: ParsingMethod
+
+
+class SubsectionType(str, Enum):
+    SUBMITTAL_SECTION = "SUBMITTAL_SECTION"
+    PART_1_GENERAL = "PART_1_GENERAL"
+    PART_2_PRODUCTS = "PART_2_PRODUCTS"
+    PART_3_EXECUTION = "PART_3_EXECUTION"
+    UNKNOWN = "UNKNOWN"
+
+
+class DocProcessingStatus(str, Enum):
+    PENDING_PROCESSING = "PENDING_PROCESSING"
+    PROCESSING = "PROCESSING"
+    SUBSECTIONS_EXTRACTED = "SUBSECTIONS_EXTRACTED"
+    PROCESSED = "PROCESSED"
+    PROCESSED_SECTION = "PROCESSED_SECTION"
+    SECTION_PROCESSING_FAILED = "SECTION_PROCESSING_FAILED"
+    FAILED = "FAILED"
+
+class TextLocation(TypedDict):
+    page_no: int
+    x: int
+    y: int
+
+
+class TextChunk(TypedDict):
+    text: str
+    text_location: TextLocation
+
+
+class SpecSubSection(TypedDict):
+    subsection_type: SubsectionType
+    master_format_section_number: str
+    text_chunks: List[TextChunk]
+
+class SpecStatusRequest(TypedDict):
+    new_status: str
+    document_id: str
+    filename: str
+    project_id: str
+    user_id: str
+    submittals: List[SubmittalInfo]
+    subsections: List[SpecSubSection]
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -379,11 +448,18 @@ def parse_spec(callback_url, document_id, project_id, object_key, filename, user
 )
 @api_view(['POST'])
 def upload_file(request):
+    if not request.user.is_authenticated:
+        return Response({'detail': 'User is not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+        
     serializer = FileUploadSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     project_id = serializer.validated_data['project_id']
+    project = Project.objects.get(id=project_id)
+    if not request.user.is_member_of_project(project):
+        return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
+
     user = request.user
     files = serializer.validated_data['files']
 
@@ -396,7 +472,7 @@ def upload_file(request):
 
     for file in files:
         try:
-            filename = f'project_{project_id}_{file.name}_{int(time.time())}'
+            filename = f'project_{project_id}__{int(time.time())}_{file.name}'
             document_path = f'original/{filename}'
             parsed_document_path = f'parsed/{filename}'
             file_md5 = get_file_hash(file)
@@ -416,7 +492,8 @@ def upload_file(request):
                 parsed_document_path=parsed_document_path,
                 processing_status='PENDING_PROCESSING',
             )
-
+            
+            file.seek(0)
             s3.upload_fileobj(
                 Fileobj=file,
                 Bucket=settings.S3_BUCKET,
@@ -425,11 +502,11 @@ def upload_file(request):
 
             parse_spec(
                 callback_url=settings.BACKEND_CALLBACK_URL,
-                document_id=uploaded_file.id,
-                project_id=project_id,
+                document_id=str(uploaded_file.id),
+                project_id=str(project_id),
                 object_key=document_path,
                 filename=file.name,
-                user_id=user.id
+                user_id=str(user.id)
             )
             async_processing.append(document_path)
         except Exception as e:
@@ -441,6 +518,95 @@ def upload_file(request):
         'async_processing': async_processing,
         'message': 'Files uploaded successfully'
     }, status=status.HTTP_200_OK)
+
+
+def change_encode_value(text):
+    if '\uf0a3' in text:
+        text = re.sub('\uf0a3', '≤', text)
+    if '\uf0b2' in text:
+        text = re.sub('\uf0b2', '”', text)
+    if '\uf0b0' in text:
+        text = re.sub('\uf0b0', 'º', text)
+    if '\uf0a2' in text:
+        text = re.sub('\uf0a2', '’', text)
+    return text
+
+@extend_schema(
+    request=FileUploadSerializer,
+    responses={200: {'description': 'File uploaded successfully'}},
+    description="Upload a file to the server.",
+    methods=["POST"]
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def spec_status_webhook(request):
+    logger.debug(f"SPEC STATUS WEBHOOK: Received request")
+    logger.debug(f"SPEC STATUS WEBHOOK: {request.data}")
+
+    request_data = SpecStatusRequest(**request.data)
+
+    if request_data['new_status'] == 'SUBSECTIONS_EXTRACTED':
+        logger.debug(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to SUBSECTIONS_EXTRACTED")
+        UploadedFile.objects.filter(id=request_data['document_id']).update(processing_status=DocProcessingStatus.SUBSECTIONS_EXTRACTED)
+        for subsection in request_data['subsections']:
+            logger.debug(f"SPEC STATUS WEBHOOK: inserting subsection {subsection['master_format_section_number']} for document {request_data['document_id']}")
+            masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=subsection['master_format_section_number'])
+            section, created = SpecSection.objects.get_or_create(
+                document_id=request_data['document_id'],
+                masterformat_section=masterformat_section,
+            )
+            section.processing_status = DocProcessingStatus.PENDING_PROCESSING
+            section.save()
+    elif request_data['new_status'] == 'PROCESSED_SECTION':
+        logger.debug(f"SPEC STATUS WEBHOOK: saving submittals")
+        submittal_items = []
+        for submittal in request_data['submittals']:
+            submittal_text = change_encode_value(submittal['submittal_text'])
+            masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=request_data['master_format_section_number'])
+            submittal_item = SubmittalItem(
+                project_id=request_data['project_id'],
+                masterformat_section=masterformat_section,
+                submittal_type=submittal['submittal_type'],
+                submittal_description=submittal['submittal_description'],
+                submittal_content=submittal_text,
+                paragraph_number=submittal['section'],
+                text_location=submittal['text_location'],
+                document_id=request_data['document_id'],
+                parsing_method=submittal.get('parsing_method', 'UNKNOWN'),
+                additional_text_locations=submittal.get('additional_text_locations', [])
+            )
+            submittal_items.append(submittal_item)
+        SubmittalItem.objects.bulk_create(submittal_items, ignore_conflicts=True)
+        SpecSection.objects.filter(
+            document_id=request_data['document_id'],
+            masterformat_section__masterformat_number=request_data['master_format_section_number']
+        ).update(processing_status=DocProcessingStatus.PROCESSED)
+    elif request_data['new_status'] == 'FAILED':
+        document = UploadedFile.objects.filter(id=request_data['document_id']).first()
+        if document.processing_status == DocProcessingStatus.SUBSECTIONS_EXTRACTED:
+            document.processing_status = DocProcessingStatus.SECTION_PROCESSING_FAILED
+            document.save()
+        else:
+            document.processing_status = DocProcessingStatus.FAILED
+            document.save()
+    """IF document.processing_status == SUBSECTIONS_EXTRACTED or SECTION_PROCESSING_FAILED then we have records of all extracted subsections.
+    If so, then update document.processing_status to PROCESSED if all subsections have been processed"""
+    logger.debug(f"SPEC STATUS WEBHOOK: checking if all subsections have been processed for document {request_data['document_id']}")
+    document = UploadedFile.objects.filter(id=request_data['document_id']).first()
+    if document.processing_status in [DocProcessingStatus.SUBSECTIONS_EXTRACTED, DocProcessingStatus.SECTION_PROCESSING_FAILED]:
+        logger.debug(f"SPEC STATUS WEBHOOK: getting unprocessed section count for document {request_data['document_id']}")
+        unprocessed_spec_section_count = SpecSection.objects.filter(document_id=request_data['document_id']).exclude(
+            processing_status=DocProcessingStatus.PROCESSED
+        ).count()
+        if unprocessed_spec_section_count == 0:
+            logger.debug(f"SPEC STATUS WEBHOOK: all subsections have been processed for document {request_data['document_id']}")
+            document.processing_status = DocProcessingStatus.PROCESSED
+            document.save()
+    
+    logger.debug(f"SPEC STATUS WEBHOOK: determining whether to assign submittal numbers...")
+    # TODO: assign submittal numbers
+
+    return Response(status=status.HTTP_200_OK)
 
 
 class SubmittalItemListViewSet(viewsets.ModelViewSet):

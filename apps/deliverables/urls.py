@@ -15,6 +15,7 @@ single_project_router.register('submittal-lists', views.SubmittalItemListViewSet
 urlpatterns = [
     path('', include(router.urls)),
     path('upload-file/', views.upload_file, name='upload_file'),
+    path('spec-status-webhook/', views.spec_status_webhook, name='spec_status_webhook'),
 ]
 
 single_project_urlpatterns = [
