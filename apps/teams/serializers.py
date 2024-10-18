@@ -13,10 +13,11 @@ class MembershipSerializer(serializers.ModelSerializer):
     first_name = serializers.ReadOnlyField(source="user.first_name")
     last_name = serializers.ReadOnlyField(source="user.last_name")
     display_name = serializers.ReadOnlyField(source="user.get_display_name")
+    email = serializers.ReadOnlyField(source="user.email")
 
     class Meta:
         model = Membership
-        fields = ("id", "user_id", "first_name", "last_name", "display_name", "role")
+        fields = ("id", "user_id", "first_name", "last_name", "display_name", "role", "email")
 
 
 class InvitationSerializer(serializers.ModelSerializer):
@@ -35,6 +36,7 @@ class TeamSerializer(serializers.ModelSerializer):
     )
     members = MembershipSerializer(source="sorted_memberships", many=True, read_only=True)
     invitations = InvitationSerializer(many=True, read_only=True, source="pending_invitations")
+    project_count = serializers.SerializerMethodField()
     dashboard_url = serializers.ReadOnlyField()
     is_admin = serializers.SerializerMethodField()
     subscription = SubscriptionSerializer(source="wrapped_subscription", read_only=True)
@@ -47,11 +49,15 @@ class TeamSerializer(serializers.ModelSerializer):
             "slug",
             "members",
             "invitations",
+            "project_count",
             "dashboard_url",
             "is_admin",
             "subscription",
             "has_active_subscription",
         )
+
+    def get_project_count(self, obj) -> int:
+        return obj.project_set.count()
 
     def get_is_admin(self, obj) -> bool:
         return is_admin(self.context["request"].user, obj)

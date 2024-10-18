@@ -83,22 +83,23 @@ THIRD_PARTY_APPS = [
 ]
 
 PEGASUS_APPS = [
-    "pegasus.apps.examples.apps.PegasusExamplesConfig",
-    "pegasus.apps.employees.apps.PegasusEmployeesConfig",
+    # "pegasus.apps.examples.apps.PegasusExamplesConfig",
+    # "pegasus.apps.employees.apps.PegasusEmployeesConfig",
 ]
 
 # Put your project-specific apps here
 PROJECT_APPS = [
     "apps.authentication.apps.AuthenticationConfig",
-    "apps.group_chat",
+    # "apps.group_chat",
     "apps.subscriptions.apps.SubscriptionConfig",
     "apps.users.apps.UserConfig",
-    "apps.dashboard.apps.DashboardConfig",
+    # "apps.dashboard.apps.DashboardConfig",
     "apps.api.apps.APIConfig",
-    "apps.ecommerce.apps.ECommerceConfig",
+    # "apps.ecommerce.apps.ECommerceConfig",
     "apps.web",
     "apps.teams.apps.TeamConfig",
-    "apps.teams_example.apps.TeamsExampleConfig",
+    # "apps.teams_example.apps.TeamsExampleConfig",
+    "apps.deliverables.apps.DeliverablesConfig",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PEGASUS_APPS + PROJECT_APPS
@@ -386,7 +387,9 @@ REST_AUTH = {
     "USER_DETAILS_SERIALIZER": "apps.users.serializers.CustomUserSerializer",
 }
 
-CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:5173"])
+FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
+
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:5173", FRONTEND_BASE_URL])
 
 
 SPECTACULAR_SETTINGS = {
@@ -408,6 +411,16 @@ SPECTACULAR_SETTINGS = {
             "ApiKeyAuth": [],
         }
     ],
+    "ENUM_NAME_OVERRIDES": {
+        "ProjectMembershipRole": "apps.deliverables.models.PROJECT_MEMBERSHIP_ROLE_CHOICES",
+        "TeamMembershipRole": "apps.teams.roles.ROLE_CHOICES",
+        "ProjectStatus": "apps.deliverables.models.Project.PROJECT_STATUS_CHOICES",
+    }
+}
+
+ENUM_NAME_OVERRIDES = {
+    "apps.deliverables.models.ProjectMembership.role": "ProjectMembershipRole",
+    "apps.teams.models.TeamMembership.role": "TeamMembershipRole"
 }
 
 # Celery setup (using redis)
@@ -531,3 +544,20 @@ LOGGING = {
         },
     },
 }
+
+
+BACKEND_CALLBACK_URL = env("BACKEND_CALLBACK_URL", default="http://localhost:8000")
+
+LEGACY_DB_HOST = env("LEGACY_DB_HOST", default="deliverables-dev.cdrdfhibqqqq.us-east-1.rds.amazonaws.com")
+LEGACY_DB_PORT = env("LEGACY_DB_PORT", default="3306")
+LEGACY_DB_USER = env("LEGACY_DB_USER", default="admin")
+LEGACY_DB_PASSWORD = env("LEGACY_DB_PASSWORD", default="")
+LEGACY_DB_NAME = env("LEGACY_DB_NAME", default="logmaker")
+
+AWS_REGION = env("AWS_REGION", default="us-east-1")
+AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default="")
+AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY", default="")
+S3_BUCKET = env("S3_BUCKET", default="")
+LAMBDA_FUNCTION_URL = env("LAMBDA_FUNCTION_URL", default="")
+ENVIRONMENT = env("ENVIRONMENT", default="")
+BACKEND_CALLBACK_URL = env("BACKEND_CALLBACK_URL", default="")

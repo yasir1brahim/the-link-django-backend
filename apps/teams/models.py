@@ -20,14 +20,32 @@ class Team(SubscriptionModelBase, BaseModel):
     A Team, with members.
     """
 
+    legacy_account_id = models.IntegerField(blank=True, null=True)
+    legacy_customer_id = models.IntegerField(blank=True, null=True)
     name = models.CharField(max_length=100)
     slug = models.SlugField(unique=True)
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="teams", through="Membership")
 
-    # your team customizations go here.
+    member_limit = models.IntegerField(default=None, null=True, blank=True)
+    project_limit = models.IntegerField(default=None, null=True, blank=True)
+
+    is_enterprise = models.BooleanField(default=False)
+    enterprise_billing_notes = models.TextField(blank=True)
+    entitlements = models.ManyToManyField("deliverables.Entitlement", blank=True)
+
+    legacy_logo_url = models.CharField(max_length=256, blank=True, null=True)
+    legacy_admin_id = models.IntegerField(blank=True, null=True)
+    legacy_status = models.CharField(max_length=256, blank=True, null=True)
+    
+    procore_id = models.IntegerField(blank=True, null=True)
+    procore_name = models.CharField(max_length=256, blank=True, null=True)
 
     def __str__(self):
         return self.name
+
+    class Meta:
+        verbose_name = "Company"
+        verbose_name_plural = "Companies"
 
     @property
     def email(self):
@@ -46,7 +64,7 @@ class Team(SubscriptionModelBase, BaseModel):
 
     @property
     def dashboard_url(self) -> str:
-        return reverse("web_team:home", args=[self.slug])
+        return reverse("web_team:home", args=[self.id])
 
 
 class Membership(BaseModel):
@@ -86,7 +104,7 @@ class Invitation(BaseModel):
     )
 
     def get_url(self) -> str:
-        return absolute_url(reverse("teams:accept_invitation", args=[self.id]))
+        return f"{settings.FRONTEND_BASE_URL}/accept-invitation/?team_id={self.team.id}&invitation_id={self.id}"
 
 
 class BaseTeamModel(BaseModel):

@@ -20,6 +20,9 @@ class CustomUser(AbstractUser):
     Add additional fields to the user model here.
     """
 
+    legacy_id = models.IntegerField(blank=True, null=True)
+    legacy_role_id = models.IntegerField(blank=True, null=True)
+
     avatar = models.FileField(upload_to=_get_avatar_filename, blank=True, validators=[validate_profile_picture])
     language = models.CharField(max_length=10, blank=True, null=True)
     timezone = models.CharField(max_length=100, blank=True, default="")
@@ -48,3 +51,19 @@ class CustomUser(AbstractUser):
     @cached_property
     def has_verified_email(self):
         return EmailAddress.objects.filter(user=self, verified=True).exists()
+    
+    def is_admin_for_team(self, team):
+        from apps.teams.roles import ROLE_ADMIN
+        return self.teams.through.objects.filter(user=self, team=team, role=ROLE_ADMIN).exists()
+    
+    def is_member_of_team(self, team):
+        return self.teams.filter(id=team.id).exists()
+    
+    def is_admin_for_project(self, project):
+        from apps.deliverables.models import ROLE_PROJECT_ADMIN
+        if self.is_admin_for_team(project.team):
+            return True
+        return self.projects.through.objects.filter(user=self, project=project, role=ROLE_PROJECT_ADMIN).exists()
+    
+    def is_member_of_project(self, project):
+        return self.projects.filter(id=project.id).exists()

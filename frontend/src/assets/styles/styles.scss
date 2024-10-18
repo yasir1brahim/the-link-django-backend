@@ -1,0 +1,142 @@
+@import "../../../node_modules/bootstrap/scss/bootstrap.scss";
+@import "../../../node_modules/bootstrap/scss/_functions.scss";
+@import "../../../node_modules/bootstrap/scss/_mixins.scss";
+@import "../../../node_modules/bootstrap/scss/_variables.scss";
+
+@import "./helpers/imports";
+
+@import "./imports";
+
+// Third Party CSS
+@import "react-bootstrap-typeahead/css/Typeahead.css";
+@import "react-datepicker/dist/react-datepicker.css";
+@import "../../components/shared/Pagination/Pagination.scss";
+
+// Component imports
+@import "../../components/shared/Loader/Loader.scss";
+@import "../../components/Authentication/Authentication.scss";
+@import "../../components/shared/NavbarTop/NavbarTop.scss";
+@import "../../components/shared/Header/Header.scss";
+@import "../../components/shared/HeaderTabs/HedaerTabs.scss";
+@import "../../components/AdminLanding/AdminLanding.scss";
+@import "../../components/AdminUser/AdminUser.scss";
+@import "../../components/CustomerProfile/CustomerProfile.scss";
+@import "../../components/CustomerProjects/CustomerProjects.scss";
+@import "../../components/ProjectDetails/ProjectDetails.scss";
+@import "../../components/ProjectLogs/ProjectLogs.scss";
+@import "../../components/PersonalProject/PersonalProject.scss";
+@import "../../components/SpecGpt/specgpt/App.scss";
+
+html,
+body {
+  font-family: $font-family-base !important;
+  font-size: 1rem !important;
+  color: #212121 !important;
+}
+
+* {
+  // font-family: 'Source Sans Pro';
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background-color: $disabled-bg;
+    border-radius: 5px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: $disabled;
+    border-radius: 5px;
+  }
+}
+
+ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.text-label-value {
+  .text-label {
+    color: #999999;
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 20px;
+  }
+
+  .text-value {
+    color: #212121;
+    font-size: 0.875rem;
+  }
+}
+
+.react-datepicker-popper {
+  z-index: 2 !important;
+}
+.collaboration-wrapper-sidenav {
+  display: flex;
+  .collabHub-sideNav-contents {
+    width: 15%;
+    display: flex;
+    flex-direction: column;
+    margin: 0px 2px 0px 3px;
+    .side-nav-collab-hub-heading {
+      font-size: 14px;
+      font-weight: 500;
+      background: rgba(32, 42, 68, 0.9);
+      color: #ffffff !important;
+      height: 35px;
+      font-weight: 700;
+      text-align: center;
+      padding-top: 7px;
+    }
+    .collab-hub-sub-heading {
+      font-weight: 500;
+      font-size: 12px;
+      height: 25px;
+      padding-top: 0px;
+    }
+    .side-nav-collab-hub {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #E2E2E2;
+      max-height: calc(100vh - 195px);
+      overflow: auto;
+      .side-nav-chub-item {
+        align-items: center;
+        padding: 2px;
+        font-size: 14px;
+        cursor: pointer;
+        // background-color: rgb(223, 223, 223);
+        line-height: 1.5;
+        border-bottom: 1px solid #E2E2E2;
+      }
+      .side-nav-chub-item:active{
+        transform: scale(0.98);
+        background-color: #d5e83e;
+      }
+      .highlight-row{
+        background: rgba($primary, .03);
+      }
+    }
+  }
+  .ss-pdf-wrraper {
+    max-height: calc(100vh - 160px);
+    overflow: auto;
+    position: relative;
+    width: 85%;
+
+    .close-pdf {
+      left: 150px;
+      top: 7px;
+      position: absolute;
+    }
+  }
+}
+
+.collaboration-wrapper {
+  max-height: calc(100vh - 150px);
+  width: 85%;
+}

@@ -1,0 +1,52 @@
+.no-repeat {
+    background-repeat: no-repeat;
+}
+
+.bg-pos {
+    background-position: center center;
+}
+span[class*='icon-'],
+[class*='icon-'] {
+    position: relative;
+    display: inline-block;
+    cursor: pointer;
+}
+.icon-{
+    &pencil {
+        background-image: url("/assets/images/user.svg");
+        @extend .no-repeat;
+    }
+}
+
+.file {
+    width: 38px;
+    height: 40px;
+    display: block;
+    @extend .no-repeat;
+    @extend .bg-pos;
+    background-image: url("/assets/images/file.svg");
+    background-size: contain;
+    &.file- {
+        &doc {
+            background-image: url("/assets/images/file-doc.svg");
+        }
+        &excel {
+            background-image: url("/assets/images/file-excel.svg");
+        }
+        &jpg {
+            background-image: url("/assets/images/file-jpg.svg");
+        }
+        &pdf {
+            background-image: url("/assets/images/file-pdf.svg");
+        }
+        &png {
+            background-image: url("/assets/images/file-png.svg");
+        }
+        &txt {
+            background-image: url("/assets/images/file-txt.svg");
+        }
+        &word {
+            background-image: url("/assets/images/file-word.svg");
+        }
+    }
+}

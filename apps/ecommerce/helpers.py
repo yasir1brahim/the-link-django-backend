@@ -11,6 +11,7 @@ from .models import Purchase
 @transaction.atomic
 def create_purchase_from_checkout_session(session: Session) -> Purchase:
     session_id = session.stripe_id
+    print(session)
     client_reference_id = int(session.client_reference_id)
     user = CustomUser.objects.get(id=client_reference_id)
     if not user.customer or user.customer.id != session.customer:
@@ -24,9 +25,11 @@ def create_purchase_from_checkout_session(session: Session) -> Purchase:
     except Purchase.DoesNotExist:
         product = Product.objects.get(id=session.line_items.data[0].price.product)
         price = Price.objects.get(id=session.line_items.data[0].price.id)
+        quantity = session.line_items.data[0].quantity
         return Purchase.objects.create(
             user=user,
             product=product,
             price=price,
             checkout_session_id=session_id,
+            quantity=quantity,
         )

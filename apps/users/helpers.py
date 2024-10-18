@@ -6,7 +6,6 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext as _
 
-
 def require_email_confirmation():
     return settings.ACCOUNT_EMAIL_VERIFICATION == app_settings.EmailVerificationMethod.MANDATORY
 
@@ -44,3 +43,14 @@ def validate_profile_picture(value):
                 size=size_in_mb,
             )
         )
+
+
+def get_next_unique_username(model_class, username_value = None):
+    base_username = username_value or "user"
+    suffix = 1
+    while True:
+        username = f"{base_username}{suffix}"
+        if not model_class.objects.filter(username=username).exists():
+            return username
+        suffix += 1
+    

@@ -1,0 +1,99 @@
+// @import '../../../../node_modules/bootstrap/scss/_functions.scss';
+// @import '../../../../node_modules/bootstrap/scss/_variables.scss';
+
+
+
+$white:                                               #ffffff;
+$gray-100:                                            #fafafa;
+$gray-150:                                            #f0f0f0;
+$gray-200:                                            #dddddd;
+$gray-300:                                            #d8d8d8;
+$gray-400:                                            #b3b3b3;
+$gray-500:                                            #adadad;
+$gray-600:                                            #817b8d;
+$gray-700:                                            #666666;
+$gray-800:                                            #333333;
+$gray-900:                                            #201830;
+$black:                                               #000000;
+$text-base-color:                                     #212121;
+
+$lavender-var1:                                       #5b67b2;
+$lavender:                                            #7887e6;
+
+$lavender-lighter-shade: #F1F3FC;
+
+$grays: () !default;
+// stylelint-disable-next-line scss/dollar-variable-default
+$grays: map-merge(
+	(
+		"100": $gray-100,
+		"200": $gray-200,
+		"300": $gray-300,
+		"400": $gray-400,
+		"500": $gray-500,
+		"600": $gray-600,
+		"700": $gray-700,
+		"800": $gray-800,
+		"900": $gray-900
+	),
+	$grays
+);
+
+$primary:                                             #202A44;
+$secondary:                                           #181818;
+$tertiary:                                            #3F3357;
+$success:                                             #669900;
+$info:                                                #E64D4D ;
+$warning:                                             #DD571C;
+$danger:                                              #cc3333;
+$light:                                               #fafafa;
+$dark:                                                #666666;
+$alert:                                               #DB0000;
+$fail:                                                #DD571C;
+$disabled:                                            #cccccc;
+$disabled-bg:                                         #f2f2f2;
+
+$theme-colors: () !default;
+$theme-colors: map-merge((
+	"primary":    $primary,
+	"secondary":  $secondary,
+	"tertiary":   $tertiary,
+	"success":    $success,
+	"info":       $info,
+	"warning":    $warning,
+	"danger":     $danger,
+	"light":      $light,
+	"dark":       $dark
+), $theme-colors );
+
+$orange-var1:        #ffa008;
+
+$antique-brass: #CC9966;
+$boulder: #7B7B7B;
+$cararra: #EBEBE4;
+$cornflower-blue: #828ba6;
+$curious-blue: #1C81C5;
+
+$klein-blue: #002CA5;
+$corn-blue: #507BF4;
+$maya-blue: #6CBBF5;
+
+$manatee-maroon: #B32424;
+
+$pumpkin1: #FF7907;
+$pumpkin2: #ff9933;
+
+$scooter: #1B80C4; // #2EBAD1; old merchant color
+
+$silver-chalice: #a8a8a8;
+$silver-tree: #64AD88;
+$limeade: #669900;
+$wild-sand: #f5f5f5;
+
+$trout: #464B5A;
+
+$status-completed: #009900;
+$status-overdue: #993333;
+$status-due: #c60;
+
+$merchant-card-header-bg:                  #F7F7FA;

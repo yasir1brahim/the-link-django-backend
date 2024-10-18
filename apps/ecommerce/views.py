@@ -53,7 +53,7 @@ def purchase_product(request, product_id: str):
         line_items=[
             {
                 "price": product.default_price.id,
-                "quantity": 1,
+                "quantity": 3,
             },
         ],
         allow_promotion_codes=True,

@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../the-link-web-app"
+		},
+		{
+			"path": "../LogManager"
+		}
+	],
+	"settings": {}
+}
