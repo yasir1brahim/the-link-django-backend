@@ -14,7 +14,7 @@ single_project_router.register('submittal-lists', views.SubmittalItemListViewSet
 
 urlpatterns = [
     path('', include(router.urls)),
-    path('upload_file', views.upload_file, name='upload_file'),
+    path('upload-file/', views.upload_file, name='upload_file'),
 ]
 
 single_project_urlpatterns = [

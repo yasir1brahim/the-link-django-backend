@@ -83,6 +83,7 @@ class UploadedFile(BaseModel):
     md5 = models.CharField(max_length=256)
     processing_status = models.CharField(max_length=256)
 
+    last_retry = models.DateTimeField(blank=True, null=True)
 
     def __str__(self):
         return self.document_path

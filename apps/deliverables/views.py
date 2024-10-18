@@ -1,7 +1,13 @@
 import os
 import time
 import logging
-
+import hashlib
+import boto3
+import shutil
+import requests
+import json
+from datetime import datetime
+from django.conf import settings
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
@@ -23,6 +29,14 @@ from rest_framework import viewsets
 from .models import Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList
 from apps.teams.models import Team
 from .permissions import ProjectAccessPermissions, SubmittalItemAccessPermissions
+
+
+s3 = boto3.client(
+    "s3",
+    region_name=settings.AWS_REGION,
+    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
+)
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -309,6 +323,54 @@ def create_temp_dir():
     return dir_path
 
 
+def get_file_hash(uploaded_file):
+    md5_hash = hashlib.md5()
+    for chunk in uploaded_file.chunks():
+        md5_hash.update(chunk)
+    return md5_hash.hexdigest()
+
+
+    
+def invoke_lambda(payload, lambda_url):
+    try:
+        requests.post(lambda_url, json=payload, timeout=2)
+    except requests.exceptions.ReadTimeout:
+        # if we timed out, it's a larger document and the lambda is processing it
+        pass
+
+def parse_spec(callback_url, document_id, project_id, object_key, filename, user_id):
+    logging.debug(f"parse_spec: {object_key}")
+
+    CHUNK_SIZE = 1200
+    CHUNK_OVERLAP = 100
+    ENVIRONMENT = settings.ENVIRONMENT
+    LAMBDA_FUNCTION_URL = settings.LAMBDA_FUNCTION_URL
+
+    payload = {
+        "object_key": object_key,
+        "document_id": str(document_id),
+        "filename": filename,
+        "user_id": user_id,
+        "project_id": project_id,
+        "chunk_size": CHUNK_SIZE,
+        "chunk_overlap": CHUNK_OVERLAP,
+        "callback_url": callback_url,
+        "ENVIRONMENT": ENVIRONMENT,
+        "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
+    }
+
+    # update the document status to processing
+    UploadedFile.objects.filter(id=document_id).update(last_retry=datetime.now())
+
+    invoke_lambda(
+        payload=payload,
+        lambda_url=LAMBDA_FUNCTION_URL
+    )
+
+    return "Kicked off processing job"
+
+
+
 @extend_schema(
     request=FileUploadSerializer,
     responses={200: {'description': 'File uploaded successfully'}},
@@ -328,27 +390,57 @@ def upload_file(request):
     if not files:
         return Response({'detail': 'No files provided'}, status=status.HTTP_400_BAD_REQUEST)
     
-    temp_base_dir = create_temp_dir()
+    already_existing_files = []
+    async_processing = []
+    not_parsed = []
 
     for file in files:
         try:
             filename = f'project_{project_id}_{file.name}_{int(time.time())}'
             document_path = f'original/{filename}'
             parsed_document_path = f'parsed/{filename}'
+            file_md5 = get_file_hash(file)
 
-            UploadedFile.objects.create(
-                file=file,
+            # check if file already exists
+            matching_files = UploadedFile.objects.filter(md5=file_md5, name=file.name, project_id=project_id)
+            if matching_files.exists():
+                already_existing_files.append(file.name)
+                continue
+
+            uploaded_file = UploadedFile.objects.create(
                 project_id=project_id,
                 uploaded_by=user,
-                name=filename,
-                path=document_path,
-                parsed_path=parsed_document_path,
-                status='uploaded',
+                name=file.name,
+                md5=file_md5,
+                document_path=document_path,
+                parsed_document_path=parsed_document_path,
+                processing_status='PENDING_PROCESSING',
             )
+
+            s3.upload_fileobj(
+                Fileobj=file,
+                Bucket=settings.S3_BUCKET,
+                Key=document_path,
+            )
+
+            parse_spec(
+                callback_url=settings.BACKEND_CALLBACK_URL,
+                document_id=uploaded_file.id,
+                project_id=project_id,
+                object_key=document_path,
+                filename=file.name,
+                user_id=user.id
+            )
+            async_processing.append(document_path)
         except Exception as e:
             logging.error(f"Error uploading file: {e}")
-            return Response({'detail': 'Error uploading file'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    return Response({'detail': 'File uploaded successfully'}, status=status.HTTP_200_OK)
+            not_parsed.append(file.name)
+    return Response({
+        'error_parsing': not_parsed,
+        'already_exist': already_existing_files,
+        'async_processing': async_processing,
+        'message': 'Files uploaded successfully'
+    }, status=status.HTTP_200_OK)
 
 
 class SubmittalItemListViewSet(viewsets.ModelViewSet):
