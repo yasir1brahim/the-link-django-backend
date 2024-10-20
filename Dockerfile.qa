@@ -42,7 +42,6 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
 
 # create code directory
 RUN mkdir /code
-WORKDIR /code
 
 # install python requirements
 RUN pip install --upgrade pip
@@ -57,6 +56,9 @@ RUN --mount=type=cache,target=/root/.cache \
 # copy code files
 COPY . /code/
 COPY docker-entrypoint.sh /code/
+RUN chmod +x /code/docker-entrypoint.sh
+
+WORKDIR /code
 
 RUN adduser --disabled-password --gecos "" django
 RUN chown -R django:django /code/
