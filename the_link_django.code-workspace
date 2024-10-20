@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../LogManager"
+		},
+		{
+			"path": "../specgpt"
 		}
 	],
 	"settings": {}

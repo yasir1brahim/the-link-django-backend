@@ -1,0 +1,62 @@
+# syntax = docker/dockerfile:1.5
+FROM python:3.11-bookworm
+ENV PYTHONUNBUFFERED=1
+
+
+# Set environment variables
+ARG ENVIRONMENT=qa
+ENV ENVIRONMENT=$ENVIRONMENT
+ARG SECRET_KEY
+ENV SECRET_KEY=$SECRET_KEY
+ARG DATABASE_URL
+ENV DATABASE_URL=$DATABASE_URL
+ARG AWS_ACCESS_KEY_ID
+ENV AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+ARG AWS_SECRET_ACCESS_KEY
+ENV AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+ARG SIMPLE_JWT_SIGNING_KEY
+ENV SIMPLE_JWT_SIGNING_KEY=$SIMPLE_JWT_SIGNING_KEY
+ARG CORS_ALLOWED_ORIGINS
+ENV CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
+ARG LEGACY_DB_PASSWORD
+ENV LEGACY_DB_PASSWORD=$LEGACY_DB_PASSWORD
+ARG AWS_REGION
+ENV AWS_REGION=$AWS_REGION
+ARG S3_BUCKET
+ENV S3_BUCKET=$S3_BUCKET
+ARG LAMBDA_FUNCTION_URL
+ENV LAMBDA_FUNCTION_URL=$LAMBDA_FUNCTION_URL
+ARG BACKEND_CALLBACK_URL
+ENV BACKEND_CALLBACK_URL=$BACKEND_CALLBACK_URL
+
+# install node/npm
+RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
+    --mount=target=/var/cache/apt,type=cache,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    echo "deb https://deb.nodesource.com/node_20.x bookworm main" > /etc/apt/sources.list.d/nodesource.list && \
+    wget -qO- https://deb.nodesource.com/gpgkey/nodesource.gpg.key | apt-key add - && \
+    apt-get update && \
+    apt-get install -yqq nodejs \
+    # install gettext for translations
+    gettext
+
+# create code directory
+RUN mkdir /code
+WORKDIR /code
+
+# install python requirements
+RUN pip install --upgrade pip
+
+# copy just requirements and install before rest of code to avoid having to
+# reinstall packages during build every time code changes
+COPY requirements.txt requirements.txt
+COPY requirements requirements/
+RUN --mount=type=cache,target=/root/.cache \
+    pip install -r requirements.txt
+
+# copy code files
+COPY . /code/
+
+RUN python manage.py migrate
+RUN python manage.py collectstatic --noinput
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]

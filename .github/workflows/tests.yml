@@ -1,9 +1,6 @@
 name: Run Django Tests
 on:
-  pull_request:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 jobs:
   code-style:
     runs-on: ubuntu-latest
