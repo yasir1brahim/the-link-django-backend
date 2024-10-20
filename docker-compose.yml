@@ -12,16 +12,16 @@ services:
       test: pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}
       interval: 2s
       retries: 10
-  redis:
-    image: redis
-    # persistent storage
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: bash -c 'exec 6<>/dev/tcp/redis/6379'
-      interval: 2s
-      retries: 10
+  # redis:
+  #   image: redis
+  #   # persistent storage
+  #   command: redis-server --appendonly yes
+  #   volumes:
+  #     - redis_data:/data
+  #   healthcheck:
+  #     test: bash -c 'exec 6<>/dev/tcp/redis/6379'
+  #     interval: 2s
+  #     retries: 10
   web:
     build:
       context: .
@@ -37,33 +37,23 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-  celery:
-    build:
-      context: .
-      dockerfile: Dockerfile.dev
-    command: celery -A the_link worker -l INFO --beat --pool=solo
-    volumes:
-      - .:/code
-    env_file:
-      - ./.env
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-  frontend:
-    build:
-      context: .
-      dockerfile: ./frontend/Dockerfile
-    command: npm run dev-host
-    volumes:
-      - .:/code
-      - /code/frontend/node_modules
-    ports:
-      - 5173:5173
+      # redis:
+      #   condition: service_healthy
+  # celery:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.dev
+  #   command: celery -A the_link worker -l INFO --beat --pool=solo
+  #   volumes:
+  #     - .:/code
+  #   env_file:
+  #     - ./.env
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
 
 volumes:
   postgres_data:
-  redis_data:
+  # redis_data:
