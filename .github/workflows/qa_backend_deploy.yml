@@ -9,7 +9,7 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: deliverables-dev
-  ECS_SERVICE: deliverables-dev-api                    # name of the service
+  ECS_SERVICE: deliverables-dev-api-django           # name of the service
   ECS_CLUSTER: deliverables-dev                     # name of the cluster
   ECS_TASK_DEFINITION: .aws/task-definition.json     # path of the JSON task definition
   CONTAINER_NAME: "deliverables-dev-api-django"           # name of the container name in the task definition
