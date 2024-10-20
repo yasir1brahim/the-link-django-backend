@@ -56,5 +56,10 @@ RUN --mount=type=cache,target=/root/.cache \
 
 # copy code files
 COPY . /code/
+COPY docker-entrypoint.sh /code/
 
+RUN adduser --disabled-password --gecos "" django
+RUN chown -R django:django /code/
+
+USER django
 ENTRYPOINT ["./docker-entrypoint.sh"]
