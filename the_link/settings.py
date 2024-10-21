@@ -556,6 +556,8 @@ LEGACY_DB_USER = os.environ.get("LEGACY_DB_USER", default="admin")
 LEGACY_DB_PASSWORD = os.environ.get("LEGACY_DB_PASSWORD", default="")
 LEGACY_DB_NAME = os.environ.get("LEGACY_DB_NAME", default="logmaker")
 
+print(f"AWS_REGION_VARIABLE: {os.environ.get('AWS_REGION', default='')}")
+print(f"LAMBDA_FUNCTION_URL_VARIABLE: {os.environ.get('LAMBDA_FUNCTION_URL', default='')}")
 AWS_REGION = os.environ.get("AWS_REGION", default="us-east-1")
 AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", default="")
 AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", default="")
