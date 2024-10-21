@@ -13,6 +13,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
+import dj_database_url
 import environ
 from django.utils.translation import gettext_lazy
 
@@ -22,18 +23,21 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 env = environ.Env()
 env.read_env(os.path.join(BASE_DIR, ".env"))
 
+ENVIRONMENT = os.environ.get("ENVIRONMENT", default="production")
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/stable/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = env("SECRET_KEY", default="django-insecure-BUNZkldzVq9rkiYkKT3rDl9MAJcZLvSKDbao7DV0")
+SECRET_KEY = os.environ.get("SECRET_KEY", default="django-insecure-BUNZkldzVq9rkiYkKT3rDl9MAJcZLvSKDbao7DV0")
 
 # SECURITY WARNING: don"t run with debug turned on in production!
-DEBUG = env.bool("DEBUG", default=False)
-ENABLE_DEBUG_TOOLBAR = env.bool("ENABLE_DEBUG_TOOLBAR", default=False) and "test" not in sys.argv
+DEBUG = os.environ.get("DEBUG", default=False)
+ENABLE_DEBUG_TOOLBAR = os.environ.get("ENABLE_DEBUG_TOOLBAR", default=False) and "test" not in sys.argv
 
 # Note: It is not recommended to set ALLOWED_HOSTS to "*" in production
-ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"])
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", default=["*"])
 
 
 # Application definition
@@ -184,19 +188,13 @@ FORM_RENDERER = "django.forms.renderers.TemplatesSetting"
 # Database
 # https://docs.djangoproject.com/en/stable/ref/settings/#databases
 
-if "DATABASE_URL" in env:
-    DATABASES = {"default": env.db()}
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": env("DJANGO_DATABASE_NAME", default="the_link"),
-            "USER": env("DJANGO_DATABASE_USER", default="postgres"),
-            "PASSWORD": env("DJANGO_DATABASE_PASSWORD", default="***"),
-            "HOST": env("DJANGO_DATABASE_HOST", default="localhost"),
-            "PORT": env("DJANGO_DATABASE_PORT", default="5432"),
-        }
-    }
+DATABASES = {
+    "default": dj_database_url.parse(
+        os.environ.get("DATABASE_URL"),
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
+}
 
 # Auth / login stuff
 
@@ -250,7 +248,7 @@ SOCIALACCOUNT_FORMS = {
 
 # User signup configuration: change to "mandatory" to require users to confirm email before signing in.
 # or "optional" to send confirmation emails but not require them
-ACCOUNT_EMAIL_VERIFICATION = env("ACCOUNT_EMAIL_VERIFICATION", default="none")
+ACCOUNT_EMAIL_VERIFICATION = os.environ.get("ACCOUNT_EMAIL_VERIFICATION", default="none")
 
 AUTHENTICATION_BACKENDS = (
     # Needed to login by username in Django admin, regardless of `allauth`
@@ -273,8 +271,8 @@ SOCIALACCOUNT_PROVIDERS = {
 }
 
 # For turnstile captchas
-TURNSTILE_KEY = env("TURNSTILE_KEY", default=None)
-TURNSTILE_SECRET = env("TURNSTILE_SECRET", default=None)
+TURNSTILE_KEY = os.environ.get("TURNSTILE_KEY", default=None)
+TURNSTILE_SECRET = os.environ.get("TURNSTILE_SECRET", default=None)
 
 
 # Internationalization
@@ -335,12 +333,12 @@ FORMS_URLFIELD_ASSUME_HTTPS = True
 # Email setup
 
 # default email used by your server
-SERVER_EMAIL = env("SERVER_EMAIL", default="noreply@thelink.ai")
-DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="avery.pawelek@thelink.ai")
+SERVER_EMAIL = os.environ.get("SERVER_EMAIL", default="noreply@thelink.ai")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", default="noreply@thelink.ai")
 
 # The default value will print emails to the console, but you can change that here
 # and in your environment.
-EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
 
 # Most production backends will require further customization. The below example uses Mailgun.
 # ANYMAIL = {
@@ -377,7 +375,7 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": False,
     "BLACKLIST_AFTER_ROTATION": False,
     "UPDATE_LAST_LOGIN": True,
-    "SIGNING_KEY": env("SIMPLE_JWT_SIGNING_KEY", default="<a comlex signing key>"),
+    "SIGNING_KEY": os.environ.get("SIMPLE_JWT_SIGNING_KEY", default="<a complex signing key>"),
     "ALGORITHM": "HS512",
 }
 
@@ -387,9 +385,9 @@ REST_AUTH = {
     "USER_DETAILS_SERIALIZER": "apps.users.serializers.CustomUserSerializer",
 }
 
-FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
+FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", default="http://localhost:3000")
 
-CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:5173", FRONTEND_BASE_URL])
+CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", default="http://localhost:5173," + FRONTEND_BASE_URL).split(",")
 
 
 SPECTACULAR_SETTINGS = {
@@ -424,13 +422,13 @@ ENUM_NAME_OVERRIDES = {
 }
 
 # Celery setup (using redis)
-if "REDIS_URL" in env:
-    REDIS_URL = env("REDIS_URL")
-elif "REDIS_TLS_URL" in env:
-    REDIS_URL = env("REDIS_TLS_URL")
+if os.environ.get("REDIS_URL"):
+    REDIS_URL = os.environ.get("REDIS_URL")
+elif os.environ.get("REDIS_TLS_URL"):
+    REDIS_URL = os.environ.get("REDIS_TLS_URL")
 else:
-    REDIS_HOST = env("REDIS_HOST", default="localhost")
-    REDIS_PORT = env("REDIS_PORT", default="6379")
+    REDIS_HOST = os.environ.get("REDIS_HOST", default="localhost")
+    REDIS_PORT = os.environ.get("REDIS_PORT", default="6379")
     REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
 
 if REDIS_URL.startswith("rediss"):
@@ -455,7 +453,7 @@ CHANNEL_LAYERS = {
 
 # Health Checks
 # A list of tokens that can be used to access the health check endpoint
-HEALTH_CHECK_TOKENS = env.list("HEALTH_CHECK_TOKENS", default="")
+HEALTH_CHECK_TOKENS = os.environ.get("HEALTH_CHECK_TOKENS", default="")
 
 # Waffle config
 
@@ -474,35 +472,38 @@ PROJECT_METADATA = {
 }
 
 # set this to True in production to have URLs generated with https instead of http
-USE_HTTPS_IN_ABSOLUTE_URLS = env.bool("USE_HTTPS_IN_ABSOLUTE_URLS", default=False)
+if ENVIRONMENT == 'local':
+    USE_HTTPS_IN_ABSOLUTE_URLS = False
+else:
+    USE_HTTPS_IN_ABSOLUTE_URLS = True
 
 ADMINS = [("Avery Pawelek", "avery.pawelek@thelink.ai")]
 
 # Add your google analytics ID to the environment to connect to Google Analytics
-GOOGLE_ANALYTICS_ID = env("GOOGLE_ANALYTICS_ID", default="")
+GOOGLE_ANALYTICS_ID = os.environ.get("GOOGLE_ANALYTICS_ID", default="")
 
 
 # Stripe config
 # modeled to be the same as https://github.com/dj-stripe/dj-stripe
 # Note: don"t edit these values here - edit them in your .env file or environment variables!
 # The defaults are provided to prevent crashes if your keys don"t match the expected format.
-STRIPE_LIVE_PUBLIC_KEY = env("STRIPE_LIVE_PUBLIC_KEY", default="pk_live_***")
-STRIPE_LIVE_SECRET_KEY = env("STRIPE_LIVE_SECRET_KEY", default="sk_live_***")
-STRIPE_TEST_PUBLIC_KEY = env("STRIPE_TEST_PUBLIC_KEY", default="pk_test_***")
-STRIPE_TEST_SECRET_KEY = env("STRIPE_TEST_SECRET_KEY", default="sk_test_***")
+STRIPE_LIVE_PUBLIC_KEY = os.environ.get("STRIPE_LIVE_PUBLIC_KEY", default="pk_live_***")
+STRIPE_LIVE_SECRET_KEY = os.environ.get("STRIPE_LIVE_SECRET_KEY", default="sk_live_***")
+STRIPE_TEST_PUBLIC_KEY = os.environ.get("STRIPE_TEST_PUBLIC_KEY", default="pk_test_***")
+STRIPE_TEST_SECRET_KEY = os.environ.get("STRIPE_TEST_SECRET_KEY", default="sk_test_***")
 # Change to True in production
-STRIPE_LIVE_MODE = env.bool("STRIPE_LIVE_MODE", False)
+STRIPE_LIVE_MODE = os.environ.get("STRIPE_LIVE_MODE", False)
 
 # djstripe settings
 # Get it from the section in the Stripe dashboard where you added the webhook endpoint
 # or from the stripe CLI when testing
-DJSTRIPE_WEBHOOK_SECRET = env("DJSTRIPE_WEBHOOK_SECRET", default="whsec_***")
+DJSTRIPE_WEBHOOK_SECRET = os.environ.get("DJSTRIPE_WEBHOOK_SECRET", default="whsec_***")
 
 DJSTRIPE_FOREIGN_KEY_TO_FIELD = "id"  # change to "djstripe_id" if not a new installation
 DJSTRIPE_SUBSCRIBER_MODEL = "teams.Team"
 DJSTRIPE_SUBSCRIBER_MODEL_REQUEST_CALLBACK = lambda request: request.team  # noqa E731
 
-ACTIVE_ECOMMERCE_PRODUCT_IDS = env.list("ACTIVE_ECOMMERCE_PRODUCT_IDS", default=[])
+ACTIVE_ECOMMERCE_PRODUCT_IDS = os.environ.get("ACTIVE_ECOMMERCE_PRODUCT_IDS", default=[])
 
 SILENCED_SYSTEM_CHECKS = [
     "djstripe.I002",  # Pegasus uses the same settings as dj-stripe for keys, so don't complain they are here
@@ -511,7 +512,7 @@ SILENCED_SYSTEM_CHECKS = [
 # Sentry setup
 
 # populate this to configure sentry. should take the form: "https://****@sentry.io/12345"
-SENTRY_DSN = env("SENTRY_DSN", default="")
+SENTRY_DSN = os.environ.get("SENTRY_DSN", default="")
 
 
 if SENTRY_DSN:
@@ -536,28 +537,27 @@ LOGGING = {
     "loggers": {
         "django": {
             "handlers": ["console"],
-            "level": env("DJANGO_LOG_LEVEL", default="INFO"),
+            "level": os.environ.get("DJANGO_LOG_LEVEL", default="INFO"),
         },
         "the_link": {
             "handlers": ["console"],
-            "level": env("THE_LINK_LOG_LEVEL", default="INFO"),
+            "level": os.environ.get("THE_LINK_LOG_LEVEL", default="INFO"),
         },
     },
 }
 
 
-BACKEND_CALLBACK_URL = env("BACKEND_CALLBACK_URL", default="http://localhost:8000")
+BACKEND_CALLBACK_URL = os.environ.get("BACKEND_CALLBACK_URL", default="http://localhost:8000")
 
-LEGACY_DB_HOST = env("LEGACY_DB_HOST", default="deliverables-dev.cdrdfhibqqqq.us-east-1.rds.amazonaws.com")
-LEGACY_DB_PORT = env("LEGACY_DB_PORT", default="3306")
-LEGACY_DB_USER = env("LEGACY_DB_USER", default="admin")
-LEGACY_DB_PASSWORD = env("LEGACY_DB_PASSWORD", default="")
-LEGACY_DB_NAME = env("LEGACY_DB_NAME", default="logmaker")
+LEGACY_DB_HOST = os.environ.get("LEGACY_DB_HOST", default="deliverables-dev.cdrdfhibqqqq.us-east-1.rds.amazonaws.com")
+LEGACY_DB_PORT = os.environ.get("LEGACY_DB_PORT", default="3306")
+LEGACY_DB_USER = os.environ.get("LEGACY_DB_USER", default="admin")
+LEGACY_DB_PASSWORD = os.environ.get("LEGACY_DB_PASSWORD", default="")
+LEGACY_DB_NAME = os.environ.get("LEGACY_DB_NAME", default="logmaker")
 
-AWS_REGION = env("AWS_REGION", default="us-east-1")
-AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default="")
-AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY", default="")
-S3_BUCKET = env("S3_BUCKET", default="")
-LAMBDA_FUNCTION_URL = env("LAMBDA_FUNCTION_URL", default="")
-ENVIRONMENT = env("ENVIRONMENT", default="")
-BACKEND_CALLBACK_URL = env("BACKEND_CALLBACK_URL", default="")
+AWS_REGION = os.environ.get("AWS_REGION", default="us-east-1")
+AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", default="")
+AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", default="")
+S3_BUCKET = os.environ.get("S3_BUCKET", default="")
+LAMBDA_FUNCTION_URL = os.environ.get("LAMBDA_FUNCTION_URL", default="")
+BACKEND_CALLBACK_URL = os.environ.get("BACKEND_CALLBACK_URL", default="")

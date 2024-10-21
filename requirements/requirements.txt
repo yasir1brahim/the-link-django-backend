@@ -62,6 +62,8 @@ cryptography==43.0.0
     # via
     #   fido2
     #   pyjwt
+dj-database-url==2.2.0
+    # via -r requirements/requirements.in
 dj-rest-auth==6.0.0
     # via -r requirements/requirements.in
 dj-stripe==2.8.4
@@ -70,6 +72,7 @@ django==5.1
     # via
     #   -r requirements/requirements.in
     #   channels
+    #   dj-database-url
     #   dj-rest-auth
     #   dj-stripe
     #   django-allauth
@@ -198,7 +201,9 @@ stripe==4.2.0
     #   -r requirements/requirements.in
     #   dj-stripe
 typing-extensions==4.12.2
-    # via qrcode
+    # via
+    #   dj-database-url
+    #   qrcode
 tzdata==2024.1
     # via
     #   celery

@@ -11,6 +11,7 @@ django-environ
 djangorestframework
 djangorestframework-api-key
 djangorestframework-simplejwt
+dj-database-url
 dj-rest-auth
 django-cors-headers
 django-health-check
