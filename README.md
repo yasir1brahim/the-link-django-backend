@@ -44,6 +44,17 @@ mkvirtualenv the_link -p python3.11
 pip install -r dev-requirements.txt
 ```
 
+## Deploying to AWS
+
+To get a shell into a running ECS container, see this article: https://elasticscale.com/blog/getting-a-shell-inside-a-container-on-aws-ecs/
+
+Run the following command to get a shell into a running ECS container:
+
+```
+aws ecs execute-command --cluster=deliverables-dev --task=273366047ed44f62827f786e6751ed96 --container=deliverables-dev-api-django --interactive --command "bin/bash"
+``` 
+
+
 ## Set up database
 
 *If you are using Docker you can skip these steps.*
