@@ -388,7 +388,7 @@ FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", default="http://localhos
 
 print(f"CORS_ALLOWED_ORIGINS_VARIABLE: {os.environ.get('CORS_ALLOWED_ORIGINS', default='')}")
 CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", default="http://localhost:5173," + FRONTEND_BASE_URL).split(",")
-
+CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", default="http://localhost:8000,https://app-dj-qa-api.thelink.ai").split(",")
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "The Link",
