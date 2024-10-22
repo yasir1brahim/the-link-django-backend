@@ -338,17 +338,16 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", default="noreply@theli
 
 # The default value will print emails to the console, but you can change that here
 # and in your environment.
-EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
+if ENVIRONMENT == 'local':
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+else:
+    EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
 
 # Most production backends will require further customization. The below example uses Mailgun.
-# ANYMAIL = {
-#     "MAILGUN_API_KEY": env("MAILGUN_API_KEY", default=None),
-#     "MAILGUN_SENDER_DOMAIN": env("MAILGUN_SENDER_DOMAIN", default=None),
-# }
+ANYMAIL = {
+    "SENDGRID_API_KEY": os.environ.get("SENDGRID_API_KEY", default=None),
+}
 
-# use in production
-# see https://github.com/anymail/django-anymail for more details/examples
-# EMAIL_BACKEND = "anymail.backends.mailgun.EmailBackend"
 
 EMAIL_SUBJECT_PREFIX = "[The Link] "
 
