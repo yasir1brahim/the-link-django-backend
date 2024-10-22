@@ -108,7 +108,9 @@ class ProjectWriteSerializer(BaseProjectSerializer):
         project = Project.objects.create(**validated_data)
 
         for membership_data in memberships_data:
-            ProjectMembership.objects.create(project=project, **membership_data)
+            user_id = membership_data.get('user').get('id').id
+            role = membership_data.get('role')
+            ProjectMembership.objects.create(project=project, user_id=user_id, role=role)
 
         return project
 

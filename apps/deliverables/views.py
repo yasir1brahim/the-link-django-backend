@@ -151,6 +151,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return queryset.order_by('name')
 
     def perform_create(self, serializer):
+        print(f"serializer.validated_data: {serializer.validated_data}")
         team = serializer.validated_data["team"]
         if not self.request.user.is_member_of_team(team):
             raise PermissionDenied()
