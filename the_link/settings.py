@@ -24,6 +24,7 @@ env = environ.Env()
 env.read_env(os.path.join(BASE_DIR, ".env"))
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT", default="production")
+print(f"ENVIRONMENT: {ENVIRONMENT}")
 
 
 # Quick-start development settings - unsuitable for production
@@ -386,7 +387,6 @@ REST_AUTH = {
 
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", default="http://localhost:3000")
 
-print(f"CORS_ALLOWED_ORIGINS_VARIABLE: {os.environ.get('CORS_ALLOWED_ORIGINS', default='')}")
 CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", default="http://localhost:5173," + FRONTEND_BASE_URL).split(",")
 CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", default="http://localhost:8000,https://app-dj-qa-api.thelink.ai").split(",")
 
@@ -555,8 +555,6 @@ LEGACY_DB_USER = os.environ.get("LEGACY_DB_USER", default="admin")
 LEGACY_DB_PASSWORD = os.environ.get("LEGACY_DB_PASSWORD", default="")
 LEGACY_DB_NAME = os.environ.get("LEGACY_DB_NAME", default="logmaker")
 
-print(f"AWS_REGION_VARIABLE: {os.environ.get('AWS_REGION', default='')}")
-print(f"LAMBDA_FUNCTION_URL_VARIABLE: {os.environ.get('LAMBDA_FUNCTION_URL', default='')}")
 AWS_REGION = os.environ.get("AWS_REGION", default="us-east-1")
 AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", default="")
 AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", default="")

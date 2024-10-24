@@ -413,8 +413,6 @@ def parse_spec(callback_url, document_id, project_id, object_key, filename, user
 
     CHUNK_SIZE = 1200
     CHUNK_OVERLAP = 100
-    ENVIRONMENT = settings.ENVIRONMENT
-    LAMBDA_FUNCTION_URL = settings.LAMBDA_FUNCTION_URL
 
     payload = {
         "object_key": object_key,
@@ -425,16 +423,19 @@ def parse_spec(callback_url, document_id, project_id, object_key, filename, user
         "chunk_size": CHUNK_SIZE,
         "chunk_overlap": CHUNK_OVERLAP,
         "callback_url": callback_url,
-        "ENVIRONMENT": ENVIRONMENT,
+        "ENVIRONMENT": settings.ENVIRONMENT,
         "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
     }
 
     # update the document status to processing
     UploadedFile.objects.filter(id=document_id).update(last_retry=datetime.now())
 
+    print(f"Invoking lambda with URL: {settings.LAMBDA_FUNCTION_URL}")
+    print(f"Invoking lambda with payload: {payload}")
+
     invoke_lambda(
         payload=payload,
-        lambda_url=LAMBDA_FUNCTION_URL
+        lambda_url=settings.LAMBDA_FUNCTION_URL
     )
 
     return "Kicked off processing job"
