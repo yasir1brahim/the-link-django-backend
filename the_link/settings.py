@@ -62,6 +62,7 @@ THIRD_PARTY_APPS = [
     "allauth.account",
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
+    "whitenoise.runserver_nostatic",
     "channels",
     "django_otp",
     "django_otp.plugins.otp_totp",
@@ -115,6 +116,7 @@ if DEBUG:
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
@@ -312,7 +314,7 @@ STORAGES = {
         # swap these to use manifest storage to bust cache when files change
         # note: this may break image references in sass/css files which is why it is not enabled by default
         # "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage",
-        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
 
@@ -541,7 +543,7 @@ LOGGING = {
     },
     "loggers": {
         "django": {
-            "handlers": ["console", "mail_admins"],
+            "handlers": ["console"],
             "level": os.environ.get("DJANGO_LOG_LEVEL", default="INFO"),
         },
         "the_link": {
