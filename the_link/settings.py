@@ -534,10 +534,14 @@ LOGGING = {
     },
     "handlers": {
         "console": {"class": "logging.StreamHandler", "formatter": "verbose"},
+        'mail_admins': {
+            'level': 'ERROR',
+            'class': 'django.utils.log.AdminEmailHandler'
+        },
     },
     "loggers": {
         "django": {
-            "handlers": ["console"],
+            "handlers": ["console", "mail_admins"],
             "level": os.environ.get("DJANGO_LOG_LEVEL", default="INFO"),
         },
         "the_link": {
