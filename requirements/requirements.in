@@ -26,3 +26,4 @@ celery[redis]
 django-celery-beat
 mysql-connector-python
 sentry-sdk
+whitenoise

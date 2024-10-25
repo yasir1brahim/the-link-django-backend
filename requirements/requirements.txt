@@ -223,3 +223,5 @@ vine==5.1.0
     #   kombu
 wcwidth==0.2.13
     # via prompt-toolkit
+whitenoise==6.7.0
+    # via -r requirements/requirements.in
