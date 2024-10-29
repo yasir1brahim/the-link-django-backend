@@ -10,7 +10,7 @@ default_context:
   deploy_platform: none
   description: Web application for The Link.ai
   docker_setup: default
-  domain_name: thelink.ai
+  domain_name: app.thelink.ai
   email: avery.pawelek@thelink.ai
   enable_github_login: n
   enable_google_login: y

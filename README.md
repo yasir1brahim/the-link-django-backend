@@ -51,7 +51,7 @@ To get a shell into a running ECS container, see this article: https://elasticsc
 Run the following command to get a shell into a running ECS container:
 
 ```
-aws ecs execute-command --cluster=deliverables-dev --task=273366047ed44f62827f786e6751ed96 --container=deliverables-dev-api-django --interactive --command "bin/bash"
+aws ecs execute-command --cluster=deliverables-dev --task=273366047ed44f62827f786e6751ed96 --container=deliverables-dev-api-django --interactive --command "bash"
 ``` 
 
 

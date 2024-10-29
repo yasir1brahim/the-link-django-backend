@@ -6,6 +6,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError as DRFVa
 from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework import status
 from apps.api.permissions import IsAuthenticatedOrHasUserAPIKey
 
@@ -30,14 +31,17 @@ class AnonymousRetrieveOnlyPermission(BasePermission):
 
 
 @extend_schema_view(
-    create=extend_schema(operation_id="teams_create"),
     list=extend_schema(operation_id="teams_list"),
     retrieve=extend_schema(operation_id="teams_retrieve"),
     update=extend_schema(operation_id="teams_update"),
     partial_update=extend_schema(operation_id="teams_partial_update"),
-    destroy=extend_schema(operation_id="teams_destroy"),
 )
-class TeamViewSet(viewsets.ModelViewSet):
+class TeamViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    viewsets.GenericViewSet
+):
     queryset = Team.objects.all()
     serializer_class = TeamSerializer
     permission_classes = (IsAuthenticatedOrHasUserAPIKey, TeamAccessPermissions)
@@ -45,11 +49,6 @@ class TeamViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         # filter queryset based on logged in user
         return self.request.user.teams.order_by("name")
-
-    def perform_create(self, serializer):
-        # ensure logged in user is set on the model during creation
-        team = serializer.save()
-        team.members.add(self.request.user, through_defaults={"role": ROLE_ADMIN})
 
 
 @extend_schema_view(
