@@ -28,7 +28,7 @@ from drf_spectacular.types import OpenApiTypes
 from .serializers import (ProjectReadSerializer, ProjectWriteSerializer, FileUploadSerializer, SubmittalItemReadSerializer, SubmittalItemWriteSerializer,
                           SubmittalItemListSerializer)
 from rest_framework import viewsets
-from .models import Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList, MasterFormatSection, SpecSection
+from .models import (Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList, MasterFormatSection, SpecSection, DocProcessingStatus)
 from apps.teams.models import Team
 from .permissions import ProjectAccessPermissions, SubmittalItemAccessPermissions
 import logging
@@ -72,15 +72,6 @@ class SubsectionType(str, Enum):
     PART_3_EXECUTION = "PART_3_EXECUTION"
     UNKNOWN = "UNKNOWN"
 
-
-class DocProcessingStatus(str, Enum):
-    PENDING_PROCESSING = "PENDING_PROCESSING"
-    PROCESSING = "PROCESSING"
-    SUBSECTIONS_EXTRACTED = "SUBSECTIONS_EXTRACTED"
-    PROCESSED = "PROCESSED"
-    PROCESSED_SECTION = "PROCESSED_SECTION"
-    SECTION_PROCESSING_FAILED = "SECTION_PROCESSING_FAILED"
-    FAILED = "FAILED"
 
 class TextLocation(TypedDict):
     page_no: int
@@ -377,20 +368,6 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             return Response({'deleted_count': deleted_count})
         return super().destroy(request, *args, **kwargs)
 
-
-
-def create_temp_dir():
-    dir_path = os.getcwd() + '/uploads/'
-    if not os.path.exists(dir_path):
-        os.mkdir(dir_path)
-    dir_path += str(int(time.time())) + '/'
-    if os.path.exists(dir_path):
-        for f in os.listdir(dir_path):
-            os.remove(os.path.join(dir_path, f))
-        logging.debug("Temp files deleted")
-    else:
-        os.mkdir(dir_path)
-    return dir_path
 
 
 def get_file_hash(uploaded_file):

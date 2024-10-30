@@ -1,3 +1,5 @@
+from enum import Enum
+
 from django.db import models
 from apps.utils.models import BaseModel
 from django.conf import settings
@@ -69,6 +71,17 @@ class Entitlement(BaseModel):
     
     def __str__(self):
         return self.readable_name
+    
+
+
+class DocProcessingStatus(str, Enum):
+    PENDING_PROCESSING = "PENDING_PROCESSING"
+    PROCESSING = "PROCESSING"
+    SUBSECTIONS_EXTRACTED = "SUBSECTIONS_EXTRACTED"
+    PROCESSED = "PROCESSED"
+    PROCESSED_SECTION = "PROCESSED_SECTION"
+    SECTION_PROCESSING_FAILED = "SECTION_PROCESSING_FAILED"
+    FAILED = "FAILED"
     
 
 class UploadedFile(BaseModel):

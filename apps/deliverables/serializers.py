@@ -6,9 +6,10 @@ from .models import Project, ProjectMembership, PROJECT_MEMBERSHIP_ROLE_CHOICES
 from apps.users.serializers import CustomUserSerializer
 from apps.users.models import CustomUser
 from apps.teams.models import Team
-from apps.deliverables.models import SubmittalItem, UploadedFile, SpecSection, SubmittalItemList, MasterFormatSection
+from apps.deliverables.models import SubmittalItem, UploadedFile, SpecSection, SubmittalItemList, MasterFormatSection, DocProcessingStatus
 from drf_spectacular.utils import extend_schema_field
 from django.conf import settings
+from django.db.models import Case, When, IntegerField
 
 from .constants import masterformat_to_section_title_map
 
@@ -132,10 +133,27 @@ class DocumentSerializer(serializers.ModelSerializer):
 
 class ProjectReadSerializer(BaseProjectSerializer):
     doc_parsed = serializers.SerializerMethodField()
-    document_details = DocumentSerializer(source="uploadedfile_set", many=True)
+    document_details = serializers.SerializerMethodField()
 
     def get_doc_parsed(self, obj):
         return obj.uploadedfile_set.count()
+    
+    def get_document_details(self, obj):
+        queryset = obj.uploadedfile_set.all().annotate(
+            status_order=Case(
+                When(processing_status=DocProcessingStatus.PENDING_PROCESSING, then=1),
+                When(processing_status=DocProcessingStatus.PROCESSING, then=2),
+                When(processing_status=DocProcessingStatus.SUBSECTIONS_EXTRACTED, then=3),
+                When(processing_status=DocProcessingStatus.SECTION_PROCESSING_FAILED, then=4),
+                When(processing_status=DocProcessingStatus.FAILED, then=5),
+                When(processing_status=DocProcessingStatus.PROCESSED, then=6),
+                When(processing_status=DocProcessingStatus.PROCESSED_SECTION, then=7),
+                default=8,
+                output_field=IntegerField(),
+            )
+        ).order_by("status_order", '-created_at')
+        return DocumentSerializer(queryset, many=True).data
+
     
     class Meta:
         model = Project
