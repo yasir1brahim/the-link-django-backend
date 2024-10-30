@@ -35,7 +35,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY", default="django-insecure-BUNZkldzVq9rk
 
 # SECURITY WARNING: don"t run with debug turned on in production!
 DEBUG = os.environ.get("DEBUG", default=False)
-ENABLE_DEBUG_TOOLBAR = os.environ.get("ENABLE_DEBUG_TOOLBAR", default=False)
+ENABLE_DEBUG_TOOLBAR = os.environ.get("ENABLE_DEBUG_TOOLBAR", default=False) and "test" not in sys.argv
 
 # Note: It is not recommended to set ALLOWED_HOSTS to "*" in production
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", default=["*"])
@@ -63,6 +63,7 @@ THIRD_PARTY_APPS = [
     "allauth.account",
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
+    "whitenoise.runserver_nostatic",
     "channels",
     "django_otp",
     "django_otp.plugins.otp_totp",
@@ -467,7 +468,7 @@ WAFFLE_FLAG_MODEL = "teams.Flag"
 # replace any values below with specifics for your project
 PROJECT_METADATA = {
     "NAME": gettext_lazy("The Link"),
-    "URL": "http://app.thelink.ai",
+    "URL": "http://thelink.ai",
     "DESCRIPTION": gettext_lazy("Web application for The Link.ai"),
     "IMAGE": "https://upload.wikimedia.org/wikipedia/commons/2/20/PEO-pegasus_black.svg",
     "KEYWORDS": "SaaS, django",
