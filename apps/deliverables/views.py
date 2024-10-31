@@ -119,9 +119,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
         ]
     )
     def list(self, request, *args, **kwargs):
+        self.queryset = self.get_queryset_for_list()
         return super().list(request, *args, **kwargs)
 
-    def get_queryset(self):
+    def get_queryset_for_list(self):
         # Get the team_id from query parameters
         team_id = self.request.query_params.get('team_id', None)
         
@@ -141,6 +142,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             except ValueError:
                 raise DRFValidationError("Invalid team_id. Must be an integer.")
         else:
+            
             queryset = self.queryset.filter(members=self.request.user)
 
         return queryset.order_by('name')

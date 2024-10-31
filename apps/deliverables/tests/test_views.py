@@ -128,6 +128,26 @@ class ProjectViewSetQuerySetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['results']), 2)
 
+    def test_team_admin_can_access_project_detail(self):
+        """Test that team admins can access project detail"""
+        self.client.force_authenticate(user=self.team1_admin)
+        response = self.client.get(reverse('project-detail', kwargs={'pk': self.project1.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_project_member_can_access_project_detail(self):
+        """Test that project members can access project detail"""
+        self.client.force_authenticate(user=self.member_of_both_teams)
+        ProjectMembership.objects.create(
+            project=self.project1,
+            user=self.member_of_both_teams,
+            role=ROLE_MEMBER
+        )
+        response = self.client.get(reverse('project-detail', kwargs={'pk': self.project1.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        unauthorized_response = self.client.get(reverse('project-detail', kwargs={'pk': self.project2.id}))
+        self.assertEqual(unauthorized_response.status_code, status.HTTP_403_FORBIDDEN)
+
     def test_invalid_team_id_returns_400(self):
         """Test that invalid team_id returns 400 error"""
         self.client.force_authenticate(user=self.member_of_both_teams)
