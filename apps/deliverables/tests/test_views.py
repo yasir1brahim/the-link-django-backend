@@ -5,7 +5,7 @@ from rest_framework import status
 from django.contrib.auth import get_user_model
 from apps.teams.models import Team, Membership as TeamMembership
 from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
-from apps.deliverables.models import Project, ProjectMembership
+from apps.deliverables.models import Project, ProjectMembership, SubmittalItem, MasterFormatSection
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 class ProjectViewSetQuerySetTests(APITestCase):
@@ -166,3 +166,46 @@ class ProjectViewSetQuerySetTests(APITestCase):
         response = self.client.get(self.url)
         
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+
+class SubmittalItemViewSetTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.User = get_user_model()
+
+        self.user = self.User.objects.create_user(
+            username='user1', 
+            password='password123'
+        )
+
+        self.team = Team.objects.create(name='Team 1', slug='team-1')
+        TeamMembership.objects.create(
+            user=self.user,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+
+        self.project = Project.objects.create(
+            name='Project 1',
+            team=self.team,
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role=ROLE_MEMBER
+        )
+
+        self.submittal_item = SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=MasterFormatSection.objects.create(masterformat_number='033000'),
+        )
+
+    def test_user_can_see_submittal_items_for_their_project(self):
+        """Test that users can see submittal items for their project"""
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        print(f"response.data: {response.data}")
+        self.assertEqual(len(response.data['message']), 1)
+        self.assertEqual(response.data['message'][0]['id'], self.submittal_item.id)
