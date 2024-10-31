@@ -34,16 +34,18 @@ class ProjectMembershipSerializer(serializers.ModelSerializer):
 class BaseProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
-        fields = ['id', 'name', 'description', 'team', 'owner', 'members', 'entitlements',
+        fields = ['id', 'name', 'description', 'team', 'members', 'entitlements',
                    'user_limit', 'status', 'start_date', 'end_date', 'is_archived']
 
     members = ProjectMembershipSerializer(source="project_memberships", many=True)
     team = serializers.ReadOnlyField(source="team.id")
-    owner = CustomUserSerializer()
-    entitlements = serializers.SerializerMethodField()
+    entitlements = serializers.SerializerMethodField(read_only=True)
     user_limit = serializers.ReadOnlyField()
 
     def get_entitlements(self, obj) -> list[str]:
+        # Handle case when obj is a dictionary (during validation)
+        if isinstance(obj, dict):
+            return []
         project_level_entitlements = obj.entitlements.values_list('code_name', flat=True)
         if project_level_entitlements:
             return project_level_entitlements
@@ -52,20 +54,22 @@ class BaseProjectSerializer(serializers.ModelSerializer):
 
 
 class ProjectWriteSerializer(BaseProjectSerializer):
-    owner = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all())
     team = serializers.PrimaryKeyRelatedField(queryset=Team.objects.all())
 
     def validate(self, data):
-        owner = data.get('owner')
         team = data.get('team')
-        members = data.get('members')
-        
-        if owner and team and not owner.is_member_of_team(team):
-            raise serializers.ValidationError("The owner must be a member of the team.")
-        
+        members = data.get('project_memberships')
+
+        if self.instance:
+            team = team or self.instance.team
+        else:
+            if not team:
+                raise serializers.ValidationError("Team is required to create a project.")
+
         if members:
             for member in members:
-                if not member.is_member_of_team(team):
+                member_user = member.get('user').get('id')
+                if not member_user.is_member_of_team(team):
                     raise serializers.ValidationError("All members must be a member of the team.")
         return data
     

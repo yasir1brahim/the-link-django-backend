@@ -18,7 +18,6 @@ class Project(BaseModel):
     name = models.CharField(max_length=256)
     description = models.TextField(blank=True)
     team = models.ForeignKey("teams.Team", on_delete=models.CASCADE)
-    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="created_projects", blank=True, null=True)
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="projects", through="ProjectMembership")
 

@@ -33,9 +33,9 @@ class EntitlementAdmin(admin.ModelAdmin):
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
-    list_display = ["id", "name", "team", "owner"]
-    list_filter = ["name", "team", "owner"]
-    search_fields = ["name", "team__name", "owner__email"]
+    list_display = ["id", "name", "team"]
+    list_filter = ["name", "team"]
+    search_fields = ["name", "team__name"]
     inlines = (ProjectMembershipInlineAdmin,)
     filter_horizontal = ("entitlements",)
 
