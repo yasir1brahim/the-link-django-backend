@@ -174,11 +174,6 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
-                "apps.web.context_processors.project_meta",
-                "apps.teams.context_processors.team",
-                "apps.teams.context_processors.user_teams",
-                # this line can be removed if not using google analytics
-                "apps.web.context_processors.google_analytics_id",
             ],
             "loaders": _DEFAULT_LOADERS if DEBUG else _CACHED_LOADERS,
         },
