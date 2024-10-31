@@ -134,14 +134,14 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 if not self.request.user.is_member_of_team(team):
                     raise PermissionDenied("You don't have permission to access projects for this team.")
                 
-                if self.request.user.is_team_admin(team):
-                    queryset = queryset.filter(team_id=team_id)
+                if self.request.user.is_admin_for_team(team):
+                    queryset = self.queryset.filter(team_id=team_id)
                 else:
-                    queryset = queryset.filter(team_id=team_id, members=self.request.user)
+                    queryset = self.queryset.filter(team_id=team_id, members=self.request.user)
             except ValueError:
                 raise DRFValidationError("Invalid team_id. Must be an integer.")
         else:
-            queryset = queryset.filter(members=self.request.user)
+            queryset = self.queryset.filter(members=self.request.user)
 
         return queryset.order_by('name')
 

@@ -14,11 +14,11 @@ class ProjectViewSetQuerySetTests(APITestCase):
         self.User = get_user_model()
         
         # Create users
-        self.user1 = self.User.objects.create_user(
+        self.member_of_both_teams = self.User.objects.create_user(
             username='user1', 
             password='password123'
         )
-        self.user2 = self.User.objects.create_user(
+        self.member_of_team2 = self.User.objects.create_user(
             username='user2', 
             password='password123'
         )
@@ -33,14 +33,24 @@ class ProjectViewSetQuerySetTests(APITestCase):
         
         # Add user1 to team1
         TeamMembership.objects.create(
-            user=self.user1,
+            user=self.member_of_both_teams,
             team=self.team1,
+            role=ROLE_MEMBER
+        )
+        TeamMembership.objects.create(
+            user=self.member_of_both_teams,
+            team=self.team2,
             role=ROLE_MEMBER
         )
         TeamMembership.objects.create(
             user=self.team1_admin,
             team=self.team1,
             role=ROLE_ADMIN
+        )
+        TeamMembership.objects.create(
+            user=self.member_of_team2,
+            team=self.team2,
+            role=ROLE_MEMBER
         )
         
         # Create projects
@@ -62,11 +72,11 @@ class ProjectViewSetQuerySetTests(APITestCase):
 
     def test_user_can_see_member_projects(self):
         """Test that users can see projects where they are members"""
-        self.client.force_authenticate(user=self.user1)
+        self.client.force_authenticate(user=self.member_of_both_teams)
         # Add user1 as member to project2
         ProjectMembership.objects.create(
             project=self.project2,
-            user=self.user1,
+            user=self.member_of_both_teams,
             role=ROLE_MEMBER
         )
         
@@ -80,7 +90,22 @@ class ProjectViewSetQuerySetTests(APITestCase):
 
     def test_filter_by_team_id(self):
         """Test filtering projects by team_id"""
-        self.client.force_authenticate(user=self.user1)
+        self.client.force_authenticate(user=self.member_of_both_teams)
+        ProjectMembership.objects.create(
+            project=self.project1,
+            user=self.member_of_both_teams,
+            role=ROLE_MEMBER
+        )
+        ProjectMembership.objects.create(
+            project=self.project2,
+            user=self.member_of_both_teams,
+            role=ROLE_MEMBER
+        )
+        ProjectMembership.objects.create(
+            project=self.project3,
+            user=self.member_of_both_teams,
+            role=ROLE_MEMBER
+        )
         response = self.client.get(f"{self.url}?team_id={self.team1.id}")
         
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -105,21 +130,21 @@ class ProjectViewSetQuerySetTests(APITestCase):
 
     def test_invalid_team_id_returns_400(self):
         """Test that invalid team_id returns 400 error"""
-        self.client.force_authenticate(user=self.user1)
+        self.client.force_authenticate(user=self.member_of_both_teams)
         response = self.client.get(f"{self.url}?team_id=invalid")
         
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_non_member_team_access_denied(self):
         """Test that accessing projects from non-member team is denied"""
-        self.client.force_authenticate(user=self.user1)
-        response = self.client.get(f"{self.url}?team_id={self.team2.id}")
+        self.client.force_authenticate(user=self.member_of_team2)
+        response = self.client.get(f"{self.url}?team_id={self.team1.id}")
         
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_projects_ordered_by_name(self):
         """Test that projects are returned ordered by name"""
-        self.client.force_authenticate(user=self.user1)
+        self.client.force_authenticate(user=self.member_of_both_teams)
         # Create projects with different names to test ordering
         Project.objects.create(
             name='A Project',
