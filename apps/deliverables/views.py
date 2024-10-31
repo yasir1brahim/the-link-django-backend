@@ -122,7 +122,6 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     def get_queryset(self):
-        queryset = self.queryset.filter(Q(members=self.request.user) | Q(owner=self.request.user))
         # Get the team_id from query parameters
         team_id = self.request.query_params.get('team_id', None)
         
@@ -135,10 +134,15 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 if not self.request.user.is_member_of_team(team):
                     raise PermissionDenied("You don't have permission to access projects for this team.")
                 
-                queryset = queryset.filter(team_id=team_id)
+                if self.request.user.is_team_admin(team):
+                    queryset = queryset.filter(team_id=team_id)
+                else:
+                    queryset = queryset.filter(team_id=team_id, members=self.request.user)
             except ValueError:
                 raise DRFValidationError("Invalid team_id. Must be an integer.")
-        
+        else:
+            queryset = queryset.filter(members=self.request.user)
+
         return queryset.order_by('name')
 
     def perform_create(self, serializer):
