@@ -151,7 +151,6 @@ class BaseImportCommand(BaseCommand):
                 start_date=legacy_project['start_date'],
                 end_date=legacy_project['end_date'],
                 team=self.get_or_create_team(legacy_project['customer_id']),
-                owner=self.get_or_create_user(legacy_project['lead_id']),
                 created_by = self.get_or_create_user(legacy_project['created_by']),
                 procore_id=legacy_project['procore_id'],
                 procore_name=legacy_project['procore_name'],
