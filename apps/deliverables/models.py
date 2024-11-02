@@ -17,6 +17,7 @@ class Project(BaseModel):
 
     name = models.CharField(max_length=256)
     project_number = models.CharField(max_length=256)
+    project_type = models.CharField(max_length=256, blank=True, null=True)
     description = models.TextField(blank=True)
     team = models.ForeignKey("teams.Team", on_delete=models.CASCADE)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="created_projects", blank=True, null=True)

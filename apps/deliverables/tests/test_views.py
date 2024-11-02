@@ -188,6 +188,64 @@ class ProjectViewSetQuerySetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
+class ProjectViewSetTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.User = get_user_model()
+
+        self.user = self.User.objects.create_user(
+            username='user1', 
+            password='password123'
+        )
+        self.team = Team.objects.create(name='Team 1', slug='team-1')
+        TeamMembership.objects.create(
+            user=self.user,
+            team=self.team,
+            role=ROLE_ADMIN
+        )
+
+        self.existing_project = Project.objects.create(
+            name='Existing Project',
+            project_number='123456',
+            team=self.team,
+        )
+
+    def test_create_project(self):
+        """Test that a project can be created"""
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(reverse('project-list'), {
+            'name': 'New Project',
+            'project_number': '789012',
+            'project_type': 'Test Type',
+            'team': self.team.id,
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        project = Project.objects.get(id=response.data['id'])
+        self.assertEqual(project.name, 'New Project')
+        self.assertEqual(project.project_number, '789012')
+        self.assertEqual(project.project_type, 'Test Type')
+        self.assertEqual(project.team, self.team)
+
+    def test_update_project(self):
+        """Test that a project can be updated"""
+        self.client.force_authenticate(user=self.user)
+        response = self.client.put(reverse('project-detail', kwargs={'pk': self.existing_project.id}), {
+            'name': 'Updated Project',
+            'project_number': '111111',
+            'project_type': 'Updated Type',
+            'team': self.team.id,
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        project = Project.objects.get(id=response.data['id'])
+        self.assertEqual(project.name, 'Updated Project')
+        self.assertEqual(project.project_number, '111111')
+        self.assertEqual(project.project_type, 'Updated Type')
+        self.assertEqual(project.team, self.team)
+
 
 class SubmittalItemViewSetTests(APITestCase):
     def setUp(self):
