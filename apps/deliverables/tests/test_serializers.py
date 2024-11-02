@@ -61,7 +61,7 @@ class ProjectReadSerializerTest(TestCase):
             'id', 'name', 'description', 'team', 
             'members', 'entitlements', 'user_limit', 'status',
             'start_date', 'end_date', 'is_archived',
-            'doc_parsed', 'document_details'
+            'doc_parsed', 'document_details', 'project_number'
         }
         self.assertEqual(set(serializer.data.keys()), expected_fields)
 
@@ -214,6 +214,7 @@ class TestProjectWriteSerializer(TestCase):
         
         self.project_data = {
             'name': 'Test Project',
+            'project_number': '123456',
             'description': 'Test Description',
             'team': self.team.id,
             'members': [

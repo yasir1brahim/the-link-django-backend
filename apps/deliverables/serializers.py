@@ -35,7 +35,7 @@ class BaseProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = ['id', 'name', 'description', 'team', 'members', 'entitlements',
-                   'user_limit', 'status', 'start_date', 'end_date', 'is_archived']
+                   'user_limit', 'status', 'start_date', 'end_date', 'is_archived', 'project_number']
 
     members = ProjectMembershipSerializer(source="project_memberships", many=True)
     team = serializers.ReadOnlyField(source="team.id")
