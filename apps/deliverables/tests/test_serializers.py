@@ -61,7 +61,8 @@ class ProjectReadSerializerTest(TestCase):
             'id', 'name', 'description', 'team', 
             'members', 'entitlements', 'user_limit', 'status',
             'start_date', 'end_date', 'is_archived',
-            'doc_parsed', 'document_details', 'project_number'
+            'doc_parsed', 'document_details', 'project_number',
+            'project_type'
         }
         self.assertEqual(set(serializer.data.keys()), expected_fields)
 
@@ -235,6 +236,16 @@ class TestProjectWriteSerializer(TestCase):
         self.assertEqual(project.team, self.team)
         self.assertEqual(project.project_memberships.count(), 1)
         self.assertEqual(project.project_memberships.first().user, self.user1)
+
+    def test_create_project_without_members(self):
+        """Test creating a project without members"""
+        self.project_data['members'] = []
+        serializer = ProjectWriteSerializer(data=self.project_data)
+        self.assertTrue(serializer.is_valid())
+        project = serializer.save()
+        self.assertEqual(project.name, 'Test Project')
+        self.assertEqual(project.team, self.team)
+        self.assertEqual(project.project_memberships.count(), 0)
 
     def test_validate_members_must_be_in_team(self):
         """Test validation that members must belong to the project's team"""
