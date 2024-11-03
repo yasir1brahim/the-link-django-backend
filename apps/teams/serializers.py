@@ -34,7 +34,7 @@ class TeamSerializer(serializers.ModelSerializer):
         required=False,
         validators=[UniqueValidator(queryset=Team.objects.all())],
     )
-    members = MembershipSerializer(source="sorted_memberships", many=True, read_only=True)
+    members = serializers.SerializerMethodField()
     invitations = InvitationSerializer(many=True, read_only=True, source="pending_invitations")
     project_count = serializers.SerializerMethodField()
     dashboard_url = serializers.ReadOnlyField()
@@ -55,6 +55,14 @@ class TeamSerializer(serializers.ModelSerializer):
             "subscription",
             "has_active_subscription",
         )
+
+    def get_members(self, obj) -> list[Membership]:
+        if is_admin(self.context["request"].user, obj):
+            return MembershipSerializer(obj.sorted_memberships, many=True).data
+        return MembershipSerializer(
+            [m for m in obj.sorted_memberships if m.user == self.context["request"].user],
+            many=True,
+        ).data
 
     def get_project_count(self, obj) -> int:
         return obj.project_set.count()

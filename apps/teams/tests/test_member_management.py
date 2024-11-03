@@ -9,7 +9,7 @@ from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
 from apps.users.models import CustomUser
 
 
-class TeamMemberManagementViewTest(MessagesTestMixin, TestCase):
+class TeamMemberManagementViewSetTest(MessagesTestMixin, TestCase):
     """
     Tests that exercise the various bits of view logic surrounding who is allowed to modify team memberships
     and remove people / leave teams.
