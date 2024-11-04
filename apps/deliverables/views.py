@@ -158,10 +158,19 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def archive(self, request, pk=None):
         """Toggle the archive status of a project."""
         project = self.get_object()
-        project.is_archived = not project.is_archived
-        project.status = Project.PROJECT_STATUS_CLOSED if project.is_archived else Project.PROJECT_STATUS_OPEN
+        
+        if 'action' in request.data and request.data['action'] == 'restore':
+            # Restore the project
+            project.is_archived = False
+            project.status = Project.PROJECT_STATUS_OPEN if project.status == Project.PROJECT_STATUS_ARCHIVED else project.status
+            status_message = "unarchived"
+        else:
+            # Archive the project
+            project.is_archived = True
+            project.status = Project.PROJECT_STATUS_ARCHIVED
+            status_message = "archived"
+        
         project.save()
-        status_message = "archived and closed" if project.is_archived else "unarchived and opened"
         return Response(
             {"status": f"Project {status_message} successfully."},
             status=status.HTTP_200_OK
