@@ -1,12 +1,13 @@
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
+from drf_writable_nested import WritableNestedModelSerializer
 
 from apps.subscriptions.serializers import SubscriptionSerializer
 
 from .helpers import get_next_unique_team_slug
-from .models import Team, Membership, Invitation
+from .models import Team, Membership, Invitation, TeamProfile
 from .roles import is_admin
-
+from django.contrib.auth import get_user_model
 
 class MembershipSerializer(serializers.ModelSerializer):
     user_id = serializers.ReadOnlyField(source="user.id")
@@ -29,7 +30,43 @@ class InvitationSerializer(serializers.ModelSerializer):
         fields = ("id", "team", "email", "role", "invited_by", "is_accepted")
 
 
-class TeamSerializer(serializers.ModelSerializer):
+# Realted Team Serializer
+User = get_user_model()
+class TeamProfileSerializer(serializers.ModelSerializer):
+    account_owner_name = serializers.CharField(write_only=False, required=False)
+    class Meta:
+        model = TeamProfile
+        fields = ['account_owner', 'account_owner_name', 'email_id', 'address', 'account_id', 'password', 'phone']
+        extra_kwargs = {'password': {'write_only': True}}
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        owner = instance.account_owner
+        if owner:
+            representation['account_owner_name'] = owner.get_full_name() or owner.username or owner.email
+        return representation
+    
+    def update(self, instance, validated_data):
+        account_owner_name = validated_data.pop('account_owner_name', None)
+        account_owner_email = validated_data.get('email_id', None)
+
+        if account_owner_email:
+            try:
+                owner = User.objects.get(email=account_owner_email)
+
+                if account_owner_name:
+                    name_parts = account_owner_name.split(" ", 1)
+                    owner.first_name = name_parts[0]
+                    owner.last_name = name_parts[1] if len(name_parts) > 1 else ""
+                    owner.save()
+
+                instance.account_owner = owner
+            except User.DoesNotExist:
+                raise serializers.ValidationError({"email_id": "User with this email does not exist."})
+
+        return super().update(instance, validated_data)
+    
+class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer):
     slug = serializers.SlugField(
         required=False,
         validators=[UniqueValidator(queryset=Team.objects.all())],
@@ -40,6 +77,7 @@ class TeamSerializer(serializers.ModelSerializer):
     dashboard_url = serializers.ReadOnlyField()
     is_admin = serializers.SerializerMethodField()
     subscription = SubscriptionSerializer(source="wrapped_subscription", read_only=True)
+    profile = TeamProfileSerializer()
 
     class Meta:
         model = Team
@@ -54,6 +92,8 @@ class TeamSerializer(serializers.ModelSerializer):
             "is_admin",
             "subscription",
             "has_active_subscription",
+            "profile",
+            "legacy_logo_url",
         )
 
     def get_members(self, obj) -> list[Membership]:

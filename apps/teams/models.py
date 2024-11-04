@@ -166,3 +166,16 @@ class Flag(AbstractUserFlag):
         team_ids = set(self.teams.all().values_list("pk", flat=True))
         cache.add(cache_key, team_ids or CACHE_EMPTY)
         return team_ids
+
+# Related Team Model
+class TeamProfile(models.Model):
+    team = models.OneToOneField(Team, on_delete=models.CASCADE, related_name="profile")
+    account_owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    email_id = models.EmailField(blank=True, null=True)
+    address = models.CharField(max_length=256, blank=True, null=True)
+    account_id = models.CharField(max_length=100, blank=True, null=True)
+    password = models.CharField(max_length=100, blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
+
+    def __str__(self):
+        return f"Profile for {self.team.name}"

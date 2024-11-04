@@ -9,6 +9,8 @@ from rest_framework.response import Response
 from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework import status
 from apps.api.permissions import IsAuthenticatedOrHasUserAPIKey
+from rest_framework.decorators import action
+from django.core.files.storage import default_storage
 
 from ..invitations import send_invitation, process_invitation
 from ..models import Team, Invitation, Membership
@@ -35,6 +37,7 @@ class AnonymousRetrieveOnlyPermission(BasePermission):
     retrieve=extend_schema(operation_id="teams_retrieve"),
     update=extend_schema(operation_id="teams_update"),
     partial_update=extend_schema(operation_id="teams_partial_update"),
+    upload_logo=extend_schema(operation_id="upload_logo"),
 )
 class TeamViewSet(
     mixins.ListModelMixin,
@@ -51,6 +54,37 @@ class TeamViewSet(
         return self.request.user.teams.order_by("name")
 
 
+    def retrieve(self, request, *args, **kwargs):
+        team_id = kwargs.get("pk")
+        team = get_object_or_404(Team, id=team_id)
+
+        if not team.membership_set.filter(user=request.user, role=ROLE_ADMIN).exists():
+            return Response({
+                "detail": "You do not have permission to view this team.",
+            }, status=403)
+        
+        serializer = self.get_serializer(team)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['post'], url_path='upload-logo')
+    def upload_logo(self, request, pk=None):
+        team = self.get_object()
+        file = request.FILES.get('file')
+
+        if not file:
+            return Response({'error': 'No file uploaded.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Save the file to the media directory
+        file_path = default_storage.save(f'logos/{file.name}', file)
+        file_url = f"{request.build_absolute_uri('/media/')}{file_path}"
+
+        # Update the team's legacy_logo_url
+        team.legacy_logo_url = file_url
+        team.save()
+
+        return Response({'file_url': file_url}, status=status.HTTP_201_CREATED)
+            
+    
 @extend_schema_view(
     update=extend_schema(operation_id="memberships_update"),
     partial_update=extend_schema(operation_id="memberships_partial_update"),
