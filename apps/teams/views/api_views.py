@@ -83,7 +83,7 @@ class MembershipViewSet(
 class InvitationViewSet(viewsets.ModelViewSet):
     queryset = Invitation.objects.all()
     serializer_class = InvitationSerializer
-    permission_classes = (AnonymousRetrieveOnlyPermission,)
+    permission_classes = (AnonymousRetrieveOnlyPermission, TeamModelAccessPermissions)
 
     @property
     def team(self):
@@ -124,6 +124,11 @@ class InvitationViewSet(viewsets.ModelViewSet):
 
         invitation = serializer.save(invited_by=self.request.user)
         send_invitation(invitation)
+
+    def list(self, request, *args, **kwargs):
+        if not request.user.is_admin_for_team(self.team):
+            raise PermissionDenied()
+        return super().list(request, *args, **kwargs)
 
 
 @api_view(['POST'])

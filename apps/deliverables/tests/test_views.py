@@ -422,6 +422,10 @@ class SubmittalItemViewSetTests(APITestCase):
             username='user1', 
             password='password123'
         )
+        self.non_member = self.User.objects.create_user(
+            username='non_member', 
+            password='password123'
+        )
 
         self.team = Team.objects.create(name='Team 1', slug='team-1')
         TeamMembership.objects.create(
@@ -453,3 +457,9 @@ class SubmittalItemViewSetTests(APITestCase):
         print(f"response.data: {response.data}")
         self.assertEqual(len(response.data['message']), 1)
         self.assertEqual(response.data['message'][0]['id'], self.submittal_item.id)
+
+    def test_user_cannot_see_submittal_items_for_other_projects(self):
+        """Test that users cannot see submittal items for projects they are not a member of"""
+        self.client.force_authenticate(user=self.non_member)
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
