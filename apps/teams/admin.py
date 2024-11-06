@@ -67,7 +67,6 @@ class TeamProfileAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        # Optionally annotate or filter queryset as needed
         return qs
 
     def __str__(self):

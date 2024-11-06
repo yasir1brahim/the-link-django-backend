@@ -167,7 +167,6 @@ class Flag(AbstractUserFlag):
         cache.add(cache_key, team_ids or CACHE_EMPTY)
         return team_ids
 
-# Related Team Model
 class TeamProfile(models.Model):
     team = models.OneToOneField(Team, on_delete=models.CASCADE, related_name="profile")
     account_owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)

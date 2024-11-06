@@ -30,7 +30,6 @@ class InvitationSerializer(serializers.ModelSerializer):
         fields = ("id", "team", "email", "role", "invited_by", "is_accepted")
 
 
-# Realted Team Serializer
 User = get_user_model()
 class TeamProfileSerializer(serializers.ModelSerializer):
     account_owner_name = serializers.CharField(write_only=False, required=False)
@@ -42,28 +41,29 @@ class TeamProfileSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         representation = super().to_representation(instance)
         owner = instance.account_owner
-        if owner:
-            representation['account_owner_name'] = owner.get_full_name() or owner.username or owner.email
+        representation['account_owner_name'] = (owner.get_full_name() or owner.username or owner.email if owner else None )
         return representation
     
+    def _get_user_by_email(self, email):
+        try:
+            return User.objects.get(email=email)
+        except User.DoesNotExist:
+            raise serializers.ValidationError({"email_id": "User with this email does not exist."})
+
+    def _update_user_name(self, user, full_name):
+        name_parts = full_name.split(" ", 1)
+        user.first_name = name_parts[0]
+        user.last_name = name_parts[1] if len(name_parts) > 1 else ""
+        user.save()
+
     def update(self, instance, validated_data):
         account_owner_name = validated_data.pop('account_owner_name', None)
-        account_owner_email = validated_data.get('email_id', None)
-
+        account_owner_email = validated_data.get('email_id')
         if account_owner_email:
-            try:
-                owner = User.objects.get(email=account_owner_email)
-
-                if account_owner_name:
-                    name_parts = account_owner_name.split(" ", 1)
-                    owner.first_name = name_parts[0]
-                    owner.last_name = name_parts[1] if len(name_parts) > 1 else ""
-                    owner.save()
-
-                instance.account_owner = owner
-            except User.DoesNotExist:
-                raise serializers.ValidationError({"email_id": "User with this email does not exist."})
-
+            owner = self._get_user_by_email(account_owner_email)
+        if account_owner_name:
+            self._update_user_name(owner, account_owner_name)
+        instance.account_owner = owner
         return super().update(instance, validated_data)
     
 class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer):
