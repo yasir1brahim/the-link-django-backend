@@ -158,23 +158,19 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def archive(self, request, pk=None):
         """Toggle the archive status of a project."""
         project = self.get_object()
-        
-        if 'action' in request.data and request.data['action'] == 'restore':
-            # Restore the project
+        action_type = request.data.get('action', 'archive').lower()
+        if action_type == 'restore':
             project.is_archived = False
-            project.status = Project.PROJECT_STATUS_OPEN if project.status == Project.PROJECT_STATUS_ARCHIVED else project.status
+            project.status = ( Project.PROJECT_STATUS_OPEN if project.status == Project.PROJECT_STATUS_ARCHIVED else project.status )
             status_message = "unarchived"
         else:
-            # Archive the project
             project.is_archived = True
             project.status = Project.PROJECT_STATUS_ARCHIVED
             status_message = "archived"
-        
+
         project.save()
-        return Response(
-            {"status": f"Project {status_message} successfully."},
-            status=status.HTTP_200_OK
-        )
+        return Response( {"status": f"Project {status_message} successfully."},
+        status=status.HTTP_200_OK )
 
 class SubmittalItemPagination(PageNumberPagination):
     page_query_param = 'page_number'
