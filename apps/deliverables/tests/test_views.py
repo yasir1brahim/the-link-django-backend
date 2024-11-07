@@ -5,8 +5,9 @@ from rest_framework import status
 from django.contrib.auth import get_user_model
 from apps.teams.models import Team, Membership as TeamMembership
 from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
-from apps.deliverables.models import Project, ProjectMembership, SubmittalItem, MasterFormatSection
+from apps.deliverables.models import Project, ProjectMembership, SubmittalItem, MasterFormatSection, ROLE_PROJECT_ADMIN, ROLE_PROJECT_MEMBER
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 class ProjectViewSetQuerySetTests(APITestCase):
     def setUp(self):
@@ -77,7 +78,7 @@ class ProjectViewSetQuerySetTests(APITestCase):
         ProjectMembership.objects.create(
             project=self.project2,
             user=self.member_of_both_teams,
-            role=ROLE_MEMBER
+            role=ROLE_PROJECT_MEMBER
         )
         
         response = self.client.get(self.url)
@@ -94,17 +95,17 @@ class ProjectViewSetQuerySetTests(APITestCase):
         ProjectMembership.objects.create(
             project=self.project1,
             user=self.member_of_both_teams,
-            role=ROLE_MEMBER
+            role=ROLE_PROJECT_MEMBER
         )
         ProjectMembership.objects.create(
             project=self.project2,
             user=self.member_of_both_teams,
-            role=ROLE_MEMBER
+            role=ROLE_PROJECT_MEMBER
         )
         ProjectMembership.objects.create(
             project=self.project3,
             user=self.member_of_both_teams,
-            role=ROLE_MEMBER
+            role=ROLE_PROJECT_MEMBER
         )
         response = self.client.get(f"{self.url}?team_id={self.team1.id}")
         
@@ -140,7 +141,7 @@ class ProjectViewSetQuerySetTests(APITestCase):
         ProjectMembership.objects.create(
             project=self.project1,
             user=self.member_of_both_teams,
-            role=ROLE_MEMBER
+            role=ROLE_PROJECT_MEMBER
         )
         response = self.client.get(reverse('project-detail', kwargs={'pk': self.project1.id}))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -193,15 +194,24 @@ class ProjectViewSetTests(APITestCase):
         self.client = APIClient()
         self.User = get_user_model()
 
-        self.user = self.User.objects.create_user(
-            username='user1', 
+        self.company_admin = self.User.objects.create_user(
+            username='company_admin', 
+            password='password123'
+        )
+        self.company_member = self.User.objects.create_user(
+            username='company_member', 
             password='password123'
         )
         self.team = Team.objects.create(name='Team 1', slug='team-1')
         TeamMembership.objects.create(
-            user=self.user,
+            user=self.company_admin,
             team=self.team,
             role=ROLE_ADMIN
+        )
+        TeamMembership.objects.create(
+            user=self.company_member,
+            team=self.team,
+            role=ROLE_MEMBER
         )
 
         self.existing_project = Project.objects.create(
@@ -210,9 +220,9 @@ class ProjectViewSetTests(APITestCase):
             team=self.team,
         )
 
-    def test_create_project(self):
-        """Test that a project can be created"""
-        self.client.force_authenticate(user=self.user)
+    def test_company_admin_can_create_project(self):
+        """Test that a company admin can create a project"""
+        self.client.force_authenticate(user=self.company_admin)
         response = self.client.post(reverse('project-list'), {
             'name': 'New Project',
             'project_number': '789012',
@@ -228,9 +238,22 @@ class ProjectViewSetTests(APITestCase):
         self.assertEqual(project.project_type, 'Test Type')
         self.assertEqual(project.team, self.team)
 
-    def test_update_project(self):
-        """Test that a project can be updated"""
-        self.client.force_authenticate(user=self.user)
+    def test_company_non_admin_cannot_create_project(self):
+        """Test that a company non-admin cannot create a project"""
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.post(reverse('project-list'), {
+            'name': 'New Project',
+            'project_number': '789012',
+            'project_type': 'Test Type',
+            'team': self.team.id,
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+    def test_company_admin_can_update_project(self):
+        """Test that a company admin can update a project"""
+        self.client.force_authenticate(user=self.company_admin)
         response = self.client.put(reverse('project-detail', kwargs={'pk': self.existing_project.id}), {
             'name': 'Updated Project',
             'project_number': '111111',
@@ -246,6 +269,149 @@ class ProjectViewSetTests(APITestCase):
         self.assertEqual(project.project_type, 'Updated Type')
         self.assertEqual(project.team, self.team)
 
+    def test_project_admin_can_update_project(self):
+        """Test that a project admin can update a project"""
+        ProjectMembership.objects.create(
+            project=self.existing_project,
+            user=self.company_member,
+            role=ROLE_PROJECT_ADMIN
+        )
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.put(reverse('project-detail', kwargs={'pk': self.existing_project.id}), {
+            'name': 'Updated Project',
+            'project_number': '111111',
+            'project_type': 'Updated Type',
+            'team': self.team.id,
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        project = Project.objects.get(id=response.data['id'])
+        self.assertEqual(project.name, 'Updated Project')
+        self.assertEqual(project.project_number, '111111')
+        self.assertEqual(project.project_type, 'Updated Type')
+        self.assertEqual(project.team, self.team)
+
+    def test_project_member_cannot_update_project(self):
+        """Test that a project admin can update a project"""
+        ProjectMembership.objects.create(
+            project=self.existing_project,
+            user=self.company_member,
+            role=ROLE_PROJECT_MEMBER
+        )
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.put(reverse('project-detail', kwargs={'pk': self.existing_project.id}), {
+            'name': 'Updated Project',
+            'project_number': '111111',
+            'project_type': 'Updated Type',
+            'team': self.team.id,
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_company_admin_can_delete_project(self):
+        """Test that a company admin can delete a project"""
+        self.client.force_authenticate(user=self.company_admin)
+        response = self.client.delete(reverse('project-detail', kwargs={'pk': self.existing_project.id}))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+        self.assertFalse(Project.objects.filter(id=self.existing_project.id).exists())
+
+    def test_company_member_cannot_delete_project(self):
+        """Test that a company member cannot delete a project"""
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.delete(reverse('project-detail', kwargs={'pk': self.existing_project.id}))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_company_member_cannot_delete_project_even_if_project_admin(self):
+        """Test that a company member cannot delete a project even if they are a project admin"""
+        ProjectMembership.objects.create(
+            project=self.existing_project,
+            user=self.company_member,
+            role=ROLE_PROJECT_ADMIN
+        )
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.delete(reverse('project-detail', kwargs={'pk': self.existing_project.id}))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class UploadFileTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.User = get_user_model()
+
+        self.company_admin = self.User.objects.create_user(
+            username='company_admin', 
+            password='password123'
+        )
+        self.company_member = self.User.objects.create_user(
+            username='company_member', 
+            password='password123'
+        )
+        self.team = Team.objects.create(name='Team 1', slug='team-1')
+        TeamMembership.objects.create(
+            user=self.company_admin,
+            team=self.team,
+            role=ROLE_ADMIN
+        )
+        TeamMembership.objects.create(
+            user=self.company_member,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+
+        self.existing_project = Project.objects.create(
+            name='Existing Project',
+            project_number='123456',
+            team=self.team,
+        )
+
+        self.mock_file = SimpleUploadedFile(
+            name='test_file.txt',
+            content=b'This is some test file content',
+            content_type='text/plain'
+        )
+
+    def test_unauthenticated_user_cannot_upload_file(self):
+        """Test that an unauthenticated user cannot upload a file"""
+        response = self.client.post(reverse('upload_file'), {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+        })
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_project_member_can_upload_file_to_their_project(self):
+        """Test that a project member can upload a file to their project"""
+        ProjectMembership.objects.create(
+            project=self.existing_project,
+            user=self.company_member,
+            role=ROLE_PROJECT_MEMBER
+        )
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.post(reverse('upload_file'), {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_company_admin_can_upload_file_to_project(self):
+        """Test that a company admin can upload a file to a project"""
+        self.client.force_authenticate(user=self.company_admin)
+        response = self.client.post(reverse('upload_file'), {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_company_member_cannot_upload_file_to_project_they_are_not_a_member_of(self):
+        """Test that a company member cannot upload a file to a project they are not a member of"""
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.post(reverse('upload_file'), {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+        })
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
 
 class SubmittalItemViewSetTests(APITestCase):
     def setUp(self):
@@ -254,6 +420,10 @@ class SubmittalItemViewSetTests(APITestCase):
 
         self.user = self.User.objects.create_user(
             username='user1', 
+            password='password123'
+        )
+        self.non_member = self.User.objects.create_user(
+            username='non_member', 
             password='password123'
         )
 
@@ -271,7 +441,7 @@ class SubmittalItemViewSetTests(APITestCase):
         ProjectMembership.objects.create(
             project=self.project,
             user=self.user,
-            role=ROLE_MEMBER
+            role=ROLE_PROJECT_MEMBER
         )
 
         self.submittal_item = SubmittalItem.objects.create(
@@ -287,3 +457,9 @@ class SubmittalItemViewSetTests(APITestCase):
         print(f"response.data: {response.data}")
         self.assertEqual(len(response.data['message']), 1)
         self.assertEqual(response.data['message'][0]['id'], self.submittal_item.id)
+
+    def test_user_cannot_see_submittal_items_for_other_projects(self):
+        """Test that users cannot see submittal items for projects they are not a member of"""
+        self.client.force_authenticate(user=self.non_member)
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

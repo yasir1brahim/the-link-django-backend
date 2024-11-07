@@ -11,9 +11,26 @@ class ProjectAccessPermissions(permissions.BasePermission):
     Members of the project still have read-only access.
     """
 
+    def has_permission(self, request, view):
+        # Allow read operations for any authenticated user
+        if request.method in permissions.SAFE_METHODS:
+            return request.user.is_authenticated
+        
+        if request.method == 'POST':
+            team_id = request.data.get('team')
+            if not team_id:
+                return False
+            return request.user.is_admin_for_team(team_id)
+            
+        # For other write operations, let has_object_permission handle it
+        return True
+
+
     def has_object_permission(self, request, view, obj):
         # Read permissions are allowed to any request
         # so we'll always allow GET, HEAD or OPTIONS requests for members
+        if request.method == 'DELETE':
+            return request.user.is_admin_for_team(obj.team)
         return self._view_for_members_edit_for_admins(request, obj)
     
 
