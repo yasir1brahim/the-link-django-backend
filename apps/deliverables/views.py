@@ -161,11 +161,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
         action_type = request.data.get('action', 'archive').lower()
         if action_type == 'restore':
             project.is_archived = False
-            project.status = ( Project.PROJECT_STATUS_OPEN if project.status == Project.PROJECT_STATUS_ARCHIVED else project.status )
             status_message = "unarchived"
         else:
             project.is_archived = True
-            project.status = Project.PROJECT_STATUS_ARCHIVED
             status_message = "archived"
 
         project.save()

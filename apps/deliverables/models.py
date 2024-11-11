@@ -8,11 +8,9 @@ from django.conf import settings
 class Project(BaseModel):
     PROJECT_STATUS_OPEN = "open"
     PROJECT_STATUS_CLOSED = "closed"
-    PROJECT_STATUS_ARCHIVED = "archived"
     PROJECT_STATUS_CHOICES = (
         (PROJECT_STATUS_OPEN, "Open"),
         (PROJECT_STATUS_CLOSED, "Closed"),
-        (PROJECT_STATUS_ARCHIVED, "Archived")
     )
 
     legacy_id = models.IntegerField(blank=True, null=True)
