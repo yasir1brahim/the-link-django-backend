@@ -198,3 +198,12 @@ class SubmittalItemList(BaseModel):
 
     def __str__(self):
         return self.name
+
+
+class ExcelExportHeader(BaseModel):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="excel_export_header")
+    options = models.JSONField(blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", )

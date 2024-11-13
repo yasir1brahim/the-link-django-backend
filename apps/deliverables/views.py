@@ -17,24 +17,29 @@ from django.db.models import Q, Func, F
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import generics, status
 from rest_framework.permissions import BasePermission
 from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.decorators import action
 
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from drf_spectacular.types import OpenApiTypes
 
 from .serializers import (ProjectReadSerializer, ProjectWriteSerializer, FileUploadSerializer, SubmittalItemReadSerializer, SubmittalItemWriteSerializer,
-                          SubmittalItemListSerializer)
+                          SubmittalItemListSerializer, ExcelExportHeaderSerializer)
 from rest_framework import viewsets
-from .models import (Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList, MasterFormatSection, SpecSection, DocProcessingStatus)
+from .models import (Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList, MasterFormatSection, SpecSection, DocProcessingStatus, ExcelExportHeader)
 from apps.teams.models import Team
 from .permissions import ProjectAccessPermissions, SubmittalItemAccessPermissions
 import logging
 from typing import TypedDict, Optional, List
 from enum import Enum
-
+import openpyxl
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+from django.http import HttpResponse
+from .constants import masterformat_to_section_title_map
 
 
 logger = logging.getLogger(__name__)
@@ -218,6 +223,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         order_col = self.request.query_params.get('order_col')
         order = self.request.query_params.get('order') or 'asc'
         list_id = self.request.query_params.get('list_id')
+        records = self.request.query_params.getlist('records[]')
 
         filters = {}
         try:
@@ -268,6 +274,10 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         
         if list_id:
             queryset = queryset.filter(submittal_lists__id=list_id)
+        
+        if len(records) > 0 and records[0] != 'All':
+            records = [int(record) for record in records]
+            queryset = queryset.filter(id__in=records)
 
         return queryset
             
@@ -389,6 +399,225 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             return Response({'deleted_count': deleted_count})
         return super().destroy(request, *args, **kwargs)
 
+    def export_to_xlsx(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        header_options = []
+        try:
+            excel_header = ExcelExportHeader.objects.get(user=request.user)
+            filtered_options = [item for item in excel_header.options if item['default']]
+            idx = 0
+            for filtered_option in filtered_options:
+                opt = {
+                    'col': idx,
+                    'name': filtered_option['name'],
+                    'width': 75 if filtered_option['name'] == 'Submittal Description' else 25
+                }
+                header_options.append(opt)
+                idx = idx + 1
+        except ExcelExportHeader.DoesNotExist:
+            pass
+
+        # Create a workbook and select the active worksheet
+        workbook = openpyxl.Workbook()
+        worksheet = workbook.active
+        worksheet.title = "Submittal Items"
+        # Define the styles
+        text_alignment = Alignment(wrap_text=True, vertical='center')
+        header_alignment = Alignment(wrap_text=True, vertical='center')
+        header_font = Font(bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='202a44', end_color='202a44', fill_type='solid')
+        header_border = Border(right=Side(border_style='thin', color='FFFFFF'))
+        # Define the headers
+        if len(header_options) == 0:
+            headers = ['Submittal #', 'Spec Section', 'Section Title', 'Paragraph', 'Submittal Type',
+                    'Submittal Title', 'Submittal Description']
+            worksheet.append(headers)
+            for col in range(1, len(headers) + 1):
+                cell = worksheet.cell(row=1, column=col)
+                cell.alignment = header_alignment
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.border = header_border
+        else:
+            for header_option in header_options:
+                cell = worksheet.cell(row=1, column=header_option['col'] + 1)
+                cell.value = header_option['name']
+                cell.alignment = header_alignment
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.border = header_border
+
+        # Write data to the worksheet
+        row_idx = 2
+        for item in queryset:
+            if len(header_options) == 0:
+                row = [
+                    item.submittal_number,
+                    item.masterformat_section.masterformat_number,
+                    item.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(item.masterformat_section.masterformat_number, 'Custom Title'),
+                    item.paragraph_number,
+                    item.submittal_type,
+                    item.submittal_description,
+                    item.submittal_content
+                ]
+                worksheet.append(row)
+                for col in range(1, len(row) + 1):
+                    cell = worksheet.cell(row=row_idx, column=col)
+                    cell.alignment = text_alignment
+            else:
+                for header_option in header_options:
+                    field_value = ''
+                    if header_option['name'] == 'Submittal #':
+                        field_value = item.submittal_number
+                    elif header_option['name'] == 'Spec Section':
+                        field_value = item.masterformat_section.masterformat_number
+                    elif header_option['name'] == 'Section Title':
+                        field_value = item.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(item.masterformat_section.masterformat_number, 'Custom Title')
+                    elif header_option['name'] == 'Paragraph':
+                        field_value = item.paragraph_number
+                    elif header_option['name'] == 'Submittal Type':
+                        field_value = item.submittal_type
+                    elif header_option['name'] == 'Submittal Title':
+                        field_value = item.submittal_description
+                    elif header_option['name'] == 'Submittal Description':
+                        field_value = item.submittal_content
+                    cell = worksheet.cell(row=row_idx, column=header_option['col'] + 1)
+                    cell.value = field_value
+                    cell.alignment = text_alignment
+            row_idx += 1
+
+        # Adjust column widths
+        if len(header_options) == 0:
+            for col_num, col in enumerate(worksheet.columns, 1):
+                max_length = 0
+                column = get_column_letter(col_num)
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(cell.value)
+                    except:
+                        pass
+                adjusted_width = (max_length + 2)
+                worksheet.column_dimensions[column].width = adjusted_width
+        else:
+            char = 'A'
+            for header_option in header_options:
+                worksheet.column_dimensions[char].width = header_option['width']
+                char = chr(ord(char) + 1)
+
+        # Create a response object and set the appropriate headers
+        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = 'attachment; filename=submittal_items.xlsx'
+        
+        # Save the workbook to the response
+        workbook.save(response)
+        
+        return response
+
+    @extend_schema(
+        summary="Export Submittal Items to XLSX",
+        description="Export the filtered submittal items to an XLSX file.",
+        parameters=[
+            OpenApiParameter(
+                name='filters[<column_name>]',
+                description='Filters for submittal items, in the format filters[spec_section]=123,abc',
+                required=False,
+                type=OpenApiTypes.STR,
+                enum=allowed_filter_keys
+            ),
+            OpenApiParameter(
+                name='records[]',
+                description='A list of submittal item IDs to export or All.',
+                required=True,
+                type=OpenApiTypes.OBJECT,
+                default=['All']
+            )
+        ],
+        responses={
+            200: OpenApiResponse(
+                description="XLSX file containing the exported submittal items"
+            ),
+            400: OpenApiResponse(description="Bad Request"),
+            401: OpenApiResponse(description="Unauthorized"),
+            403: OpenApiResponse(description="Forbidden"),
+            404: OpenApiResponse(description="Not Found"),
+        }
+    )
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request, *args, **kwargs):
+        return self.export_to_xlsx(request, *args, **kwargs)
+
+    def export_to_jet_build(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        header_options = []
+
+        # Create a workbook and select the active worksheet
+        workbook = openpyxl.Workbook()
+        worksheet = workbook.active
+        worksheet.title = "Submittal Items"
+        # Define the styles
+        text_alignment = Alignment(wrap_text=True, vertical='center')
+
+        # Write data to the worksheet
+        row_idx = 1
+        for item in queryset:
+            row = [
+                item.masterformat_section.masterformat_number[:2],
+                ' '.join([item.masterformat_section.masterformat_number[i:i+2] for i in range(2, len(item.masterformat_section.masterformat_number), 2)]),
+                item.submittal_description
+            ]
+            worksheet.append(row)
+            for col in range(1, len(row) + 1):
+                cell = worksheet.cell(row=row_idx, column=col)
+                cell.alignment = text_alignment
+            row_idx += 1
+
+        # Adjust column widths
+        worksheet.column_dimensions['A'].width = 15
+        worksheet.column_dimensions['B'].width = 15
+        worksheet.column_dimensions['C'].width = 100
+
+        # Create a response object and set the appropriate headers
+        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = 'attachment; filename=submittal_items.xlsx'
+        
+        # Save the workbook to the response
+        workbook.save(response)
+        
+        return response
+
+    @extend_schema(
+        summary="Export Submittal Items to Jet Build XLSX",
+        description="Export the filtered submittal items to an XLSX file. XLSX file doesn't have header and it's formatted for Jet Build.",
+        parameters=[
+            OpenApiParameter(
+                name='filters[<column_name>]',
+                description='Filters for submittal items, in the format filters[spec_section]=123,abc',
+                required=False,
+                type=OpenApiTypes.STR,
+                enum=allowed_filter_keys
+            ),
+            OpenApiParameter(
+                name='records[]',
+                description='A list of submittal item IDs to export or All.',
+                required=True,
+                type=OpenApiTypes.OBJECT,
+                default=['All']
+            )
+        ],
+        responses={
+            200: OpenApiResponse(
+                description="XLSX file containing the exported submittal items"
+            ),
+            400: OpenApiResponse(description="Bad Request"),
+            401: OpenApiResponse(description="Unauthorized"),
+            403: OpenApiResponse(description="Forbidden"),
+            404: OpenApiResponse(description="Not Found"),
+        }
+    )
+    @action(detail=False, methods=['get'], url_path='export-jet-build')
+    def export_jet_build(self, request, *args, **kwargs):
+        return self.export_to_jet_build(request, *args, **kwargs)
 
 
 def get_file_hash(uploaded_file):
@@ -618,3 +847,55 @@ class SubmittalItemListViewSet(viewsets.ModelViewSet):
         project_id = self.kwargs.get('project_id')
         return self.queryset.filter(project_id=project_id)
 
+
+class UpsertExcelExportHeaderView(generics.GenericAPIView):
+    serializer_class = ExcelExportHeaderSerializer
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Upsert Excel Export Header",
+        description="Upsert the Excel export header options for the authenticated user.",
+        request=ExcelExportHeaderSerializer,
+        responses={
+            200: OpenApiResponse(
+                description="Excel export header options upserted successfully",
+                response=ExcelExportHeaderSerializer
+            ),
+            400: OpenApiResponse(description="Bad Request"),
+            401: OpenApiResponse(description="Unauthorized"),
+        }
+    )
+    def post(self, request, *args, **kwargs):
+        user = request.user
+        options = request.data.get('options', {})
+        excel_export_header, created = ExcelExportHeader.objects.update_or_create(
+            user=user,
+            defaults={'options': options}
+        )
+        serializer = self.get_serializer(excel_export_header)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class GetExcelExportHeaderView(generics.RetrieveAPIView):
+    serializer_class = ExcelExportHeaderSerializer
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Get Excel Export Header",
+        description="Retrieve the Excel export header options for the authenticated user.",
+        responses={
+            200: OpenApiResponse(
+                description="Excel export header options retrieved successfully",
+                response=ExcelExportHeaderSerializer
+            ),
+            401: OpenApiResponse(description="Unauthorized"),
+        }
+    )
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        try:
+            excel_export_header = ExcelExportHeader.objects.get(user=user)
+            serializer = self.get_serializer(excel_export_header)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except ExcelExportHeader.DoesNotExist:
+            return Response({"options": []}, status=status.HTTP_200_OK)
