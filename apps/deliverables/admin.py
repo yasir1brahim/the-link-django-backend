@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
     SavedSubmittalItemList, UploadedFile, SpecSection, MasterFormatSection,
-    SubmittalItemList,
+    SubmittalItemList, ExcelExportHeader
 )
 
 
@@ -87,3 +87,7 @@ class SubmittalItemListAdmin(admin.ModelAdmin):
     search_fields = ["project__name", "name", "created_by__email"]
     filter_horizontal = ("submittals",)
 
+@admin.register(ExcelExportHeader)
+class ExcelExportHeaderAdmin(admin.ModelAdmin):
+    list_display = ["user", "updated_at"]
+    search_fields = ["user__email", ]

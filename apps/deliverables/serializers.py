@@ -2,7 +2,7 @@ import json
 import boto3
 
 from rest_framework import serializers
-from .models import Project, ProjectMembership, PROJECT_MEMBERSHIP_ROLE_CHOICES
+from .models import Project, ProjectMembership, PROJECT_MEMBERSHIP_ROLE_CHOICES, ExcelExportHeader
 from apps.users.serializers import CustomUserSerializer
 from apps.users.models import CustomUser
 from apps.teams.models import Team
@@ -283,3 +283,9 @@ class SubmittalItemListSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubmittalItemList
         fields = '__all__'
+
+
+class ExcelExportHeaderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExcelExportHeader
+        fields = ['user', 'options', 'updated_at']
