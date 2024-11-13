@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.db.models import Count, Q
 from waffle.admin import FlagAdmin as WaffleFlagAdmin
 
-from .models import Team, Membership, Invitation, Flag, TeamProfile
+from .models import Team, Membership, Invitation, Flag
 
 
 @admin.register(Membership)
@@ -58,16 +58,3 @@ class FlagAdmin(WaffleFlagAdmin):
     list_display = tuple(list(WaffleFlagAdmin.list_display) + [teams_list])
     list_filter = tuple(list(WaffleFlagAdmin.list_filter) + ["teams"])
     raw_id_fields = tuple(list(WaffleFlagAdmin.raw_id_fields) + ["teams"])
-
-@admin.register(TeamProfile)
-class TeamProfileAdmin(admin.ModelAdmin):
-    list_display = ["team", "account_owner", "email_id", "phone"]
-    list_filter = ["account_owner"]
-    search_fields = ["team__name", "email_id", "phone"]
-
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs
-
-    def __str__(self):
-        return f"Profile for {self.team.name}"

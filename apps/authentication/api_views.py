@@ -6,13 +6,13 @@ from dj_rest_auth.views import LoginView
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.generics import GenericAPIView
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-
+from rest_framework.views import APIView
 
 from apps.users.models import CustomUser
-from .serializers import LoginResponseSerializer, OtpRequestSerializer
+from .serializers import LoginResponseSerializer, OtpRequestSerializer, UserStatusUpdateSerializer
 import uuid
 from django.core.cache import cache
 
@@ -96,3 +96,23 @@ class VerifyOTPView(GenericAPIView):
         else:
             # OTP is invalid
             return Response({"status": "invalid_otp", "detail": "Invalid OTP code"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserStatusUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, *args, **kwargs):
+        serializer = UserStatusUpdateSerializer(data=request.data)
+        if serializer.is_valid():
+            user_id = serializer.validated_data['user_id']
+            is_active = serializer.validated_data['is_active']
+            
+            try:
+                user = CustomUser.objects.get(id=user_id) 
+                user.is_active = is_active
+                user.save()
+                return Response({"message": "User status updated successfully"}, status=status.HTTP_200_OK)
+            except CustomUser.DoesNotExist:
+                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
