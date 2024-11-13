@@ -82,7 +82,7 @@ urlpatterns = [
     # hijack urls for impersonation
     path("hijack/", include("hijack.urls", namespace="hijack")),
     # Deliverables URLs
-    path("api/deliverables/", include(deliverables_urls)),
+    path("api/deliverables/", include((deliverables_urls, 'deliverables'))),
     path("api/deliverables/<int:project_id>/", include(single_project_urlpatterns)),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

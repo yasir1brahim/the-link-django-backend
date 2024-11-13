@@ -14,7 +14,7 @@ from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q, Func, F
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
@@ -154,6 +154,21 @@ class ProjectViewSet(viewsets.ModelViewSet):
             raise PermissionDenied()
         serializer.save(created_by=self.request.user)
 
+    @action(detail=True, methods=['post'], url_path='archive')
+    def archive(self, request, pk=None):
+        """Toggle the archive status of a project."""
+        project = self.get_object()
+        action_type = request.data.get('action', 'archive').lower()
+        if action_type == 'restore':
+            project.is_archived = False
+            status_message = "unarchived"
+        else:
+            project.is_archived = True
+            status_message = "archived"
+
+        project.save()
+        return Response( {"status": f"Project {status_message} successfully."},
+        status=status.HTTP_200_OK )
 
 class SubmittalItemPagination(PageNumberPagination):
     page_query_param = 'page_number'

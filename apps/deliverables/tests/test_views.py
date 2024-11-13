@@ -463,3 +463,87 @@ class SubmittalItemViewSetTests(APITestCase):
         self.client.force_authenticate(user=self.non_member)
         response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+class ProjectArchiveTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.User = get_user_model()
+
+        self.user = self.User.objects.create_user(username='user1', password='password123')
+        self.client.force_authenticate(user=self.user)
+        self.admin_user = self.User.objects.create_user(username='admin_user', password='adminpass')
+        self.client.force_authenticate(user=self.admin_user)
+
+        self.team = Team.objects.create(name='Team 1', slug='team-1')
+        TeamMembership.objects.create(
+            user=self.user,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+
+        self.project = Project.objects.create(
+            name='Project 1',
+            team=self.team,
+            is_archived=False,
+            status=Project.PROJECT_STATUS_OPEN 
+        )
+
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role=ROLE_PROJECT_MEMBER 
+        )
+
+        TeamMembership.objects.create(
+            user=self.admin_user,
+            team=self.team,
+            role=ROLE_ADMIN
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.admin_user,
+            role=ROLE_ADMIN
+        )
+
+        self.team_id = self.team.id
+
+    def test_archive_project_by_admin(self):
+        """Test that an admin can archive a project."""
+        self.client.force_authenticate(user=self.admin_user)
+
+        url = reverse('deliverables:project-archive', args=[self.project.id])
+        response = self.client.post(url, data={'action': 'archive', 'team': self.team_id})
+        self.project.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(self.project.is_archived)
+        self.assertEqual(self.project.status, Project.PROJECT_STATUS_OPEN)
+        self.assertIn("Project archived successfully.", response.data["status"])
+
+    def test_restore_project_by_admin(self):
+        """Test that an admin can restore an archived project."""
+        self.project.is_archived = True
+        self.project.save()
+
+        self.client.force_authenticate(user=self.admin_user)
+
+        url = reverse('deliverables:project-archive', args=[self.project.id])
+        response = self.client.post(url, data={'action': 'restore', 'team': self.team_id})
+        self.project.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(self.project.is_archived)
+        self.assertEqual(self.project.status, Project.PROJECT_STATUS_OPEN)
+        self.assertIn("Project unarchived successfully.", response.data["status"])
+
+    def test_archive_project_by_member(self):
+        """Test that a regular member cannot archive a project."""
+        self.client.force_authenticate(user=self.user)
+
+        url = reverse('deliverables:project-archive', args=[self.project.id])
+        response = self.client.post(url, data={'action': 'archive', 'team': self.team_id})
+        self.project.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(self.project.is_archived) 
+        self.assertEqual(self.project.status, Project.PROJECT_STATUS_OPEN)
