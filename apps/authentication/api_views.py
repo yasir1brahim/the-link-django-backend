@@ -1,6 +1,9 @@
 from allauth.mfa.totp.internal.auth import TOTP
 from allauth.mfa.utils import is_mfa_enabled
 from allauth.mfa.models import Authenticator
+from apps.teams.permissions import TeamAccessPermissions
+from apps.teams.roles import ROLE_ADMIN
+from apps.teams.models import Team, Membership as TeamMembership
 from dj_rest_auth.serializers import JWTSerializer
 from dj_rest_auth.views import LoginView
 from drf_spectacular.utils import extend_schema
@@ -99,20 +102,28 @@ class VerifyOTPView(GenericAPIView):
 
 
 class UserStatusUpdateView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TeamAccessPermissions]
 
     def patch(self, request, *args, **kwargs):
-        serializer = UserStatusUpdateSerializer(data=request.data)
-        if serializer.is_valid():
-            user_id = serializer.validated_data['user_id']
-            is_active = serializer.validated_data['is_active']
+        status_serializer = UserStatusUpdateSerializer(data=request.data)
+        if status_serializer.is_valid():
+            target_user_id = status_serializer.validated_data['user_id']
+            new_active_status = status_serializer.validated_data['is_active']
             
             try:
-                user = CustomUser.objects.get(id=user_id) 
-                user.is_active = is_active
-                user.save()
+                target_user = CustomUser.objects.get(id=target_user_id)
+                target_user_memberships = TeamMembership.objects.filter(user=target_user)
+                if not target_user_memberships.exists():
+                    return Response({"error": "User is not part of any team"}, status=status.HTTP_400_BAD_REQUEST)
+                admin_team_memberships = TeamMembership.objects.filter(user=request.user, role=ROLE_ADMIN, team__in=target_user_memberships.values_list('team', flat=True))
+                
+                if not admin_team_memberships.exists():
+                    return Response({"error": "You do not have permission to update this user's status"}, status=status.HTTP_403_FORBIDDEN)
+                
+                target_user.is_active = new_active_status
+                target_user.save()
                 return Response({"message": "User status updated successfully"}, status=status.HTTP_200_OK)
             except CustomUser.DoesNotExist:
                 return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(status_serializer.errors, status=status.HTTP_400_BAD_REQUEST)

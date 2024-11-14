@@ -28,3 +28,5 @@ mysql-connector-python
 sentry-sdk
 whitenoise
 drf-writable-nested
+openpyxl
+pillow

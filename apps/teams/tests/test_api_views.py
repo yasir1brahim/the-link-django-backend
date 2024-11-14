@@ -6,6 +6,10 @@ from apps.teams.models import Team, Membership as TeamMembership, Invitation
 from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
 from apps.users.models import CustomUser
 
+from io import BytesIO
+from PIL import Image
+from django.core.files.uploadedfile import SimpleUploadedFile
+
 class TeamViewSetTest(APITestCase):
     def setUp(self):
         self.client = APIClient()
@@ -223,3 +227,44 @@ class InvitationViewSetTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         response = self.client.get(reverse('single_team:invitation-list', kwargs={'team_id': self.team.id}))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+class UploadLogoTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.team = Team.objects.create(name='Team 1', slug='team-1')
+        self.team_admin = CustomUser.objects.create_user(username='team_admin', password='password123')
+        self.team_member = CustomUser.objects.create_user(username='team_member', password='password123')
+
+        TeamMembership.objects.create(user=self.team_admin, team=self.team, role=ROLE_ADMIN)
+        TeamMembership.objects.create(user=self.team_member, team=self.team, role=ROLE_MEMBER)
+
+        self.image = BytesIO()
+        Image.new('RGB', (100, 100)).save(self.image, format='PNG')
+        self.image.seek(0)
+        self.logo_file = SimpleUploadedFile("logo.png", self.image.read(), content_type="image/png")
+
+        self.upload_logo_url = reverse('teams:team-upload-logo', args=[self.team.id])
+
+    def test_unauthenticated_user_cannot_upload_logo(self):
+        """Test that an unauthenticated user cannot upload a logo"""
+        response = self.client.post(self.upload_logo_url, {'file': self.logo_file})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_team_admin_can_upload_logo(self):
+        """Test that a team member can uplaod the logo"""
+        self.client.force_authenticate(user=self.team_admin)
+        response = self.client.post(self.upload_logo_url, {'file': self.logo_file}, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_team_member_cannot_upload_logo(self):
+        """Test that a team member cannot upload the logo"""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.post(self.upload_logo_url, {'file': self.logo_file}, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+    
+    def test_admin_upload_logo_no_file(self):
+        """Test that an admin cannot upload an empty logo file"""
+        self.client.force_authenticate(user=self.team_admin)
+        response = self.client.post(self.upload_logo_url, {}, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['error'], 'No file uploaded.')
