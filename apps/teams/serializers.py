@@ -1,12 +1,15 @@
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
+from drf_writable_nested import WritableNestedModelSerializer
 
 from apps.subscriptions.serializers import SubscriptionSerializer
 
 from .helpers import get_next_unique_team_slug
 from .models import Team, Membership, Invitation
 from .roles import is_admin
+from django.contrib.auth import get_user_model
 
+from apps.deliverables.serializers import BaseProjectSerializer
 
 class MembershipSerializer(serializers.ModelSerializer):
     user_id = serializers.ReadOnlyField(source="user.id")
@@ -14,10 +17,11 @@ class MembershipSerializer(serializers.ModelSerializer):
     last_name = serializers.ReadOnlyField(source="user.last_name")
     display_name = serializers.ReadOnlyField(source="user.get_display_name")
     email = serializers.ReadOnlyField(source="user.email")
+    is_active = serializers.ReadOnlyField(source="user.is_active")
 
     class Meta:
         model = Membership
-        fields = ("id", "user_id", "first_name", "last_name", "display_name", "role", "email")
+        fields = ("id", "user_id", "first_name", "last_name", "display_name", "role", "email", "is_active")
 
 
 class InvitationSerializer(serializers.ModelSerializer):
@@ -27,9 +31,8 @@ class InvitationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Invitation
         fields = ("id", "team", "email", "role", "invited_by", "is_accepted")
-
-
-class TeamSerializer(serializers.ModelSerializer):
+    
+class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer):
     slug = serializers.SlugField(
         required=False,
         validators=[UniqueValidator(queryset=Team.objects.all())],
@@ -40,6 +43,7 @@ class TeamSerializer(serializers.ModelSerializer):
     dashboard_url = serializers.ReadOnlyField()
     is_admin = serializers.SerializerMethodField()
     subscription = SubscriptionSerializer(source="wrapped_subscription", read_only=True)
+    projects = serializers.SerializerMethodField()
 
     class Meta:
         model = Team
@@ -54,6 +58,8 @@ class TeamSerializer(serializers.ModelSerializer):
             "is_admin",
             "subscription",
             "has_active_subscription",
+            "legacy_logo_url",
+            "projects",
         )
 
     def get_members(self, obj) -> list[Membership]:
@@ -74,3 +80,6 @@ class TeamSerializer(serializers.ModelSerializer):
         team_name = validated_data.get("name", None)
         validated_data["slug"] = validated_data.get("slug", get_next_unique_team_slug(team_name))
         return super().create(validated_data)
+    
+    def get_projects(self, obj):
+        return BaseProjectSerializer(obj.project_set.all(), many=True).data
