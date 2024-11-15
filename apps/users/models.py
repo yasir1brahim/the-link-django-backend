@@ -60,12 +60,17 @@ class CustomUser(AbstractUser):
         return self.teams.filter(id=team.id).exists()
     
     def is_admin_for_project(self, project):
-        from apps.deliverables.models import ROLE_PROJECT_ADMIN
+        from apps.deliverables.models import ROLE_PROJECT_ADMIN, Project
+        if isinstance(project, int):
+            project = Project.objects.get(id=project)
         if self.is_admin_for_team(project.team):
             return True
         return self.projects.through.objects.filter(user=self, project=project, role=ROLE_PROJECT_ADMIN).exists()
     
     def is_member_of_project(self, project):
+        from apps.deliverables.models import Project
+        if isinstance(project, int):
+            project = Project.objects.get(id=project)
         if self.is_admin_for_team(project.team):
             return True
         return self.projects.filter(id=project.id).exists()

@@ -31,7 +31,7 @@ from .serializers import (ProjectReadSerializer, ProjectWriteSerializer, FileUpl
 from rest_framework import viewsets
 from .models import (Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList, MasterFormatSection, SpecSection, DocProcessingStatus, ExcelExportHeader)
 from apps.teams.models import Team
-from .permissions import ProjectAccessPermissions, SubmittalItemAccessPermissions
+from .permissions import ProjectAccessPermissions, SubmittalItemAccessPermissions, SubmittalListAccessPermissions
 import logging
 from typing import TypedDict, Optional, List
 from enum import Enum
@@ -840,7 +840,7 @@ def spec_status_webhook(request):
 
 class SubmittalItemListViewSet(viewsets.ModelViewSet):
     queryset = SubmittalItemList.objects.all()
-    permission_classes = [IsAuthenticated, ProjectAccessPermissions]
+    permission_classes = [IsAuthenticated, SubmittalListAccessPermissions]
     serializer_class = SubmittalItemListSerializer
 
     def get_queryset(self):

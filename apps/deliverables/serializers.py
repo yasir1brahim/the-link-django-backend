@@ -280,9 +280,19 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
 
 
 class SubmittalItemListSerializer(serializers.ModelSerializer):
+    project_id = serializers.IntegerField(source='project.id', required=False)
+    name = serializers.CharField()
+    created_by = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(), required=False)
+    submittals = serializers.PrimaryKeyRelatedField(queryset=SubmittalItem.objects.all(), many=True, required=False)
+
+    def create(self, validated_data):
+        validated_data['project'] = Project.objects.get(id=self.context['view'].kwargs.get('project_id'))
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
+
     class Meta:
         model = SubmittalItemList
-        fields = '__all__'
+        fields = ['id', 'project_id', 'name', 'created_by', 'submittals']
 
 
 class ExcelExportHeaderSerializer(serializers.ModelSerializer):
