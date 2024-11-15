@@ -610,7 +610,11 @@ class SubmittalItemListViewSetTests(APITestCase):
     def test_team_member_can_create_submittal_list(self):
         """Test that a team member can create a submittal list"""
         self.client.force_authenticate(user=self.team_member)
-        response = self.client.post(reverse('submittal-list-list', kwargs={'project_id': self.project.id}), data={'name': 'New Submittal Item List', 'project_id': self.project.id})
+        response = self.client.post(reverse(
+            'submittal-list-list',
+            kwargs={'project_id': self.project.id}), 
+            data={'name': 'New Submittal Item List', 'submittals': [self.submittal_item_in_list.id]}
+        )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
     def test_team_member_created_by_is_set_automatically(self):
