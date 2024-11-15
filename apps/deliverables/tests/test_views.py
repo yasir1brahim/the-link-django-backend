@@ -5,7 +5,7 @@ from rest_framework import status
 from django.contrib.auth import get_user_model
 from apps.teams.models import Team, Membership as TeamMembership
 from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
-from apps.deliverables.models import Project, ProjectMembership, SubmittalItem, MasterFormatSection, ROLE_PROJECT_ADMIN, ROLE_PROJECT_MEMBER
+from apps.deliverables.models import Project, ProjectMembership, SubmittalItemList, SubmittalItem, MasterFormatSection, ROLE_PROJECT_ADMIN, ROLE_PROJECT_MEMBER
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -547,3 +547,75 @@ class ProjectArchiveTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertFalse(self.project.is_archived) 
         self.assertEqual(self.project.status, Project.PROJECT_STATUS_OPEN)
+
+
+class SubmittalItemListViewSetTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.User = get_user_model()
+        self.team_member = self.User.objects.create_user(username='team_member', password='password123')
+        self.team = Team.objects.create(name='Team 1', slug='team-1')
+        TeamMembership.objects.create(
+            user=self.team_member,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+
+        self.project = Project.objects.create(
+            name='Project 1',
+            team=self.team,
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.team_member,
+            role=ROLE_PROJECT_MEMBER
+        )
+
+        self.other_project = Project.objects.create(
+            name='Project 2',
+            team=self.team,
+        )
+
+        self.submittal_item_list = SubmittalItemList.objects.create(
+            name='Submittal Item List 1',
+            project=self.project,
+        )
+
+        self.submittal_item_in_list = SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=MasterFormatSection.objects.create(masterformat_number='033000'),
+        )
+        self.submittal_item_in_list.submittal_lists.add(self.submittal_item_list)
+
+        self.submittal_item_not_in_list = SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=MasterFormatSection.objects.create(masterformat_number='033001'),
+        )
+
+    def test_team_member_can_see_submittal_lists_for_their_project(self):
+        """Test that a team member can see submittal lists for their project"""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(reverse('submittal-list-list', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['results'][0]['id'], self.submittal_item_list.id)
+        self.assertEqual(len(response.data['results'][0]['submittals']), 1)
+        self.assertEqual(response.data['results'][0]['submittals'][0], self.submittal_item_in_list.id)
+
+    def test_team_member_cannot_see_submittal_lists_for_other_projects(self):
+        """Test that a team member cannot see submittal lists for other projects"""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(reverse('submittal-list-list', kwargs={'project_id': self.other_project.id}))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_team_member_can_create_submittal_list(self):
+        """Test that a team member can create a submittal list"""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.post(reverse('submittal-list-list', kwargs={'project_id': self.project.id}), data={'name': 'New Submittal Item List', 'project_id': self.project.id})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_team_member_created_by_is_set_automatically(self):
+        """Test that the created_by field is set automatically"""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.post(reverse('submittal-list-list', kwargs={'project_id': self.project.id}), data={'name': 'New Submittal Item List', 'project_id': self.project.id})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['created_by'], self.team_member.id)

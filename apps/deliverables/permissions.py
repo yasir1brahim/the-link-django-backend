@@ -40,6 +40,15 @@ class ProjectAccessPermissions(permissions.BasePermission):
         return request.user.is_admin_for_project(project)
 
 
+class SubmittalListAccessPermissions(permissions.BasePermission):
+    """
+    Permission to allow any member of a project to access submittal lists.
+    """
+
+    def has_permission(self, request, view):
+        return request.user.is_member_of_project(view.kwargs['project_id'])
+
+
 class SubmittalItemAccessPermissions(permissions.BasePermission):
     """
     Permission to only allow admins of a project to edit the project object.
