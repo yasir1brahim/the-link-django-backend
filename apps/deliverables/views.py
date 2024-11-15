@@ -899,3 +899,11 @@ class GetExcelExportHeaderView(generics.RetrieveAPIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except ExcelExportHeader.DoesNotExist:
             return Response({"options": []}, status=status.HTTP_200_OK)
+
+
+# region notices
+# TODO:
+#   - Split `views.py` into a module
+#   - move this region into a separate file
+
+# endregion notices

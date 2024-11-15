@@ -2,7 +2,6 @@ import json
 import boto3
 
 from rest_framework import serializers
-from .models import Project, ProjectMembership, PROJECT_MEMBERSHIP_ROLE_CHOICES, ExcelExportHeader
 from apps.users.serializers import CustomUserSerializer
 from apps.users.models import CustomUser
 from apps.teams.models import Team
@@ -12,6 +11,16 @@ from django.conf import settings
 from django.db.models import Case, When, IntegerField
 
 from .constants import masterformat_to_section_title_map
+from .models import (
+    PROJECT_MEMBERSHIP_ROLE_CHOICES,
+    Project,
+    ProjectMembership,
+    ExcelExportHeader,
+
+    NoticeExcerpt,
+    NoticeMatch,
+)
+
 
 s3 = boto3.client(
     "s3",
@@ -19,6 +28,7 @@ s3 = boto3.client(
     aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
     aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
 )
+
 
 class ProjectMembershipSerializer(serializers.ModelSerializer):
     user_id = serializers.PrimaryKeyRelatedField(source="user.id", queryset=CustomUserSerializer.Meta.model.objects.all())
@@ -299,3 +309,59 @@ class ExcelExportHeaderSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExcelExportHeader
         fields = ['user', 'options', 'updated_at']
+
+
+# region notices
+# TODO:
+#   - Split `serializers.py` into a module
+#   - move this region into a separate file
+
+class NoticeExcerptSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = NoticeExcerpt
+        fields = [
+            'anchor',
+            'lines',
+        ]
+
+
+class NoticeMatchSerializer(serializers.ModelSerializer):
+    document = serializers.PrimaryKeyRelatedField(
+        queryset=UploadedFile.objects.all(),
+        required=True,
+    )
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Project.objects.all(),
+        required=True,
+    )
+    notice_type = serializers.CharField(required=False)
+    notice_type_match = serializers.CharField(required=False)
+
+    class Meta:
+        model = NoticeMatch
+        fields = [
+            'document',
+            'project',
+            'notice_type',
+            'notice_type_match',
+        ]
+
+
+class NoticeProcessingCallbackSerializer(serializers.Serializer):
+    document = serializers.PrimaryKeyRelatedField(
+        queryset=UploadedFile.objects.all(),
+        required=True,
+    )
+    excerpts = NoticeExcerptSerializer(many=True, required=True)
+    matches = NoticeMatchSerializer(many=True, required=True)
+
+    def validate(self, attrs):
+        # TODO: Validate `excerpt_ids` match to provided local IDs
+        pass
+
+    def create(self, validated_data):
+        # TODO: Save `validated_data['document']` to all the matches & excerpts
+        pass
+
+# endregion notices
