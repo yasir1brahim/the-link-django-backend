@@ -160,8 +160,8 @@ class InvitationViewSetTest(APITestCase):
         self.team_admin = CustomUser.objects.create_user(username='team_admin', password='password123')
         self.team_member = CustomUser.objects.create_user(username='team_member', password='password123')
 
-        TeamMembership.objects.create(user=self.team_admin, team=self.team, role=ROLE_ADMIN)
-        TeamMembership.objects.create(user=self.team_member, team=self.team, role=ROLE_MEMBER)
+        self.team_membership_admin = TeamMembership.objects.create(user=self.team_admin, team=self.team, role=ROLE_ADMIN)
+        self.team_membership_member = TeamMembership.objects.create(user=self.team_member, team=self.team, role=ROLE_MEMBER)
 
     def test_team_admin_can_create_invitation(self):
         self.client.force_authenticate(user=self.team_admin)
@@ -219,7 +219,8 @@ class InvitationViewSetTest(APITestCase):
         self.client.force_authenticate(user=self.team_admin)
         response = self.client.post(reverse('single_team:invitation-list', kwargs={'team_id': self.other_team.id}), {'team': self.other_team.id, 'email': 'test@example.com'})
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        response = self.client.patch(reverse('single_team:invitation-detail', kwargs={'team_id': self.other_team.id, 'pk': self.other_team_invitation.id}), {'email': 'test2@example.com'})
+        other_team_invitation = Invitation.objects.create(email='test@example.com', team=self.other_team, invited_by=self.team_admin, role=ROLE_MEMBER)
+        response = self.client.patch(reverse('single_team:invitation-detail', kwargs={'team_id': self.other_team.id, 'pk': other_team_invitation.id}), {'email': 'test2@example.com'})
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_anonymous_user_cannot_create_or_view_invitations(self):

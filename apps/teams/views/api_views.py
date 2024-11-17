@@ -56,14 +56,16 @@ class TeamViewSet(
 
     def retrieve(self, request, *args, **kwargs):
         team_id = kwargs.get("pk")
-        team = get_object_or_404(Team, id=team_id)
+        team = get_object_or_404(self.get_queryset(), id=team_id)
+
+        serializer = self.get_serializer(team)
 
         if not team.membership_set.filter(user=request.user, role=ROLE_ADMIN).exists():
-            return Response({
-                "detail": "You do not have permission to view this team.",
-            }, status=403)
+            serializer.data['members'] = [
+                membership for membership in serializer.data['members']
+                if membership['user_id'] == request.user.id
+            ]
         
-        serializer = self.get_serializer(team)
         return Response(serializer.data)
     
     @action(detail=True, methods=['post'], url_path='upload-logo')
