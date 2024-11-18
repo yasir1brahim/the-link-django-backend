@@ -15,9 +15,10 @@ from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q, Func, F
 from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from rest_framework import generics, status
+from rest_framework import generics, status, mixins
 from rest_framework.permissions import BasePermission
 from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
 from rest_framework.pagination import PageNumberPagination
@@ -26,10 +27,23 @@ from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from drf_spectacular.types import OpenApiTypes
 
-from .serializers import (ProjectReadSerializer, ProjectWriteSerializer, FileUploadSerializer, SubmittalItemReadSerializer, SubmittalItemWriteSerializer,
-                          SubmittalItemListSerializer, ExcelExportHeaderSerializer)
+from .serializers import (
+    ProjectReadSerializer,
+    ProjectWriteSerializer,
+    FileUploadSerializer,
+    SubmittalItemReadSerializer,
+    SubmittalItemWriteSerializer,
+    SubmittalItemListSerializer,
+    ExcelExportHeaderSerializer,
+
+    NoticeMatchSerializer,
+    NoticeProcessingCallbackSerializer,
+)
 from rest_framework import viewsets
-from .models import (Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList, MasterFormatSection, SpecSection, DocProcessingStatus, ExcelExportHeader)
+from .models import (
+    Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList,
+    MasterFormatSection, SpecSection, DocProcessingStatus, ExcelExportHeader, NoticeMatch,
+)
 from apps.teams.models import Team
 from .permissions import ProjectAccessPermissions, SubmittalItemAccessPermissions, SubmittalListAccessPermissions
 import logging
@@ -40,7 +54,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from django.http import HttpResponse
 from .constants import masterformat_to_section_title_map
-
+from .serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -905,5 +919,18 @@ class GetExcelExportHeaderView(generics.RetrieveAPIView):
 # TODO:
 #   - Split `views.py` into a module
 #   - move this region into a separate file
+
+class NoticeViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    serializer_class = NoticeMatchSerializer
+    queryset = (
+        NoticeMatch.objects
+        .select_related('document')
+        .prefetch_related('excerpt_anchors')
+    )
+
+
+class NoticeProcessingWebhookView(CreateAPIView):
+    serializer_class = NoticeProcessingCallbackSerializer
+    permission_classes = [AllowAny]
 
 # endregion notices

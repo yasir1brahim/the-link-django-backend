@@ -233,7 +233,7 @@ class NoticeMatch(BaseModel):
     document = models.ForeignKey(
         "UploadedFile",
         on_delete=models.CASCADE,
-        related_name="notice_excerpts",
+        related_name="notice_matches",
     )
 
     notice_type = models.CharField(max_length=256, null=True, blank=True)
