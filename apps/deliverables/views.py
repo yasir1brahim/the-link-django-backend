@@ -1,48 +1,72 @@
-import os
-import time
+from typing import TypedDict, List
+
 import logging
+import time
 import hashlib
 import boto3
-import shutil
 import requests
-import json
 import re
+from enum import Enum
 from datetime import datetime
 
-from django.conf import settings
-from django.shortcuts import render, get_object_or_404
-from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
-from django.db.models import Q, Func, F
-from rest_framework.decorators import api_view, permission_classes, action
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.response import Response
-from rest_framework import generics, status
-from rest_framework.permissions import BasePermission
-from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
-from rest_framework.pagination import PageNumberPagination
-from rest_framework.decorators import action
-
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
-from drf_spectacular.types import OpenApiTypes
-
-from .serializers import (ProjectReadSerializer, ProjectWriteSerializer, FileUploadSerializer, SubmittalItemReadSerializer, SubmittalItemWriteSerializer,
-                          SubmittalItemListSerializer, ExcelExportHeaderSerializer)
-from rest_framework import viewsets
-from .models import (Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList, MasterFormatSection, SpecSection, DocProcessingStatus, ExcelExportHeader)
-from apps.teams.models import Team
-from .permissions import ProjectAccessPermissions, SubmittalItemAccessPermissions, SubmittalListAccessPermissions
-import logging
-from typing import TypedDict, Optional, List
-from enum import Enum
 import openpyxl
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+
 from django.http import HttpResponse
+from django.conf import settings
+from django.shortcuts import get_object_or_404
+from django.db.models import Q
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.response import Response
+from rest_framework import generics, status
+from rest_framework.exceptions import (
+    PermissionDenied,
+    ValidationError as DRFValidationError,
+)
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.decorators import action
+from rest_framework import viewsets
+
+from drf_spectacular.utils import (
+    extend_schema,
+    OpenApiParameter,
+    OpenApiResponse,
+)
+from drf_spectacular.types import OpenApiTypes
+
+from apps.teams.models import Team
+from .serializers import (
+    ProjectReadSerializer,
+    ProjectWriteSerializer,
+    FileUploadSerializer,
+    SubmittalItemReadSerializer,
+    SubmittalItemWriteSerializer,
+    SubmittalItemListSerializer,
+    ExcelExportHeaderSerializer,
+)
+from .models import (
+    Project,
+    UploadedFile,
+    SubmittalItem,
+    SubmittalItemList,
+    MasterFormatSection,
+    SpecSection,
+    DocProcessingStatus,
+    ExcelExportHeader,
+)
+from .permissions import (
+    ProjectAccessPermissions,
+    SubmittalItemAccessPermissions,
+    SubmittalListAccessPermissions,
+)
 from .constants import masterformat_to_section_title_map
+from .services import SubmittalService
 
 
 logger = logging.getLogger(__name__)
+
 
 s3 = boto3.client(
     "s3",
@@ -57,6 +81,7 @@ class ParsingMethod(str, Enum):
     REGEX_PRODUCT_DATA = "REGEX_PRODUCT_DATA"
     AI_SUBMITTAL = "AI_SUBMITTAL"
     UNKNOWN = "UNKNOWN"
+
 
 class SubmittalInfo(TypedDict):
     submittal_type: str
@@ -93,6 +118,7 @@ class SpecSubSection(TypedDict):
     subsection_type: SubsectionType
     master_format_section_number: str
     text_chunks: List[TextChunk]
+
 
 class SpecStatusRequest(TypedDict):
     new_status: str
@@ -174,6 +200,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         project.save()
         return Response( {"status": f"Project {status_message} successfully."},
         status=status.HTTP_200_OK )
+
 
 class SubmittalItemPagination(PageNumberPagination):
     page_query_param = 'page_number'
@@ -760,6 +787,10 @@ def change_encode_value(text):
         text = re.sub('\uf0a2', '’', text)
     return text
 
+
+# region submittal webhook
+# TODO: Move to separate file
+
 @extend_schema(
     request=FileUploadSerializer,
     responses={200: {'description': 'File uploaded successfully'}},
@@ -831,11 +862,17 @@ def spec_status_webhook(request):
             logger.debug(f"SPEC STATUS WEBHOOK: all subsections have been processed for document {request_data['document_id']}")
             document.processing_status = DocProcessingStatus.PROCESSED
             document.save()
-    
+
     logger.debug(f"SPEC STATUS WEBHOOK: determining whether to assign submittal numbers...")
-    # TODO: assign submittal numbers
+    SubmittalService.assign_submittal_numbers(
+        # TODO: Replace `int` cast here with actually enforcing integer input
+        project=int(request_data['project_id']),
+        only_if_all_documents_processed=True,
+    )
 
     return Response(status=status.HTTP_200_OK)
+
+# endregion submittal webhook
 
 
 class SubmittalItemListViewSet(viewsets.ModelViewSet):
