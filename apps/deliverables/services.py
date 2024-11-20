@@ -7,6 +7,7 @@ from .models import (
     UploadedFile,
     DocProcessingStatus, SubmittalItem,
 )
+from ..utils.database import apply_advisory_lock_submittal_number_assignment
 
 
 logger = logging.getLogger(__name__)
@@ -120,8 +121,13 @@ class SubmittalService:
             f'reassign={reassign}',
         )
 
-        # TODO: ADD ADVISORY LOCK
-        with transaction.atomic():
+        # Apply advisory lock right away, on project level, to prevent any
+        # race conditions in case of multiple documents being processed at the
+        # same time
+        with (
+            transaction.atomic(),
+            apply_advisory_lock_submittal_number_assignment(project),
+        ):
             cls._actually_assign_submittal_numbers(
                 project=project,
                 reassign=reassign,
