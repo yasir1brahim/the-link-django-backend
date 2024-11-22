@@ -175,6 +175,34 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return Response( {"status": f"Project {status_message} successfully."},
         status=status.HTTP_200_OK )
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='submittal_id',
+                description='ID of the submittal to get the project ID',
+                required=True,
+                type=OpenApiTypes.INT
+            )
+        ],
+        responses={
+            200: OpenApiTypes.OBJECT,
+            400: OpenApiTypes.OBJECT
+        },
+        description="Get the project ID associated with a given submittal ID."
+    )
+    @action(detail=False, methods=['get'], url_path='project-id-by-submittal-id')
+    def project_id_by_submittal_id(self, request):
+        submittal_id = request.query_params.get('submittal_id')
+        if not submittal_id:
+            return Response({"error": "submittal_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            submittal_item = get_object_or_404(SubmittalItem, id=submittal_id)
+            project_id = submittal_item.project.id
+            return Response({"project_id": project_id}, status=status.HTTP_200_OK)
+        except ValueError:
+            return Response({"error": "Invalid submittal_id. Must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
+
 class SubmittalItemPagination(PageNumberPagination):
     page_query_param = 'page_number'
     page_size_query_param = 'limit'
