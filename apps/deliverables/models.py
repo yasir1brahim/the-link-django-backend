@@ -186,7 +186,7 @@ class SubmittalItem(BaseModel):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.document.name} - {self.masterformat_section.masterformat_number} - {self.paragraph_number}: {self.submittal_description}"
+        return f"{self.document.name if self.document else ''} - {self.masterformat_section.masterformat_number} - {self.paragraph_number}: {self.submittal_description}"
     
 
 class SubmittalItemList(BaseModel):
