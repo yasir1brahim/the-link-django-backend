@@ -485,7 +485,6 @@ class ProjectArchiveTests(APITestCase):
             name='Project 1',
             team=self.team,
             is_archived=False,
-            status=Project.PROJECT_STATUS_OPEN 
         )
 
         ProjectMembership.objects.create(
@@ -517,7 +516,6 @@ class ProjectArchiveTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(self.project.is_archived)
-        self.assertEqual(self.project.status, Project.PROJECT_STATUS_OPEN)
         self.assertIn("Project archived successfully.", response.data["status"])
 
     def test_restore_project_by_admin(self):
@@ -533,7 +531,6 @@ class ProjectArchiveTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(self.project.is_archived)
-        self.assertEqual(self.project.status, Project.PROJECT_STATUS_OPEN)
         self.assertIn("Project unarchived successfully.", response.data["status"])
 
     def test_archive_project_by_member(self):
@@ -546,7 +543,6 @@ class ProjectArchiveTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertFalse(self.project.is_archived) 
-        self.assertEqual(self.project.status, Project.PROJECT_STATUS_OPEN)
 
 
 class SubmittalItemListViewSetTests(APITestCase):
