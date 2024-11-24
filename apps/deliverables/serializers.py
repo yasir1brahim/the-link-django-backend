@@ -34,13 +34,13 @@ class ProjectMembershipSerializer(serializers.ModelSerializer):
 class BaseProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
-        fields = ['id', 'name', 'description', 'team', 'members', 'entitlements',
+        fields = ['id', 'name', 'description', 'team', 'members',
                    'user_limit', 'start_date', 'end_date', 'is_archived', 
                    'project_number', 'project_type']
 
     members = ProjectMembershipSerializer(source="project_memberships", many=True, required=False)
     team = serializers.ReadOnlyField(source="team.id")
-    entitlements = serializers.SerializerMethodField(read_only=True)
+    # entitlements = serializers.SerializerMethodField(read_only=True)
     user_limit = serializers.ReadOnlyField()
 
     def get_entitlements(self, obj) -> list[str]:
@@ -136,7 +136,12 @@ class DocumentSerializer(serializers.ModelSerializer):
         model = UploadedFile
         fields = ['document_id', 'document_name', 'document_status', 'created_at', 'updated_at', 'document_subsections']
 
-class ProjectReadSerializer(BaseProjectSerializer):
+class ProjectListSerializer(BaseProjectSerializer):
+    class Meta:
+        model = Project
+        fields = BaseProjectSerializer.Meta.fields
+
+class ProjectDetailsSerializer(BaseProjectSerializer):
     doc_parsed = serializers.SerializerMethodField()
     document_details = serializers.SerializerMethodField()
 
@@ -175,7 +180,6 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
     additional_text_locations = serializers.JSONField()
     doc_id = serializers.IntegerField(source='document.id', allow_null=True)
     doc_link = serializers.SerializerMethodField()
-    full_edit = serializers.SerializerMethodField()
     id = serializers.IntegerField()
     item_desc = serializers.CharField(source='submittal_description')
     para_context = serializers.CharField(source='submittal_content')
@@ -200,14 +204,6 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
             return obj.document.document_path
         else:
             return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.document.document_path}, ExpiresIn=3600)
-            
-    def get_full_edit(self, obj):
-        try:
-            if obj.updated_by.id != 1:
-                return "true"
-        except AttributeError:
-            return "false"
-        return "false"
 
     class Meta:
         model = SubmittalItem
@@ -215,7 +211,6 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
             'additional_text_locations',
             'doc_id',
             'doc_link',
-            'full_edit',
             'id',
             'item_desc',
             'para_context',

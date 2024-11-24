@@ -38,7 +38,8 @@ from drf_spectacular.types import OpenApiTypes
 
 from apps.teams.models import Team
 from .serializers import (
-    ProjectReadSerializer,
+    ProjectDetailsSerializer,
+    ProjectListSerializer,
     ProjectWriteSerializer,
     FileUploadSerializer,
     SubmittalItemReadSerializer,
@@ -135,9 +136,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, ProjectAccessPermissions]
 
     def get_serializer_class(self):
-        if self.action in ['list', 'retrieve']:
-            return ProjectReadSerializer
+        if self.action == 'retrieve':
+            return ProjectDetailsSerializer
+        if self.action == 'list':
+            return ProjectListSerializer
         return ProjectWriteSerializer
+    
 
     @extend_schema(
         parameters=[
@@ -152,6 +156,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         self.queryset = self.get_queryset_for_list()
         return super().list(request, *args, **kwargs)
+    
 
     def get_queryset_for_list(self):
         # Get the team_id from query parameters
@@ -173,10 +178,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
             except ValueError:
                 raise DRFValidationError("Invalid team_id. Must be an integer.")
         else:
-            
             queryset = self.queryset.filter(members=self.request.user)
 
-        return queryset.order_by('name')
+        return queryset.select_related('team').prefetch_related('members').order_by('name')
 
     def perform_create(self, serializer):
         print(f"serializer.validated_data: {serializer.validated_data}")
@@ -294,6 +298,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             raise DRFValidationError(f"Invalid filters: {e}")
 
         queryset = self.queryset.filter(project_id=project_id)
+        queryset = queryset.select_related('masterformat_section').select_related('document').select_related('project')
         queryset = queryset.exclude(submittal_type='Unclassified', masterformat_section__masterformat_number__regex='^0[012]\\d+')
 
         if search:

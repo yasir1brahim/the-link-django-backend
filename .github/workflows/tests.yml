@@ -43,5 +43,6 @@ jobs:
       - name: Run Tests
         env:
           DATABASE_URL: postgres://postgres:postgres_password@localhost:5432/postgres
+          S3_BUCKET: linkdocs
         run: |
           python manage.py test
