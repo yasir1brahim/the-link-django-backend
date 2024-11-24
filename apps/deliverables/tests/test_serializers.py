@@ -59,7 +59,7 @@ class ProjectReadSerializerTest(TestCase):
         serializer = ProjectReadSerializer(instance=self.project)
         expected_fields = {
             'id', 'name', 'description', 'team', 
-            'members', 'entitlements', 'user_limit', 'status',
+            'members', 'entitlements', 'user_limit',
             'start_date', 'end_date', 'is_archived',
             'doc_parsed', 'document_details', 'project_number',
             'project_type'

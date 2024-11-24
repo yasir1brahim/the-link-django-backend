@@ -147,7 +147,6 @@ class BaseImportCommand(BaseCommand):
             project = Project(
                 legacy_id=legacy_project['project_id'],
                 name=legacy_project['project_name'],
-                status=legacy_project['status'],
                 start_date=legacy_project['start_date'],
                 end_date=legacy_project['end_date'],
                 team=self.get_or_create_team(legacy_project['customer_id']),
