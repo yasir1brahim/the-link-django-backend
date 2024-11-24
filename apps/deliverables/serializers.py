@@ -180,7 +180,6 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
     additional_text_locations = serializers.JSONField()
     doc_id = serializers.IntegerField(source='document.id', allow_null=True)
     doc_link = serializers.SerializerMethodField()
-    full_edit = serializers.SerializerMethodField()
     id = serializers.IntegerField()
     item_desc = serializers.CharField(source='submittal_description')
     para_context = serializers.CharField(source='submittal_content')
@@ -205,14 +204,6 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
             return obj.document.document_path
         else:
             return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.document.document_path}, ExpiresIn=3600)
-            
-    def get_full_edit(self, obj):
-        try:
-            if obj.updated_by.id != 1:
-                return "true"
-        except AttributeError:
-            return "false"
-        return "false"
 
     class Meta:
         model = SubmittalItem
@@ -220,7 +211,6 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
             'additional_text_locations',
             'doc_id',
             'doc_link',
-            'full_edit',
             'id',
             'item_desc',
             'para_context',
