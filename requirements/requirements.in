@@ -30,3 +30,4 @@ whitenoise
 drf-writable-nested
 openpyxl
 pillow
+gunicorn
