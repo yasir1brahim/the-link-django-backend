@@ -3,8 +3,8 @@ from django.test import TestCase
 
 from django.utils import timezone
 from django.db.models import QuerySet
-from ..models import Project, UploadedFile, DocProcessingStatus, Entitlement
-from ..serializers import ProjectDetailsSerializer, ProjectMembership, ProjectWriteSerializer
+from ..models import Project, UploadedFile, DocProcessingStatus, Entitlement, SubmittalItem, MasterFormatSection
+from ..serializers import ProjectDetailsSerializer, ProjectMembership, ProjectWriteSerializer, SubmittalItemReadSerializer
 from apps.teams.models import Membership
 from rest_framework.exceptions import ValidationError
 from apps.users.models import CustomUser
@@ -359,3 +359,36 @@ class TestProjectWriteSerializer(TestCase):
         self.assertEqual(project.project_memberships.count(), 2)
         roles = set(project.project_memberships.values_list('role', flat=True))
         self.assertEqual(roles, {'project_member', 'project_admin'})
+
+
+class TestSubmittalItemReadSerializer(TestCase):
+    def setUp(self):
+        self.team = Team.objects.create(name="Test Team")
+        self.project = Project.objects.create(name="Test Project", team=self.team)
+
+        self.submittal_item = SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=MasterFormatSection.objects.create(masterformat_number="01000"),
+            document=UploadedFile.objects.create(name="Test Document", project=self.project, document_path="test/path"),
+        )
+
+    def test_serializer_contains_expected_fields(self):
+        """Test that serializer contains all expected fields"""
+        serializer = SubmittalItemReadSerializer(instance=self.submittal_item)
+        expected_fields = {
+            'additional_text_locations',
+            'doc_id',
+            'doc_link',
+            'id',
+            'item_desc',
+            'para_context',
+            'para_no',
+            'project_id',
+            'section_title',
+            'spec_section',
+            'submittal_number',
+            'text_loc',
+            'type',
+        }
+        self.assertEqual(set(serializer.data.keys()), expected_fields)
+
