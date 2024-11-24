@@ -34,13 +34,13 @@ class ProjectMembershipSerializer(serializers.ModelSerializer):
 class BaseProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
-        fields = ['id', 'name', 'description', 'team', 'members', 'entitlements',
+        fields = ['id', 'name', 'description', 'team', 'members',
                    'user_limit', 'start_date', 'end_date', 'is_archived', 
                    'project_number', 'project_type']
 
     members = ProjectMembershipSerializer(source="project_memberships", many=True, required=False)
     team = serializers.ReadOnlyField(source="team.id")
-    entitlements = serializers.SerializerMethodField(read_only=True)
+    # entitlements = serializers.SerializerMethodField(read_only=True)
     user_limit = serializers.ReadOnlyField()
 
     def get_entitlements(self, obj) -> list[str]:
@@ -136,7 +136,12 @@ class DocumentSerializer(serializers.ModelSerializer):
         model = UploadedFile
         fields = ['document_id', 'document_name', 'document_status', 'created_at', 'updated_at', 'document_subsections']
 
-class ProjectReadSerializer(BaseProjectSerializer):
+class ProjectListSerializer(BaseProjectSerializer):
+    class Meta:
+        model = Project
+        fields = BaseProjectSerializer.Meta.fields
+
+class ProjectDetailsSerializer(BaseProjectSerializer):
     doc_parsed = serializers.SerializerMethodField()
     document_details = serializers.SerializerMethodField()
 

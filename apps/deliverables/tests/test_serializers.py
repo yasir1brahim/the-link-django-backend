@@ -1,9 +1,10 @@
+import unittest
 from django.test import TestCase
 
 from django.utils import timezone
 from django.db.models import QuerySet
 from ..models import Project, UploadedFile, DocProcessingStatus, Entitlement
-from ..serializers import ProjectReadSerializer, ProjectMembership, ProjectWriteSerializer
+from ..serializers import ProjectDetailsSerializer, ProjectMembership, ProjectWriteSerializer
 from apps.teams.models import Membership
 from rest_framework.exceptions import ValidationError
 from apps.users.models import CustomUser
@@ -56,10 +57,10 @@ class ProjectReadSerializerTest(TestCase):
 
     def test_serializer_contains_expected_fields(self):
         """Test that serializer contains all expected fields"""
-        serializer = ProjectReadSerializer(instance=self.project)
+        serializer = ProjectDetailsSerializer(instance=self.project)
         expected_fields = {
             'id', 'name', 'description', 'team', 
-            'members', 'entitlements', 'user_limit',
+            'members', 'user_limit',
             'start_date', 'end_date', 'is_archived',
             'doc_parsed', 'document_details', 'project_number',
             'project_type'
@@ -68,7 +69,7 @@ class ProjectReadSerializerTest(TestCase):
 
     def test_team_field_returns_id(self):
         """Test that team field returns only the ID"""
-        serializer = ProjectReadSerializer(instance=self.project)
+        serializer = ProjectDetailsSerializer(instance=self.project)
         self.assertEqual(serializer.data['team'], self.team.id)
 
     def test_members_field_serialization(self):
@@ -79,26 +80,28 @@ class ProjectReadSerializerTest(TestCase):
             role="MEMBER"
         )
         
-        serializer = ProjectReadSerializer(instance=self.project)
+        serializer = ProjectDetailsSerializer(instance=self.project)
         self.assertEqual(len(serializer.data['members']), 1)
         self.assertEqual(serializer.data['members'][0]['user_id'], self.user.id)
         self.assertEqual(serializer.data['members'][0]['role'], "MEMBER")
 
+    @unittest.skip("Entitlements aren't used yet, so not calculated to improve performance")
     def test_get_entitlements_project_level(self):
         """Test entitlements method returns project-level entitlements when they exist"""
         self.project.entitlements.add(self.project_entitlement)
         
-        serializer = ProjectReadSerializer(instance=self.project)
+        serializer = ProjectDetailsSerializer(instance=self.project)
         self.assertEqual(
             list(serializer.data['entitlements']),
             ['project_level_entitlement']
         )
 
+    @unittest.skip("Entitlements aren't used yet, so not calculated to improve performance")
     def test_get_entitlements_team_level_fallback(self):
         """Test entitlements method falls back to team-level entitlements"""
         self.team.entitlements.add(self.team_entitlement)
         
-        serializer = ProjectReadSerializer(instance=self.project)
+        serializer = ProjectDetailsSerializer(instance=self.project)
         self.assertEqual(
             list(serializer.data['entitlements']),
             ['team_level_entitlement']
@@ -106,7 +109,7 @@ class ProjectReadSerializerTest(TestCase):
 
 
     def test_document_ordering(self):
-        serializer = ProjectReadSerializer(self.project)
+        serializer = ProjectDetailsSerializer(self.project)
         documents = serializer.data['document_details']
         
         # Check the order matches our status_order Case/When logic
@@ -134,7 +137,7 @@ class ProjectReadSerializerTest(TestCase):
             created_at=newer_time
         )
         
-        serializer = ProjectReadSerializer(self.project)
+        serializer = ProjectDetailsSerializer(self.project)
         documents = serializer.data['document_details']
         
         # Find documents with PENDING_PROCESSING status
@@ -159,7 +162,7 @@ class ProjectReadSerializerTest(TestCase):
         )
 
         # Act
-        result = ProjectReadSerializer(self.project).data['doc_parsed']
+        result = ProjectDetailsSerializer(self.project).data['doc_parsed']
 
         # Assert
         self.assertEqual(result, 5)
@@ -171,7 +174,7 @@ class ProjectReadSerializerTest(TestCase):
             description="New Description",
             team=self.team
         )
-        result = ProjectReadSerializer(new_project).data['document_details']
+        result = ProjectDetailsSerializer(new_project).data['document_details']
 
         # Assert
         self.assertEqual(result, [])
@@ -183,7 +186,7 @@ class ProjectReadSerializerTest(TestCase):
             description="New Description",
             team=self.team
         )
-        result = ProjectReadSerializer(new_project).data['doc_parsed']
+        result = ProjectDetailsSerializer(new_project).data['doc_parsed']
 
         # Assert
         self.assertEqual(result, 0)
