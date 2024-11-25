@@ -28,7 +28,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4.0.2
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
@@ -46,7 +46,7 @@ jobs:
             --build-arg ENVIRONMENT="${{ env.ENVIRONMENT }}" \
             --build-arg SECRET_KEY="${{ secrets.SECRET_KEY }}" \
             --build-arg DATABASE_URL="${{ secrets.DATABASE_URL }}" \
-            --build-arg AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            --build-arg AWS_ACCESS_KEY_ID="${{ vars.AWS_ACCESS_KEY_ID }}" \
             --build-arg AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
             --build-arg SIMPLE_JWT_SIGNING_KEY="${{ secrets.SIMPLE_JWT_SIGNING_KEY }}" \
             --build-arg CORS_ALLOWED_ORIGINS="${{ vars.CORS_ALLOWED_ORIGINS }}" \
