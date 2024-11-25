@@ -175,6 +175,11 @@ class FileUploadSerializer(serializers.Serializer):
     project_id = serializers.IntegerField()
 
 
+class CombineSubmittalItemsSerializer(serializers.Serializer):
+    lst_all_logs = serializers.ListField(child=serializers.DictField())
+    project_id = serializers.IntegerField()
+    prepared_object = serializers.DictField()
+
 
 class SubmittalItemReadSerializer(serializers.ModelSerializer):
     additional_text_locations = serializers.JSONField()
