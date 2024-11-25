@@ -8,6 +8,9 @@ import requests
 import re
 from enum import Enum
 from datetime import datetime
+from typing import TypedDict, List
+import ast
+import json
 
 import openpyxl
 from openpyxl.utils import get_column_letter
@@ -46,6 +49,7 @@ from .serializers import (
     SubmittalItemWriteSerializer,
     SubmittalItemListSerializer,
     ExcelExportHeaderSerializer,
+    CombineSubmittalItemsSerializer,
 )
 from .models import (
     Project,
@@ -678,7 +682,128 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='export-jet-build')
     def export_jet_build(self, request, *args, **kwargs):
         return self.export_to_jet_build(request, *args, **kwargs)
+    
 
+@extend_schema(
+    summary="Combine multiple submittal items into one.",
+    request=CombineSubmittalItemsSerializer,
+    responses={200: {'description': 'Rows combined'}},
+    description="Combine multiple submittal items into one.",
+    methods=["POST"]
+)
+@api_view(['POST'])
+def combine_rows(request):
+    def _ensure_not_str(obj):
+        if not isinstance(obj, str):
+            return obj
+        return _ensure_not_str(ast.literal_eval(obj))
+
+    serializer = CombineSubmittalItemsSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    project_id = serializer.validated_data['project_id']
+    project = Project.objects.get(id=project_id)
+    if not request.user.is_member_of_project(project):
+        return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
+
+
+    lst_all_logs_id = []
+    lst_all_logs_spec_section = []
+    lst_all_logs = []
+    # lst_page_no = []
+    lst_index = []
+    for log in serializer.validated_data['lst_all_logs']:
+        lst_all_logs_id.append(log['id'])
+        lst_all_logs_spec_section.append(log['spec_section'])
+        # lst_page_no.append(log['page_no'])
+        lst_index.append(log['index'])
+
+    # Combine all lists into a single list of tuples for sorting
+    combined_logs = list(zip(
+        lst_all_logs_spec_section,
+        lst_all_logs_id,
+        # lst_page_no,
+        lst_index,
+    ))
+
+    # Sort the combined logs based on page number and then by index number
+    sorted_combined_logs = sorted(
+        combined_logs,
+        key=lambda x: (
+            # x[2],  # page_no
+            x[2],
+        ),
+    )
+
+    # Extract the sorted sorted_combined_logs
+    sorted_lst_all_logs_id = [x[1] for x in sorted_combined_logs]
+
+    logging.info(sorted_combined_logs)
+    for log_id in sorted_lst_all_logs_id:
+        for log in serializer.validated_data['lst_all_logs']:
+            if log['id'] == log_id:
+                lst_all_logs.append(log)
+
+    get_db_logs = SubmittalItem.objects.filter(project_id=project_id, id__in=sorted_lst_all_logs_id)
+    
+    if not len(get_db_logs) == len(sorted_lst_all_logs_id):
+        return Response({'detail': 'Log ID not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Get the first log
+    first_log = None
+    logging.info(sorted_lst_all_logs_id)
+    for log in get_db_logs:
+        logging.info(log.id)
+        logging.info(sorted_lst_all_logs_id[0])
+        if log.id == sorted_lst_all_logs_id[0]:
+            first_log = log
+            break
+
+    prepared_object = serializer.validated_data['prepared_object']
+
+    # Update the first log with the prepared object
+    first_log.submittal_description = prepared_object['item_desc']
+    first_log.submittal_type = prepared_object['type']
+
+    target_additional_text_locations = []
+    initial_add_text_locs = first_log.additional_text_locations
+    if initial_add_text_locs:
+        initial_add_text_locs = _ensure_not_str(
+            initial_add_text_locs or []
+        )
+        target_additional_text_locations.extend(initial_add_text_locs)
+
+    for log in get_db_logs:
+        if log.id == sorted_lst_all_logs_id[0]:
+            continue
+
+        if log.submittal_content != first_log.submittal_content:
+            first_log.submittal_content += '\n' + log.submittal_content
+
+        text_loc = _ensure_not_str(log.text_location)
+        additional_text_locations = (
+            _ensure_not_str(
+                log.additional_text_locations or []
+            )
+        )
+
+        if text_loc:
+            target_additional_text_locations.append(text_loc)
+
+        if additional_text_locations:
+            target_additional_text_locations.extend(additional_text_locations)
+
+    first_log.additional_text_locations = list(
+        target_additional_text_locations,
+    )
+
+    first_log.save()
+
+    # Delete the rest of data
+    SubmittalItem.objects.filter(id__in=sorted_lst_all_logs_id[1:]).delete()
+
+    return Response({'message': 'Rows combined'}, status=status.HTTP_200_OK)
 
 def get_file_hash(uploaded_file):
     md5_hash = hashlib.md5()
