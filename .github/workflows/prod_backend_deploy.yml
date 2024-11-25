@@ -1,25 +1,22 @@
-name: Deploy to QA
+name: Deploy to Production
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: deliverables-dev
-  ECS_SERVICE: deliverables-dev-api-django           # name of the service
-  ECS_CLUSTER: deliverables-dev                     # name of the cluster
-  ECS_TASK_DEFINITION: .aws/task-definition.json     # path of the JSON task definition
-  CONTAINER_NAME: "deliverables-dev-api-django"           # name of the container name in the task definition
-  ENVIRONMENT: qa
+  ECR_REPOSITORY: deliverables-prod
+  ECS_SERVICE: deliverables-prod-api-django           # name of the service
+  ECS_CLUSTER: deliverables-prod                     # name of the cluster
+  ECS_TASK_DEFINITION: .aws/prod-task-definition.json     # path of the JSON task definition
+  CONTAINER_NAME: "deliverables-prod-api-django"           # name of the container name in the task definition
+  ENVIRONMENT: prod
 
 jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    environment: qa
+    environment: prod
 
     steps:
       - name: Checkout
