@@ -1,48 +1,77 @@
-import os
-import time
+from typing import TypedDict, List
+
 import logging
+import time
 import hashlib
 import boto3
-import shutil
 import requests
-import json
 import re
-from datetime import datetime
-
-from django.conf import settings
-from django.shortcuts import render, get_object_or_404
-from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
-from django.db.models import Q, Func, F
-from rest_framework.decorators import api_view, permission_classes, action
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.response import Response
-from rest_framework import generics, status
-from rest_framework.permissions import BasePermission
-from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
-from rest_framework.pagination import PageNumberPagination
-from rest_framework.decorators import action
-
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
-from drf_spectacular.types import OpenApiTypes
-
-from .serializers import (ProjectReadSerializer, ProjectWriteSerializer, FileUploadSerializer, SubmittalItemReadSerializer, SubmittalItemWriteSerializer,
-                          SubmittalItemListSerializer, ExcelExportHeaderSerializer)
-from rest_framework import viewsets
-from .models import (Entitlement, Project, ROLE_PROJECT_ADMIN, UploadedFile, SubmittalItem, SubmittalItemList, MasterFormatSection, SpecSection, DocProcessingStatus, ExcelExportHeader)
-from apps.teams.models import Team
-from .permissions import ProjectAccessPermissions, SubmittalItemAccessPermissions, SubmittalListAccessPermissions
-import logging
-from typing import TypedDict, Optional, List
 from enum import Enum
+from datetime import datetime
+from typing import TypedDict, List
+import ast
+import json
+
 import openpyxl
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+
 from django.http import HttpResponse
+from django.conf import settings
+from django.shortcuts import get_object_or_404
+from django.db.models import Q
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.response import Response
+from rest_framework import generics, status
+from rest_framework.exceptions import (
+    PermissionDenied,
+    ValidationError as DRFValidationError,
+)
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.decorators import action
+from rest_framework import viewsets
+
+from drf_spectacular.utils import (
+    extend_schema,
+    OpenApiParameter,
+    OpenApiResponse,
+)
+from drf_spectacular.types import OpenApiTypes
+
+from apps.teams.models import Team
+from .serializers import (
+    ProjectDetailsSerializer,
+    ProjectListSerializer,
+    ProjectWriteSerializer,
+    FileUploadSerializer,
+    SubmittalItemReadSerializer,
+    SubmittalItemWriteSerializer,
+    SubmittalItemListSerializer,
+    ExcelExportHeaderSerializer,
+    CombineSubmittalItemsSerializer,
+)
+from .models import (
+    Project,
+    UploadedFile,
+    SubmittalItem,
+    SubmittalItemList,
+    MasterFormatSection,
+    SpecSection,
+    DocProcessingStatus,
+    ExcelExportHeader,
+)
+from .permissions import (
+    ProjectAccessPermissions,
+    SubmittalItemAccessPermissions,
+    SubmittalListAccessPermissions,
+)
 from .constants import masterformat_to_section_title_map
+from .services import SubmittalService
 
 
 logger = logging.getLogger(__name__)
+
 
 s3 = boto3.client(
     "s3",
@@ -57,6 +86,7 @@ class ParsingMethod(str, Enum):
     REGEX_PRODUCT_DATA = "REGEX_PRODUCT_DATA"
     AI_SUBMITTAL = "AI_SUBMITTAL"
     UNKNOWN = "UNKNOWN"
+
 
 class SubmittalInfo(TypedDict):
     submittal_type: str
@@ -94,6 +124,7 @@ class SpecSubSection(TypedDict):
     master_format_section_number: str
     text_chunks: List[TextChunk]
 
+
 class SpecStatusRequest(TypedDict):
     new_status: str
     document_id: str
@@ -109,9 +140,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, ProjectAccessPermissions]
 
     def get_serializer_class(self):
-        if self.action in ['list', 'retrieve']:
-            return ProjectReadSerializer
+        if self.action == 'retrieve':
+            return ProjectDetailsSerializer
+        if self.action == 'list':
+            return ProjectListSerializer
         return ProjectWriteSerializer
+    
 
     @extend_schema(
         parameters=[
@@ -126,6 +160,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         self.queryset = self.get_queryset_for_list()
         return super().list(request, *args, **kwargs)
+    
 
     def get_queryset_for_list(self):
         # Get the team_id from query parameters
@@ -147,10 +182,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
             except ValueError:
                 raise DRFValidationError("Invalid team_id. Must be an integer.")
         else:
-            
             queryset = self.queryset.filter(members=self.request.user)
 
-        return queryset.order_by('name')
+        return queryset.select_related('team').prefetch_related('members').order_by('name')
 
     def perform_create(self, serializer):
         print(f"serializer.validated_data: {serializer.validated_data}")
@@ -174,6 +208,35 @@ class ProjectViewSet(viewsets.ModelViewSet):
         project.save()
         return Response( {"status": f"Project {status_message} successfully."},
         status=status.HTTP_200_OK )
+
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='submittal_id',
+                description='ID of the submittal to get the project ID',
+                required=True,
+                type=OpenApiTypes.INT
+            )
+        ],
+        responses={
+            200: OpenApiTypes.OBJECT,
+            400: OpenApiTypes.OBJECT
+        },
+        description="Get the project ID associated with a given submittal ID."
+    )
+    @action(detail=False, methods=['get'], url_path='project-id-by-submittal-id')
+    def project_id_by_submittal_id(self, request):
+        submittal_id = request.query_params.get('submittal_id')
+        if not submittal_id:
+            return Response({"error": "submittal_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            submittal_item = get_object_or_404(SubmittalItem, id=submittal_id)
+            project_id = submittal_item.project.id
+            return Response({"project_id": project_id}, status=status.HTTP_200_OK)
+        except ValueError:
+            return Response({"error": "Invalid submittal_id. Must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
 
 class SubmittalItemPagination(PageNumberPagination):
     page_query_param = 'page_number'
@@ -239,6 +302,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             raise DRFValidationError(f"Invalid filters: {e}")
 
         queryset = self.queryset.filter(project_id=project_id)
+        queryset = queryset.select_related('masterformat_section').select_related('document').select_related('project')
         queryset = queryset.exclude(submittal_type='Unclassified', masterformat_section__masterformat_number__regex='^0[012]\\d+')
 
         if search:
@@ -618,7 +682,128 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='export-jet-build')
     def export_jet_build(self, request, *args, **kwargs):
         return self.export_to_jet_build(request, *args, **kwargs)
+    
 
+@extend_schema(
+    summary="Combine multiple submittal items into one.",
+    request=CombineSubmittalItemsSerializer,
+    responses={200: {'description': 'Rows combined'}},
+    description="Combine multiple submittal items into one.",
+    methods=["POST"]
+)
+@api_view(['POST'])
+def combine_rows(request):
+    def _ensure_not_str(obj):
+        if not isinstance(obj, str):
+            return obj
+        return _ensure_not_str(ast.literal_eval(obj))
+
+    serializer = CombineSubmittalItemsSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    project_id = serializer.validated_data['project_id']
+    project = Project.objects.get(id=project_id)
+    if not request.user.is_member_of_project(project):
+        return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
+
+
+    lst_all_logs_id = []
+    lst_all_logs_spec_section = []
+    lst_all_logs = []
+    # lst_page_no = []
+    lst_index = []
+    for log in serializer.validated_data['lst_all_logs']:
+        lst_all_logs_id.append(log['id'])
+        lst_all_logs_spec_section.append(log['spec_section'])
+        # lst_page_no.append(log['page_no'])
+        lst_index.append(log['index'])
+
+    # Combine all lists into a single list of tuples for sorting
+    combined_logs = list(zip(
+        lst_all_logs_spec_section,
+        lst_all_logs_id,
+        # lst_page_no,
+        lst_index,
+    ))
+
+    # Sort the combined logs based on page number and then by index number
+    sorted_combined_logs = sorted(
+        combined_logs,
+        key=lambda x: (
+            # x[2],  # page_no
+            x[2],
+        ),
+    )
+
+    # Extract the sorted sorted_combined_logs
+    sorted_lst_all_logs_id = [x[1] for x in sorted_combined_logs]
+
+    logging.info(sorted_combined_logs)
+    for log_id in sorted_lst_all_logs_id:
+        for log in serializer.validated_data['lst_all_logs']:
+            if log['id'] == log_id:
+                lst_all_logs.append(log)
+
+    get_db_logs = SubmittalItem.objects.filter(project_id=project_id, id__in=sorted_lst_all_logs_id)
+    
+    if not len(get_db_logs) == len(sorted_lst_all_logs_id):
+        return Response({'detail': 'Log ID not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Get the first log
+    first_log = None
+    logging.info(sorted_lst_all_logs_id)
+    for log in get_db_logs:
+        logging.info(log.id)
+        logging.info(sorted_lst_all_logs_id[0])
+        if log.id == sorted_lst_all_logs_id[0]:
+            first_log = log
+            break
+
+    prepared_object = serializer.validated_data['prepared_object']
+
+    # Update the first log with the prepared object
+    first_log.submittal_description = prepared_object['item_desc']
+    first_log.submittal_type = prepared_object['type']
+
+    target_additional_text_locations = []
+    initial_add_text_locs = first_log.additional_text_locations
+    if initial_add_text_locs:
+        initial_add_text_locs = _ensure_not_str(
+            initial_add_text_locs or []
+        )
+        target_additional_text_locations.extend(initial_add_text_locs)
+
+    for log in get_db_logs:
+        if log.id == sorted_lst_all_logs_id[0]:
+            continue
+
+        if log.submittal_content != first_log.submittal_content:
+            first_log.submittal_content += '\n' + log.submittal_content
+
+        text_loc = _ensure_not_str(log.text_location)
+        additional_text_locations = (
+            _ensure_not_str(
+                log.additional_text_locations or []
+            )
+        )
+
+        if text_loc:
+            target_additional_text_locations.append(text_loc)
+
+        if additional_text_locations:
+            target_additional_text_locations.extend(additional_text_locations)
+
+    first_log.additional_text_locations = list(
+        target_additional_text_locations,
+    )
+
+    first_log.save()
+
+    # Delete the rest of data
+    SubmittalItem.objects.filter(id__in=sorted_lst_all_logs_id[1:]).delete()
+
+    return Response({'message': 'Rows combined'}, status=status.HTTP_200_OK)
 
 def get_file_hash(uploaded_file):
     md5_hash = hashlib.md5()
@@ -760,6 +945,10 @@ def change_encode_value(text):
         text = re.sub('\uf0a2', '’', text)
     return text
 
+
+# region submittal webhook
+# TODO: Move to separate file
+
 @extend_schema(
     request=FileUploadSerializer,
     responses={200: {'description': 'File uploaded successfully'}},
@@ -831,11 +1020,17 @@ def spec_status_webhook(request):
             logger.debug(f"SPEC STATUS WEBHOOK: all subsections have been processed for document {request_data['document_id']}")
             document.processing_status = DocProcessingStatus.PROCESSED
             document.save()
-    
+
     logger.debug(f"SPEC STATUS WEBHOOK: determining whether to assign submittal numbers...")
-    # TODO: assign submittal numbers
+    SubmittalService.assign_submittal_numbers(
+        # TODO: Replace `int` cast here with actually enforcing integer input
+        project=int(request_data['project_id']),
+        only_if_all_documents_processed=True,
+    )
 
     return Response(status=status.HTTP_200_OK)
+
+# endregion submittal webhook
 
 
 class SubmittalItemListViewSet(viewsets.ModelViewSet):

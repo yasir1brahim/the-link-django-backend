@@ -485,7 +485,6 @@ class ProjectArchiveTests(APITestCase):
             name='Project 1',
             team=self.team,
             is_archived=False,
-            status=Project.PROJECT_STATUS_OPEN 
         )
 
         ProjectMembership.objects.create(
@@ -517,7 +516,6 @@ class ProjectArchiveTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(self.project.is_archived)
-        self.assertEqual(self.project.status, Project.PROJECT_STATUS_OPEN)
         self.assertIn("Project archived successfully.", response.data["status"])
 
     def test_restore_project_by_admin(self):
@@ -533,7 +531,6 @@ class ProjectArchiveTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(self.project.is_archived)
-        self.assertEqual(self.project.status, Project.PROJECT_STATUS_OPEN)
         self.assertIn("Project unarchived successfully.", response.data["status"])
 
     def test_archive_project_by_member(self):
@@ -546,7 +543,6 @@ class ProjectArchiveTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertFalse(self.project.is_archived) 
-        self.assertEqual(self.project.status, Project.PROJECT_STATUS_OPEN)
 
 
 class SubmittalItemListViewSetTests(APITestCase):
@@ -623,3 +619,165 @@ class SubmittalItemListViewSetTests(APITestCase):
         response = self.client.post(reverse('submittal-list-list', kwargs={'project_id': self.project.id}), data={'name': 'New Submittal Item List', 'project_id': self.project.id})
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['created_by'], self.team_member.id)
+
+
+class TestCombineRows(APITestCase):
+    def setUp(self):
+        # Create test user
+        self.user = get_user_model().objects.create_user(
+            username='testuser',
+            password='testpass123'
+        )
+        self.team = Team.objects.create(name='Team 1', slug='team-1')
+        TeamMembership.objects.create(
+            user=self.user,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+        self.client.force_authenticate(user=self.user)
+        
+        # Create test project
+        self.project = Project.objects.create(
+            name='Test Project',
+            team=self.team,
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role=ROLE_PROJECT_MEMBER
+        )
+        self.masterformat_section = MasterFormatSection.objects.create(masterformat_number='033000')
+        
+        # Create test submittal items
+        self.submittal_items = []
+        for i in range(3):
+            item = SubmittalItem.objects.create(
+                project=self.project,
+                masterformat_section=self.masterformat_section,
+                submittal_description=f'Test Description {i}',
+                submittal_type=f'Type {i}',
+                submittal_content=f'Content {i}',
+                text_location={'page': i},
+                additional_text_locations=[{'section': f'S{i}'}]
+            )
+            self.submittal_items.append(item)
+
+    def test_successful_combine(self):
+        """Test successful combination of submittal items"""
+        url = reverse('deliverables:combine_rows')
+        data = {
+            'project_id': self.project.id,
+            'lst_all_logs': [
+                {
+                    'id': self.submittal_items[0].id,
+                    'spec_section': 'Section A',
+                    'index': 0
+                },
+                {
+                    'id': self.submittal_items[1].id,
+                    'spec_section': 'Section B',
+                    'index': 1
+                }
+            ],
+            'prepared_object': {
+                'item_desc': 'Combined Description',
+                'type': 'Combined Type'
+            }
+        }
+        
+        response = self.client.post(url, data, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['message'], 'Rows combined')
+        
+        # Verify first item was updated
+        first_item = SubmittalItem.objects.get(id=self.submittal_items[0].id)
+        self.assertEqual(first_item.submittal_description, 'Combined Description')
+        self.assertEqual(first_item.submittal_type, 'Combined Type')
+        self.assertEqual(first_item.additional_text_locations, [{'section': 'S0'}, {'page': 1}, {'section': 'S1'}])
+        self.assertEqual(first_item.submittal_content, 'Content 0\nContent 1')
+
+        # Verify second item was deleted
+        with self.assertRaises(SubmittalItem.DoesNotExist):
+            SubmittalItem.objects.get(id=self.submittal_items[1].id)
+
+    def test_unauthorized_user(self):
+        """Test unauthorized user cannot combine rows"""
+        # Create new user not in project
+        unauthorized_user = get_user_model().objects.create_user(
+            username='unauthorized',
+            password='testpass123'
+        )
+        self.client.force_authenticate(user=unauthorized_user)
+        
+        url = reverse('deliverables:combine_rows')
+        data = {
+            'project_id': self.project.id,
+            'lst_all_logs': [
+                {'id': self.submittal_items[0].id, 'spec_section': 'A', 'index': 0}
+            ],
+            'prepared_object': {
+                'item_desc': 'Test',
+                'type': 'Test'
+            }
+        }
+        
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_invalid_log_id(self):
+        """Test combining with non-existent log ID"""
+        url = reverse('deliverables:combine_rows')
+        data = {
+            'project_id': self.project.id,
+            'lst_all_logs': [
+                {'id': 99999, 'spec_section': 'A', 'index': 0}
+            ],
+            'prepared_object': {
+                'item_desc': 'Test',
+                'type': 'Test'
+            }
+        }
+        
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['detail'], 'Log ID not found')
+
+    def test_combine_with_text_locations(self):
+        """Test combining items preserves text locations correctly"""
+        url = reverse('deliverables:combine_rows')
+        data = {
+            'project_id': self.project.id,
+            'lst_all_logs': [
+                {
+                    'id': self.submittal_items[0].id,
+                    'spec_section': 'A',
+                    'index': 0
+                },
+                {
+                    'id': self.submittal_items[1].id,
+                    'spec_section': 'B',
+                    'index': 1
+                },
+                {
+                    'id': self.submittal_items[2].id,
+                    'spec_section': 'C',
+                    'index': 2
+                }
+            ],
+            'prepared_object': {
+                'item_desc': 'Combined',
+                'type': 'Combined'
+            }
+        }
+        
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify text locations for the items joined to the first item are preserved
+        # in additional_text_locations
+        combined_item = SubmittalItem.objects.get(id=self.submittal_items[0].id)
+        self.assertIn({'page': 1}, combined_item.additional_text_locations)
+        self.assertIn({'section': 'S1'}, combined_item.additional_text_locations)
+        self.assertIn({'page': 2}, combined_item.additional_text_locations)
+        self.assertIn({'section': 'S2'}, combined_item.additional_text_locations)

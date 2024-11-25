@@ -6,13 +6,6 @@ from django.conf import settings
 
 
 class Project(BaseModel):
-    PROJECT_STATUS_OPEN = "open"
-    PROJECT_STATUS_CLOSED = "closed"
-    PROJECT_STATUS_CHOICES = (
-        (PROJECT_STATUS_OPEN, "Open"),
-        (PROJECT_STATUS_CLOSED, "Closed"),
-    )
-
     legacy_id = models.IntegerField(blank=True, null=True)
 
     name = models.CharField(max_length=256)
@@ -24,7 +17,6 @@ class Project(BaseModel):
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="projects", through="ProjectMembership")
 
     is_archived = models.BooleanField(default=False)
-    status = models.CharField(max_length=256, choices=PROJECT_STATUS_CHOICES, default=PROJECT_STATUS_OPEN)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
 
@@ -186,7 +178,7 @@ class SubmittalItem(BaseModel):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.document.name} - {self.masterformat_section.masterformat_number} - {self.paragraph_number}: {self.submittal_description}"
+        return f"{self.document.name if self.document else ''} - {self.masterformat_section.masterformat_number} - {self.paragraph_number}: {self.submittal_description}"
     
 
 class SubmittalItemList(BaseModel):
