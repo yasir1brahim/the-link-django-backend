@@ -391,7 +391,7 @@ REST_AUTH = {
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", default="http://localhost:3000")
 
 CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", default="http://localhost:5173," + FRONTEND_BASE_URL).split(",")
-CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", default="http://localhost:8000,https://app-dj-qa-api.thelink.ai").split(",")
+CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", default="http://localhost:8000,https://app-dj-qa-api.thelink.ai,https://log-manager-api-prod.thelink.ai").split(",")
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "The Link",
