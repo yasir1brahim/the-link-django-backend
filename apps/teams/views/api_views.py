@@ -16,7 +16,12 @@ from ..invitations import send_invitation, process_invitation
 from ..models import Team, Invitation, Membership
 from ..permissions import TeamAccessPermissions, TeamModelAccessPermissions
 from ..roles import is_admin, is_member, ROLE_ADMIN
-from ..serializers import TeamSerializer, InvitationSerializer, MembershipSerializer
+from ..serializers import TeamSerializer, InvitationSerializer, MembershipSerializer, InvitedUserResetPasswordSerializer
+from apps.users.serializers import CustomPasswordResetSerializer
+from rest_framework.viewsets import ViewSet
+from apps.users.models import CustomUser as User
+import secrets 
+import string
 
 
 class AnonymousRetrieveOnlyPermission(BasePermission):
@@ -183,3 +188,71 @@ def api_accept_invitation(request, team_id, invitation_id):
     invitation.is_accepted = True
     invitation.save()
     return Response({'detail': 'Invitation accepted.'}, status=status.HTTP_200_OK)
+
+class InvitedUserResetPasswordViewSet(ViewSet):
+    permission_classes = (AnonymousRetrieveOnlyPermission, TeamModelAccessPermissions)
+
+    def create(self, request):
+        """Handle user creation and send password reset email."""
+        serializer = InvitedUserResetPasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            data = serializer.validated_data
+            email = data['email']
+            team_id = data['team_id']
+            team = self._get_team(team_id)
+            user_exists = self._check_user_exists(email)
+            if user_exists:
+                self._resend_invitation(request, email)
+                return Response({"message": "User already exists."}, 
+                                status=status.HTTP_200_OK)
+            
+            default_password = self._generate_password()
+            user = self._create_user(data, default_password)
+            self._create_membership(user, team, data['role'])
+            self._send_password_reset_email(request, email, default_password)
+            return Response({"message": "User created and password reset email sent."}, status=status.HTTP_201_CREATED)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def _get_team(self, team_id):
+        """Fetch the team or raise a 404 if not found."""
+        return get_object_or_404(Team, id=team_id)
+
+    def _check_user_exists(self, email):
+        """Check if user exists by email."""
+        if User.objects.filter(email=email).exists():
+            return User.objects.filter(email=email).exists()
+    
+    def _generate_password(self):
+        """Generate a random password."""
+        return ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+
+    def _create_user(self, data, password):
+        """Create and return a new user."""
+        return User.objects.create_user(
+            username=data['email'],
+            first_name=data['first_name'],
+            last_name=data['last_name'],
+            email=data['email'],
+            password=password
+        )
+
+    def _create_membership(self, user, team, role):
+        """Create team membership."""
+        Membership.objects.create(user=user, team=team, role=role)
+
+    def _send_password_reset_email(self, request, email, default_password):
+        """Send password reset email."""
+        password_reset_serializer = CustomPasswordResetSerializer(data={'email': email, 'password': default_password }, context={'request': request})
+        if password_reset_serializer.is_valid():
+            password_reset_serializer.save()
+        else:
+            return Response({"error": "Password reset email failed."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    def _resend_invitation(self, request, email):
+        """Resend invitation by sending a password reset email."""
+        user = User.objects.get(email=email)
+        new_password = self._generate_password()
+        user.set_password(new_password)
+        user.save()
+        self._send_password_reset_email(request, email, new_password)

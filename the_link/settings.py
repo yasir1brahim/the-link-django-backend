@@ -35,6 +35,10 @@ SECRET_KEY = os.environ.get("SECRET_KEY", default="django-insecure-BUNZkldzVq9rk
 
 # SECURITY WARNING: don"t run with debug turned on in production!
 DEBUG = os.environ.get("DEBUG", default=False)
+if ENVIRONMENT == 'local':
+    USE_HTTPS = False
+else:
+    USE_HTTPS = True
 ENABLE_DEBUG_TOOLBAR = os.environ.get("ENABLE_DEBUG_TOOLBAR", default=False) and "test" not in sys.argv
 
 # Note: It is not recommended to set ALLOWED_HOSTS to "*" in production

@@ -32,6 +32,7 @@ team_urlpatterns = (
 router = routers.DefaultRouter()
 router.register("api/teams", views.TeamViewSet)
 router.register("api/memberships", views.MembershipViewSet)
+router.register("api/invited-user", views.InvitedUserResetPasswordViewSet, basename="invited-user")
 urlpatterns += router.urls
 
 single_team_router = routers.DefaultRouter()
