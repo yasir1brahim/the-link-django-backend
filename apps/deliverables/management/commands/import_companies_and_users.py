@@ -95,13 +95,15 @@ class Command(BaseImportCommand):
                 continue
             self.get_or_create_user(user['id'])
 
-        projects = self.get_legacy_projects()        
-        print(f"Importing {len(projects)} projects from legacy database...")
-        for project in projects:
-            if Project.objects.filter(legacy_id=project['project_id']).exists():
-                print(f"Project with legacy_id {project['project_id']} already exists")
-                continue
-            self.get_or_create_project(project['project_id'])
+        import_projects = False
+        if import_projects:
+            projects = self.get_legacy_projects()        
+            print(f"Importing {len(projects)} projects from legacy database...")
+            for project in projects:
+                if Project.objects.filter(legacy_id=project['project_id']).exists():
+                    print(f"Project with legacy_id {project['project_id']} already exists")
+                    continue
+                self.get_or_create_project(project['project_id'])
         
         print("Mapping users to teams...")
         user_to_team_mappings = self.get_legacy_user_to_team_mappings()
