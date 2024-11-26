@@ -349,7 +349,23 @@ class Command(BaseImportCommand):
             self.django_project_id_to_team_id_map[project.id] = project.team_id
             self.legacy_project_user_counts[project.legacy_id] = project.users
 
+    def get_legacy_lists(self, cursor):
+        self.cursor.execute("SELECT * FROM saved_logs ORDER BY id DESC LIMIT 10")
+         # Get the column names from cursor description
+        columns = [col[0] for col in self.cursor.description]
+        
+        # Fetch all results
+        rows = cursor.fetchall()
+        
+        # Convert to list of dictionaries
+        results = [dict(zip(columns, row)) for row in rows]
+        return results
+    
 
+    def import_submittal_lists(self):
+        print("Importing submittal lists from legacy database...")
+        print("Run separate import command for this")
+        
     def handle(self, *args, **kwargs):
         self.connect_to_legacy_db()
         self.cursor = self.connection.cursor()
@@ -360,3 +376,5 @@ class Command(BaseImportCommand):
         self.map_users_to_companies()
         self.map_users_to_projects()
         self.import_submittal_items()
+        self.import_submittal_lists()
+

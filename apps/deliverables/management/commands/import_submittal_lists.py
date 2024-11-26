@@ -32,8 +32,5 @@ class Command(BaseImportCommand):
             new_list.save()
 
             submittal_item_ids = legacy_list['records'][1:-1].split(', ')
-            for submittal_item_id in submittal_item_ids:
-                submittal_item = SubmittalItem.objects.filter(legacy_id=int(submittal_item_id)).first()
-                if submittal_item:
-                    new_list.submittals.add(submittal_item)
+            new_list.submittals.add(*submittal_item_ids)
             print(new_list)
