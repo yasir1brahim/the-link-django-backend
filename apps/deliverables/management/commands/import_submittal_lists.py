@@ -34,5 +34,10 @@ class Command(BaseImportCommand):
             new_list.save()
 
             submittal_item_ids = legacy_list['records'][1:-1].split(', ')
-            new_list.submittals.add(*[legacy_ids_to_django_ids[int(submittal_item_id)] for submittal_item_id in submittal_item_ids])
+            django_submittal_item_ids = []
+            for submittal_item_id in submittal_item_ids:
+                django_id = legacy_ids_to_django_ids.get(int(submittal_item_id))
+                if django_id:
+                    django_submittal_item_ids.append(django_id)
+            new_list.submittals.add(*django_submittal_item_ids)
             print(new_list)
