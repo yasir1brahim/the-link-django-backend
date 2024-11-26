@@ -5,7 +5,7 @@ class Command(BaseImportCommand):
     help = "Import submittal lists from legacy database"
 
     def get_legacy_lists(self, cursor):
-        cursor.execute("SELECT * FROM saved_logs ORDER BY id DESC LIMIT 10")
+        cursor.execute("SELECT * FROM saved_logs ORDER BY id DESC")
          # Get the column names from cursor description
         columns = [col[0] for col in cursor.description]
         
