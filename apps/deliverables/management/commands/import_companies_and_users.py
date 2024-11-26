@@ -87,6 +87,9 @@ class Command(BaseImportCommand):
         print("Importing users from legacy database...")
         users = self.get_legacy_users()
         for user in users:
+            if 'pjdick' in user['email_address']:   
+                print(user)
+                print("--------------------------------")
             if CustomUser.objects.filter(legacy_id=user['id']).exists():
                 print(f"User with legacy_id {user['id']} already exists")
                 continue
