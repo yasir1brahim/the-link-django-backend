@@ -115,16 +115,16 @@ class Command(BaseImportCommand):
                 team=team, 
                 role=self.map_legacy_role_to_team_role(user.legacy_role_id)
             )
-
-        print("Mapping users to projects...")
-        user_to_project_mappings = self.get_legacy_user_to_project_mappings()
-        for user_mapping in user_to_project_mappings:
-            user = self.get_or_create_user(user_mapping['user_id'])
-            project = self.get_or_create_project(user_mapping['project_id'])
-            ProjectMembership.objects.get_or_create(
-                user=user, 
-                project=project, 
-                role=self.map_legacy_role_to_project_role(user.legacy_role_id)
-            )
+        if import_projects:
+            print("Mapping users to projects...")
+            user_to_project_mappings = self.get_legacy_user_to_project_mappings()
+            for user_mapping in user_to_project_mappings:
+                user = self.get_or_create_user(user_mapping['user_id'])
+                project = self.get_or_create_project(user_mapping['project_id'])
+                ProjectMembership.objects.get_or_create(
+                    user=user, 
+                    project=project, 
+                    role=self.map_legacy_role_to_project_role(user.legacy_role_id)
+                )
 
         print("Import complete!")
