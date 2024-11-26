@@ -564,3 +564,6 @@ AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", default="")
 S3_BUCKET = os.environ.get("S3_BUCKET", default="")
 LAMBDA_FUNCTION_URL = os.environ.get("LAMBDA_FUNCTION_URL", default="")
 BACKEND_CALLBACK_URL = os.environ.get("BACKEND_CALLBACK_URL", default="")
+
+NOTICES_LAMBDA_FUNCTION_URL = os.environ.get("NOTICES_LAMBDA_FUNCTION_URL", default="")
+BACKEND_NOTICES_CALLBACK_URL = os.environ.get("BACKEND_NOTICES_CALLBACK_URL", default="")
