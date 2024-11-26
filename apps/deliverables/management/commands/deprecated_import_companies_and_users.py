@@ -50,6 +50,7 @@ class Command(BaseImportCommand):
         # Convert to list of dictionaries
         results = [dict(zip(columns, row)) for row in rows]
         return results
+    
     def get_legacy_user_to_team_mappings(self):
         cursor = self.connection.cursor()
         cursor.execute("SELECT * FROM employees ORDER BY user_id ASC")
