@@ -20,6 +20,8 @@ class Command(BaseImportCommand):
         self.connect_to_legacy_db()
         cursor = self.connection.cursor()
         legacy_lists = self.get_legacy_lists(cursor)
+        submittal_items = SubmittalItem.objects.all()
+        legacy_ids_to_django_ids = {submittal_item.legacy_id: submittal_item.id for submittal_item in submittal_items}
         print(legacy_lists)
 
         for legacy_list in legacy_lists:
@@ -32,5 +34,5 @@ class Command(BaseImportCommand):
             new_list.save()
 
             submittal_item_ids = legacy_list['records'][1:-1].split(', ')
-            new_list.submittals.add(*submittal_item_ids)
+            new_list.submittals.add(*[legacy_ids_to_django_ids[int(submittal_item_id)] for submittal_item_id in submittal_item_ids])
             print(new_list)
