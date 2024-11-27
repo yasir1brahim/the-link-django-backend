@@ -45,7 +45,6 @@ class Command(BaseImportCommand):
     def import_companies(self):
         print("Importing companies from legacy database...")
         legacy_companies = self.get_legacy_companies()
-        print(legacy_companies)
 
         for legacy_company in legacy_companies:
             team = self.get_or_create_team(legacy_company['customer_id'], legacy_company)
@@ -56,6 +55,8 @@ class Command(BaseImportCommand):
             legacy_admin_id = legacy_company['customer_id']
             user = self.get_or_create_user(legacy_admin_id)
             Membership.objects.create(user_id=user, team_id=team.id, role=ROLE_ADMIN)
+        print(f"Imported {len(legacy_companies)} companies from legacy database")
+        print("Company names:", [company.get('customer_name') for company in legacy_companies])
 
 
     def get_legacy_projects(self):
@@ -134,7 +135,6 @@ class Command(BaseImportCommand):
     def import_projects(self):
         print("Importing projects from legacy database...")
         legacy_projects = self.get_legacy_projects()
-        print(legacy_projects)
 
         for legacy_project in legacy_projects:
             project = self.get_or_create_project(legacy_project['project_id'], legacy_project)
@@ -142,6 +142,7 @@ class Command(BaseImportCommand):
             self.django_project_id_to_team_id_map[project.id] = project.team_id
             user_count = legacy_project['users']
             self.legacy_project_user_counts[legacy_project['project_id']] = user_count
+        print(f"Imported {len(legacy_projects)} projects from legacy database")
 
     def get_or_create_user(self, legacy_id, legacy_user_from_import = None):
         legacy_user = legacy_user_from_import
@@ -149,7 +150,6 @@ class Command(BaseImportCommand):
             return self.legacy_user_id_to_user_id[legacy_id]
         if not legacy_user:
             legacy_user = self.get_legacy_user(legacy_id)
-        print("creating user:", legacy_user)
         try:
             first_name = legacy_user['full_name'].split(' ')[0]
             last_name = legacy_user['full_name'].split(' ')[1]
@@ -175,7 +175,9 @@ class Command(BaseImportCommand):
         for user in users:
             user_id = self.get_or_create_user(user['id'], user)
             self.legacy_user_id_to_user_id[user['id']] = user_id
-
+        print(f"Imported {len(users)} users from legacy database")
+        print("User emails:", [user.get('email_address') for user in users])
+        
     def get_legacy_user_to_team_mappings(self):
         cursor = self.connection.cursor()
         cursor.execute("SELECT * FROM employees ORDER BY user_id ASC")
