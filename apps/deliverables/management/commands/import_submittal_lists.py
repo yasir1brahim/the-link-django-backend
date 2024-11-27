@@ -1,6 +1,6 @@
 from .base_import_command import BaseImportCommand
 from apps.deliverables.models import SubmittalItemList, SubmittalItem
-
+from django.conf import settings
 class Command(BaseImportCommand):
     help = "Import submittal lists from legacy database"
 
@@ -17,6 +17,9 @@ class Command(BaseImportCommand):
         return results
 
     def handle(self, *args, **kwargs):
+        print("Importing data from legacy database...")
+        print("Database host:", settings.LEGACY_DB_HOST)
+        input("Press Enter to continue...")
         self.connect_to_legacy_db()
         cursor = self.connection.cursor()
         legacy_lists = self.get_legacy_lists(cursor)
@@ -26,7 +29,11 @@ class Command(BaseImportCommand):
 
         for legacy_list in legacy_lists:
             print(legacy_list)
-            project = self.get_or_create_project(legacy_list['project_id'])
+            try:
+                project = self.get_or_create_project(legacy_list['project_id'])
+            except Exception as e:
+                print(f"Error getting or creating project for legacy list {legacy_list['view_name']}: {e}")
+                continue
             new_list = SubmittalItemList(
                 project=project,
                 name=legacy_list['view_name'],
@@ -40,4 +47,5 @@ class Command(BaseImportCommand):
                 if django_id:
                     django_submittal_item_ids.append(django_id)
             new_list.submittals.add(*django_submittal_item_ids)
+            new_list.save()
             print(new_list)

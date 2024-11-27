@@ -367,6 +367,9 @@ class Command(BaseImportCommand):
         print("Run separate import command for this")
         
     def handle(self, *args, **kwargs):
+        print("Importing data from legacy database...")
+        print("Database host:", settings.LEGACY_DB_HOST)
+        input("Press Enter to continue...")
         self.connect_to_legacy_db()
         self.cursor = self.connection.cursor()
         # self.set_idempotency_maps()
