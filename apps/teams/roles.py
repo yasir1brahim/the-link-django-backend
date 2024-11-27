@@ -15,13 +15,16 @@ ROLE_CHOICES = (
 def is_member(user: CustomUser, team) -> bool:
     if not team:
         return False
+    if user.is_superuser:
+        return True
     return team.members.filter(id=user.id).exists()
 
 
 def is_admin(user: CustomUser, team) -> bool:
     if not team:
         return False
-
+    if user.is_superuser:
+        return True
     from .models import Membership
 
     return Membership.objects.filter(team=team, user=user, role=ROLE_ADMIN).exists()
