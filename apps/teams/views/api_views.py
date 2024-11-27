@@ -55,6 +55,8 @@ class TeamViewSet(
     permission_classes = (IsAuthenticatedOrHasUserAPIKey, TeamAccessPermissions)
 
     def get_queryset(self):
+        if self.request.user.is_superuser:
+            return self.queryset
         # filter queryset based on logged in user
         return self.request.user.teams.order_by("name")
 
@@ -107,6 +109,8 @@ class MembershipViewSet(
     permission_classes = (IsAuthenticatedOrHasUserAPIKey, TeamModelAccessPermissions)
 
     def get_queryset(self):
+        if self.request.user.is_superuser:
+            return self.queryset
         # filter queryset based on logged in user
         return self.queryset.filter(team__in=self.request.user.teams.all())
 

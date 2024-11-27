@@ -60,9 +60,11 @@ class CustomPasswordResetSerializer(serializers.Serializer):
             'password': default_password
         }
 
-        email_template = 'account/email/password_reset_key_message.html'
-        body = render_to_string(email_template, context)
-        send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False)
+        email_template_text = 'account/email/password_reset_key_message.txt'
+        email_template_html = 'account/email/password_reset_key_message.html'
+        body_text = render_to_string(email_template_text, context)
+        body_html = render_to_string(email_template_html, context)
+        send_mail(subject, body_text, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False, html_message=body_html)
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
     uid = serializers.CharField()

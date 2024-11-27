@@ -18,7 +18,7 @@ class TeamViewSetTest(APITestCase):
         self.other_team = Team.objects.create(name='Team 2', slug='team-2')
         self.team_admin = CustomUser.objects.create_user(username='team_admin', password='password123')
         self.team_member = CustomUser.objects.create_user(username='team_member', password='password123')
-
+        self.superuser = CustomUser.objects.create_superuser(username='superuser', password='password123')
         TeamMembership.objects.create(user=self.team_admin, team=self.team, role=ROLE_ADMIN)
         TeamMembership.objects.create(user=self.team_member, team=self.team, role=ROLE_MEMBER)
 
@@ -103,6 +103,28 @@ class TeamViewSetTest(APITestCase):
         response = self.client.delete(reverse('teams:team-detail', kwargs={'pk': self.team.id}))
         self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
 
+    def test_superuser_can_view_all_teams(self):
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.get(reverse('teams:team-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 2)
+
+    def test_superuser_can_view_other_teams(self):
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.get(reverse('teams:team-detail', kwargs={'pk': self.other_team.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['id'], self.other_team.id)
+
+    def test_superuser_can_update_team(self):
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.put(reverse('teams:team-detail', kwargs={'pk': self.other_team.id}), {'name': 'Updated Team 2'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['name'], 'Updated Team 2')
+
+    def test_superuser_cannot_delete_team(self):
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.delete(reverse('teams:team-detail', kwargs={'pk': self.other_team.id}))
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
 
 class MembershipViewSetTest(APITestCase):
     def setUp(self):
@@ -113,6 +135,7 @@ class MembershipViewSetTest(APITestCase):
         self.team_admin = CustomUser.objects.create_user(username='team_admin', password='password123')
         self.team_member1 = CustomUser.objects.create_user(username='team_member1', password='password123')
         self.team_member2 = CustomUser.objects.create_user(username='team_member2', password='password123')
+        self.superuser = CustomUser.objects.create_superuser(username='superuser', password='password123')
 
         self.team_membership_admin = TeamMembership.objects.create(user=self.team_admin, team=self.team, role=ROLE_ADMIN)
         self.team_membership_member1 = TeamMembership.objects.create(user=self.team_member1, team=self.team, role=ROLE_MEMBER)
@@ -130,6 +153,11 @@ class MembershipViewSetTest(APITestCase):
         response = self.client.delete(reverse('teams:membership-detail', kwargs={'pk': self.team_membership_member1.id}))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_superuser_can_delete_team_membership(self):
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.delete(reverse('teams:membership-detail', kwargs={'pk': self.team_membership_member1.id}))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
     def test_team_admin_can_update_team_membership(self):
         self.client.force_authenticate(user=self.team_admin)
         response = self.client.put(reverse('teams:membership-detail', kwargs={'pk': self.team_membership_member1.id}), {'role': ROLE_ADMIN})
@@ -140,6 +168,12 @@ class MembershipViewSetTest(APITestCase):
         self.client.force_authenticate(user=self.team_member1)
         response = self.client.put(reverse('teams:membership-detail', kwargs={'pk': self.team_membership_member1.id}), {'role': ROLE_ADMIN})
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_superuser_can_update_team_membership(self):
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.put(reverse('teams:membership-detail', kwargs={'pk': self.team_membership_member1.id}), {'role': ROLE_ADMIN})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['role'], ROLE_ADMIN)
 
     def test_team_admin_cannot_update_other_team_memberships(self):
         self.client.force_authenticate(user=self.team_admin)
@@ -159,12 +193,18 @@ class InvitationViewSetTest(APITestCase):
         self.other_team = Team.objects.create(name='Team 2', slug='team-2')
         self.team_admin = CustomUser.objects.create_user(username='team_admin', password='password123')
         self.team_member = CustomUser.objects.create_user(username='team_member', password='password123')
+        self.superuser = CustomUser.objects.create_superuser(username='superuser', password='password123')
 
         self.team_membership_admin = TeamMembership.objects.create(user=self.team_admin, team=self.team, role=ROLE_ADMIN)
         self.team_membership_member = TeamMembership.objects.create(user=self.team_member, team=self.team, role=ROLE_MEMBER)
 
     def test_team_admin_can_create_invitation(self):
         self.client.force_authenticate(user=self.team_admin)
+        response = self.client.post(reverse('single_team:invitation-list', kwargs={'team_id': self.team.id}), {'team': self.team.id, 'email': 'test@example.com', 'role': ROLE_MEMBER})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_superuser_can_create_invitation(self):
+        self.client.force_authenticate(user=self.superuser)
         response = self.client.post(reverse('single_team:invitation-list', kwargs={'team_id': self.team.id}), {'team': self.team.id, 'email': 'test@example.com', 'role': ROLE_MEMBER})
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
@@ -185,6 +225,12 @@ class InvitationViewSetTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['results']), 0)
 
+    def test_superuser_can_view_team_invitations(self):
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.get(reverse('single_team:invitation-list', kwargs={'team_id': self.team.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 0)
+
     def test_team_member_cannot_view_their_team_invitations(self):
         self.client.force_authenticate(user=self.team_member)
         response = self.client.get(reverse('single_team:invitation-list', kwargs={'team_id': self.team.id}))
@@ -192,6 +238,12 @@ class InvitationViewSetTest(APITestCase):
 
     def test_team_admin_can_delete_their_team_invitations(self):
         self.client.force_authenticate(user=self.team_admin)
+        invitation = Invitation.objects.create(email='test@example.com', team=self.team, invited_by=self.team_admin, role=ROLE_MEMBER)
+        response = self.client.delete(reverse('single_team:invitation-detail', kwargs={'team_id': self.team.id, 'pk': invitation.id}))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_superuser_can_delete_team_invitations(self):
+        self.client.force_authenticate(user=self.superuser)
         invitation = Invitation.objects.create(email='test@example.com', team=self.team, invited_by=self.team_admin, role=ROLE_MEMBER)
         response = self.client.delete(reverse('single_team:invitation-detail', kwargs={'team_id': self.team.id, 'pk': invitation.id}))
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
@@ -204,6 +256,13 @@ class InvitationViewSetTest(APITestCase):
 
     def test_team_admin_can_update_their_team_invitations(self):
         self.client.force_authenticate(user=self.team_admin)
+        invitation = Invitation.objects.create(email='test@example.com', team=self.team, invited_by=self.team_admin, role=ROLE_MEMBER)
+        response = self.client.patch(reverse('single_team:invitation-detail', kwargs={'team_id': self.team.id, 'pk': invitation.id}), {'email': 'test2@example.com'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['email'], 'test2@example.com')
+
+    def test_superuser_can_update_team_invitations(self):
+        self.client.force_authenticate(user=self.superuser)
         invitation = Invitation.objects.create(email='test@example.com', team=self.team, invited_by=self.team_admin, role=ROLE_MEMBER)
         response = self.client.patch(reverse('single_team:invitation-detail', kwargs={'team_id': self.team.id, 'pk': invitation.id}), {'email': 'test2@example.com'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
