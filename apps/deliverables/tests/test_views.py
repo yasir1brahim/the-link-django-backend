@@ -27,6 +27,11 @@ class ProjectViewSetQuerySetTests(APITestCase):
             username='team1_admin',
             password='password123'
         )
+        self.superuser = self.User.objects.create_superuser(username='superuser', password='password123')
+        self.member_of_no_team = self.User.objects.create_user(
+            username='member_of_no_team',
+            password='password123'
+        )
         
         # Create teams
         self.team1 = Team.objects.create(name='Team 1', slug='team-1')
@@ -129,9 +134,22 @@ class ProjectViewSetQuerySetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['results']), 2)
 
+    def test_superuser_can_see_all_projects(self):
+        """Test that superusers can see all projects"""
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 3)
+
     def test_team_admin_can_access_project_detail(self):
         """Test that team admins can access project detail"""
         self.client.force_authenticate(user=self.team1_admin)
+        response = self.client.get(reverse('deliverables:project-detail', kwargs={'pk': self.project1.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_superuser_can_access_project_detail(self):
+        """Test that superusers can access project detail"""
+        self.client.force_authenticate(user=self.superuser)
         response = self.client.get(reverse('deliverables:project-detail', kwargs={'pk': self.project1.id}))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -189,6 +207,7 @@ class ProjectViewSetQuerySetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
+
 class ProjectViewSetTests(APITestCase):
     def setUp(self):
         self.client = APIClient()
@@ -202,6 +221,7 @@ class ProjectViewSetTests(APITestCase):
             username='company_member', 
             password='password123'
         )
+        self.superuser = self.User.objects.create_superuser(username='superuser', password='password123')
         self.team = Team.objects.create(name='Team 1', slug='team-1')
         TeamMembership.objects.create(
             user=self.company_admin,
@@ -238,6 +258,18 @@ class ProjectViewSetTests(APITestCase):
         self.assertEqual(project.project_type, 'Test Type')
         self.assertEqual(project.team, self.team)
 
+    def test_superuser_can_create_project(self):
+        """Test that a superuser can create a project"""
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.post(reverse('deliverables:project-list'), {
+            'name': 'New Project',
+            'project_number': '789012',
+            'project_type': 'Test Type',
+            'team': self.team.id,
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
     def test_company_non_admin_cannot_create_project(self):
         """Test that a company non-admin cannot create a project"""
         self.client.force_authenticate(user=self.company_member)
@@ -268,6 +300,19 @@ class ProjectViewSetTests(APITestCase):
         self.assertEqual(project.project_number, '111111')
         self.assertEqual(project.project_type, 'Updated Type')
         self.assertEqual(project.team, self.team)
+
+    def test_superuser_can_update_project(self):
+        """Test that a superuser can update a project"""
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.put(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}), {
+            'name': 'Updated Project',
+            'project_number': '111111',
+            'project_type': 'Updated Type',
+            'team': self.team.id,
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
 
     def test_project_admin_can_update_project(self):
         """Test that a project admin can update a project"""
@@ -317,6 +362,12 @@ class ProjectViewSetTests(APITestCase):
 
         self.assertFalse(Project.objects.filter(id=self.existing_project.id).exists())
 
+    def test_superuser_can_delete_project(self):
+        """Test that a superuser can delete a project"""
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.delete(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
     def test_company_member_cannot_delete_project(self):
         """Test that a company member cannot delete a project"""
         self.client.force_authenticate(user=self.company_member)
@@ -334,6 +385,12 @@ class ProjectViewSetTests(APITestCase):
         response = self.client.delete(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_non_project_member_cannot_view_project(self):
+        """Test that a non-project member cannot view a project"""
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.get(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
 
 class UploadFileTests(APITestCase):
     def setUp(self):
@@ -348,6 +405,7 @@ class UploadFileTests(APITestCase):
             username='company_member', 
             password='password123'
         )
+        self.superuser = self.User.objects.create_superuser(username='superuser', password='password123')
         self.team = Team.objects.create(name='Team 1', slug='team-1')
         TeamMembership.objects.create(
             user=self.company_admin,
@@ -403,6 +461,15 @@ class UploadFileTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
+    def test_superuser_can_upload_file_to_project(self):
+        """Test that a superuser can upload a file to a project"""
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.post(reverse('deliverables:upload_file'), {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
     def test_company_member_cannot_upload_file_to_project_they_are_not_a_member_of(self):
         """Test that a company member cannot upload a file to a project they are not a member of"""
         self.client.force_authenticate(user=self.company_member)
@@ -426,7 +493,7 @@ class SubmittalItemViewSetTests(APITestCase):
             username='non_member', 
             password='password123'
         )
-
+        self.superuser = self.User.objects.create_superuser(username='superuser', password='password123')
         self.team = Team.objects.create(name='Team 1', slug='team-1')
         TeamMembership.objects.create(
             user=self.user,
@@ -458,6 +525,14 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(len(response.data['message']), 1)
         self.assertEqual(response.data['message'][0]['id'], self.submittal_item.id)
 
+    def test_superuser_can_see_submittal_items_for_project(self):
+        """Test that a superuser can see submittal items for a project"""
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['message']), 1)
+        self.assertEqual(response.data['message'][0]['id'], self.submittal_item.id)
+
     def test_user_cannot_see_submittal_items_for_other_projects(self):
         """Test that users cannot see submittal items for projects they are not a member of"""
         self.client.force_authenticate(user=self.non_member)
@@ -472,6 +547,7 @@ class ProjectArchiveTests(APITestCase):
         self.user = self.User.objects.create_user(username='user1', password='password123')
         self.client.force_authenticate(user=self.user)
         self.admin_user = self.User.objects.create_user(username='admin_user', password='adminpass')
+        self.superuser = self.User.objects.create_superuser(username='superuser', password='password123')
         self.client.force_authenticate(user=self.admin_user)
 
         self.team = Team.objects.create(name='Team 1', slug='team-1')
@@ -533,6 +609,22 @@ class ProjectArchiveTests(APITestCase):
         self.assertFalse(self.project.is_archived)
         self.assertIn("Project unarchived successfully.", response.data["status"])
 
+    def test_superuser_can_archive_project(self):
+        """Test that a superuser can archive a project"""
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.post(reverse('deliverables:project-archive', args=[self.project.id]), data={'action': 'archive', 'team': self.team_id})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.project.refresh_from_db()
+        self.assertTrue(self.project.is_archived)
+
+    def test_superuser_can_restore_project(self):
+        """Test that a superuser can restore an archived project"""
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.post(reverse('deliverables:project-archive', args=[self.project.id]), data={'action': 'restore', 'team': self.team_id})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.project.refresh_from_db()
+        self.assertFalse(self.project.is_archived)
+
     def test_archive_project_by_member(self):
         """Test that a regular member cannot archive a project."""
         self.client.force_authenticate(user=self.user)
@@ -550,6 +642,7 @@ class SubmittalItemListViewSetTests(APITestCase):
         self.client = APIClient()
         self.User = get_user_model()
         self.team_member = self.User.objects.create_user(username='team_member', password='password123')
+        self.superuser = self.User.objects.create_superuser(username='superuser', password='password123')
         self.team = Team.objects.create(name='Team 1', slug='team-1')
         TeamMembership.objects.create(
             user=self.team_member,
@@ -597,6 +690,13 @@ class SubmittalItemListViewSetTests(APITestCase):
         self.assertEqual(len(response.data['results'][0]['submittals']), 1)
         self.assertEqual(response.data['results'][0]['submittals'][0], self.submittal_item_in_list.id)
 
+    def test_superuser_can_see_submittal_lists_for_project(self):
+        """Test that a superuser can see submittal lists for a project"""
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.get(reverse('submittal-list-list', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['results'][0]['id'], self.submittal_item_list.id)
+
     def test_team_member_cannot_see_submittal_lists_for_other_projects(self):
         """Test that a team member cannot see submittal lists for other projects"""
         self.client.force_authenticate(user=self.team_member)
@@ -606,6 +706,16 @@ class SubmittalItemListViewSetTests(APITestCase):
     def test_team_member_can_create_submittal_list(self):
         """Test that a team member can create a submittal list"""
         self.client.force_authenticate(user=self.team_member)
+        response = self.client.post(reverse(
+            'submittal-list-list',
+            kwargs={'project_id': self.project.id}), 
+            data={'name': 'New Submittal Item List', 'submittals': [self.submittal_item_in_list.id]}
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_superuser_can_create_submittal_list(self):
+        """Test that a superuser can create a submittal list"""
+        self.client.force_authenticate(user=self.superuser)
         response = self.client.post(reverse(
             'submittal-list-list',
             kwargs={'project_id': self.project.id}), 
@@ -628,6 +738,7 @@ class TestCombineRows(APITestCase):
             username='testuser',
             password='testpass123'
         )
+        self.superuser = get_user_model().objects.create_superuser(username='superuser', password='password123')
         self.team = Team.objects.create(name='Team 1', slug='team-1')
         TeamMembership.objects.create(
             user=self.user,
@@ -700,6 +811,32 @@ class TestCombineRows(APITestCase):
         # Verify second item was deleted
         with self.assertRaises(SubmittalItem.DoesNotExist):
             SubmittalItem.objects.get(id=self.submittal_items[1].id)
+
+    def test_superuser_can_combine_rows(self):
+        """Test that a superuser can combine rows"""
+        url = reverse('deliverables:combine_rows')
+        data = {
+            'project_id': self.project.id,
+            'lst_all_logs': [
+                {
+                    'id': self.submittal_items[0].id,
+                    'spec_section': 'Section A',
+                    'index': 0
+                },
+                {
+                    'id': self.submittal_items[1].id,
+                    'spec_section': 'Section B',
+                    'index': 1
+                }
+            ],
+            'prepared_object': {
+                'item_desc': 'Combined Description',
+                'type': 'Combined Type'
+            }
+        }
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_unauthorized_user(self):
         """Test unauthorized user cannot combine rows"""

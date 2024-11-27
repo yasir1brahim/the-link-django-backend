@@ -182,7 +182,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
             except ValueError:
                 raise DRFValidationError("Invalid team_id. Must be an integer.")
         else:
-            queryset = self.queryset.filter(members=self.request.user)
+            if self.request.user.is_superuser:
+                queryset = self.queryset
+            else:
+                queryset = self.queryset.filter(members=self.request.user)
 
         return queryset.select_related('team').prefetch_related('members').order_by('name')
 
