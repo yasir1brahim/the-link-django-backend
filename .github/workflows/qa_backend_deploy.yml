@@ -51,6 +51,7 @@ jobs:
             --build-arg SIMPLE_JWT_SIGNING_KEY="${{ secrets.SIMPLE_JWT_SIGNING_KEY }}" \
             --build-arg CORS_ALLOWED_ORIGINS="${{ vars.CORS_ALLOWED_ORIGINS }}" \
             --build-arg LEGACY_DB_PASSWORD="${{ secrets.LEGACY_DB_PASSWORD }}" \
+            --build-arg LEGACY_DB_HOST="${{ vars.LEGACY_DB_HOST }}" \
             --build-arg AWS_REGION="${{ vars.AWS_REGION }}" \
             --build-arg S3_BUCKET="${{ vars.S3_BUCKET }}" \
             --build-arg LAMBDA_FUNCTION_URL="${{ vars.LAMBDA_FUNCTION_URL }}" \
