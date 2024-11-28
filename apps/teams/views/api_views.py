@@ -11,6 +11,7 @@ from rest_framework import status
 from apps.api.permissions import IsAuthenticatedOrHasUserAPIKey
 from rest_framework.decorators import action
 from django.core.files.storage import default_storage
+from apps.utils.constants import WELCOME_RESET_SUBJECT
 
 from ..invitations import send_invitation, process_invitation
 from ..models import Team, Invitation, Membership
@@ -203,10 +204,13 @@ class InvitedUserResetPasswordViewSet(ViewSet):
             data = serializer.validated_data
             email = data['email']
             team_id = data['team_id']
+            first_name = data['first_name']
+            last_name = data['last_name']
+            role = data['role']
             team = self._get_team(team_id)
             user_exists = self._check_user_exists(email)
             if user_exists:
-                self._resend_invitation(request, email)
+                self._resend_invitation(request, email, team, role, first_name, last_name)
                 return Response({"message": "User already exists."}, 
                                 status=status.HTTP_200_OK)
             
@@ -247,15 +251,29 @@ class InvitedUserResetPasswordViewSet(ViewSet):
 
     def _send_password_reset_email(self, request, email, default_password):
         """Send password reset email."""
-        password_reset_serializer = CustomPasswordResetSerializer(data={'email': email, 'password': default_password }, context={'request': request})
+        password_reset_serializer = CustomPasswordResetSerializer(data={'email': email, 'password': default_password, 'subject_line': WELCOME_RESET_SUBJECT }, context={'request': request})
         if password_reset_serializer.is_valid():
             password_reset_serializer.save()
         else:
             return Response({"error": "Password reset email failed."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-    def _resend_invitation(self, request, email):
+    def _resend_invitation(self, request, email, team, role, first_name, last_name):
         """Resend invitation by sending a password reset email."""
         user = User.objects.get(email=email)
+        updates = {}
+        if user.first_name != first_name:
+            updates['first_name'] = first_name
+        if user.last_name != last_name:
+            updates['last_name'] = last_name
+        if updates:
+            for field, value in updates.items():
+                setattr(user, field, value)
+            user.save()
+        membership = Membership.objects.filter(user=user, team=team).first()
+        if membership:
+            if membership.role != role:
+                membership.role = role
+                membership.save()
         new_password = self._generate_password()
         user.set_password(new_password)
         user.save()
