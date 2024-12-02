@@ -9,7 +9,7 @@ from django.template.loader import render_to_string
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.contrib.auth.tokens import default_token_generator
 from django.contrib.sites.models import Site
-
+from apps.utils.constants import PASSWORD_RESET_SUBJECT
 class CustomUserSerializer(serializers.ModelSerializer):
     """
     Basic serializer to pass CustomUser details to the front end.
@@ -23,6 +23,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
 class CustomPasswordResetSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, required=False)
+    subject_line = serializers.CharField(write_only=True, required=False)
 
     def validate_email(self, value):
         """Validate the provided email to ensure it is associated with an existing user."""
@@ -40,6 +41,7 @@ class CustomPasswordResetSerializer(serializers.Serializer):
         """Generate a password reset URL and send a password reset email to the user."""
         user = self.validated_data['email']
         default_password = self.validated_data.get('password')
+        subject_line = self.validated_data.get('subject_line')
         
         uidb64 = urlsafe_base64_encode(str(user.pk).encode('utf-8'))
         token = default_token_generator.make_token(user)
@@ -50,7 +52,7 @@ class CustomPasswordResetSerializer(serializers.Serializer):
         
         password_reset_url = f"{protocol}://{domain}/password-reset/confirm/{uidb64}/{token}/"
 
-        subject = "Password Reset Request"
+        subject_line = subject_line or PASSWORD_RESET_SUBJECT
         context = {
             'user': user,
             'password_reset_url': password_reset_url,
@@ -64,7 +66,7 @@ class CustomPasswordResetSerializer(serializers.Serializer):
         email_template_html = 'account/email/password_reset_key_message.html'
         body_text = render_to_string(email_template_text, context)
         body_html = render_to_string(email_template_html, context)
-        send_mail(subject, body_text, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False, html_message=body_html)
+        send_mail(subject_line, body_text, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False, html_message=body_html)
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
     uid = serializers.CharField()
