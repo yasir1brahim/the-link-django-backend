@@ -683,6 +683,32 @@ def parse_spec(callback_url, document_id, project_id, object_key, filename, user
 
 
 
+def call_extract_notices_lambda(callback_url, document_id, project_id, object_key, filename, user_id):
+    logging.debug(f"call_extract_notices_lambda: {object_key}")
+
+    payload = {
+        "source_file_s3_uri": f"s3://{settings.S3_BUCKET}/{object_key}",
+        "document_id": str(document_id),
+        "callback_url": callback_url,
+        "ENVIRONMENT": settings.ENVIRONMENT,
+    }
+
+    # update the document status to processing
+    UploadedFile.objects.filter(id=document_id).update(last_retry=datetime.now())
+
+    print(f"Invoking lambda with URL: {settings.LAMBDA_FUNCTION_URL}")
+    print(f"Invoking lambda with payload: {payload}")
+
+    invoke_lambda(
+        payload=payload,
+        lambda_url=settings.LAMBDA_FUNCTION_URL
+    )
+
+    return "Kicked off processing job"
+
+
+
+
 @extend_schema(
     request=FileUploadSerializer,
     responses={200: {'description': 'File uploaded successfully'}},

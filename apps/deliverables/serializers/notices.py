@@ -125,6 +125,7 @@ class NoticeProcessingCallbackSerializer(serializers.Serializer):
             )
 
     def validate(self, attrs):
+        print("attrs", attrs)
         self._validate_all_anchors(attrs)
         return attrs
 
