@@ -29,8 +29,7 @@ from apps.web.urls import team_urlpatterns as web_team_urls
 from apps.web.sitemaps import StaticViewSitemap
 from apps.deliverables.urls import single_project_urlpatterns
 from apps.deliverables.urls import urlpatterns as deliverables_urls
-from dj_rest_auth.views import PasswordResetView, PasswordResetConfirmView
-from django.views.generic import TemplateView
+from apps.users.views import CustomPasswordResetView, CustomPasswordResetConfirmView
 
 sitemaps = {
     "static": StaticViewSitemap(),
@@ -65,12 +64,8 @@ urlpatterns = [
     path("celery-progress/", include("celery_progress.urls")),
     # auth API
     path("api/auth/", include("apps.authentication.urls")),
-    path("api/auth/password/reset/", PasswordResetView.as_view(), name="password-reset"),
-    path("api/auth/password/reset/confirm/", PasswordResetConfirmView.as_view(), name="password-reset-confirm"),
-    # this url is used to generate email content
-    path('password-reset/confirm/<uidb64>/<token>/',
-        TemplateView.as_view(template_name="password_reset_confirm.html"),
-        name='password_reset_confirm'),
+    path('api/auth/password/reset/', CustomPasswordResetView.as_view(), name='password-reset'),
+    path("api/auth/password/reset/confirm/", CustomPasswordResetConfirmView.as_view(), name="password-reset-confirm"),
     
     # API docs
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),

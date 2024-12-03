@@ -13,7 +13,7 @@ media/
 docs/_build
 _dist/
 .env
-.env.production
+.env.prod
 .env.qa
 .DS_Store
 .direnv

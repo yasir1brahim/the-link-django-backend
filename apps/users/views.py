@@ -17,6 +17,15 @@ from .forms import CustomUserChangeForm, UploadAvatarForm
 from .helpers import require_email_confirmation, user_has_confirmed_email_address
 from .models import CustomUser
 
+from .serializers import CustomPasswordResetSerializer, PasswordResetConfirmSerializer
+from django.shortcuts import render
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from django.contrib.auth.tokens import default_token_generator
+from django.contrib.auth import get_user_model
+from django.utils.http import urlsafe_base64_decode
+from rest_framework.permissions import AllowAny
 
 @login_required
 def profile(request):
@@ -109,3 +118,36 @@ def revoke_api_key(request):
         ),
     )
     return HttpResponseRedirect(reverse("users:user_profile"))
+
+class CustomPasswordResetView(APIView):
+    permission_classes = [AllowAny]
+    def post(self, request, *args, **kwargs):
+        """Handle the POST request for sending a password reset link to the user's email."""
+        serializer = CustomPasswordResetSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'message': 'Password reset link sent to email.'}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+class CustomPasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+    def post(self, request, *args, **kwargs):
+        """Handle the POST request for resetting the password based on the provided token."""
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        if serializer.is_valid():
+            uidb64 = serializer.validated_data['uid']
+            token = serializer.validated_data['token']
+            new_password = serializer.validated_data['new_password1']
+
+            try:
+                uid = urlsafe_base64_decode(uidb64).decode()
+                user = get_user_model().objects.get(pk=uid)
+                if default_token_generator.check_token(user, token):
+                    user.set_password(new_password)
+                    user.save()
+                    return Response({'message': 'Password reset successfully.'}, status=status.HTTP_200_OK)
+                else:
+                    return Response({'error': 'Invalid token.'}, status=status.HTTP_400_BAD_REQUEST)
+            except (TypeError, ValueError, CustomUser.DoesNotExist):
+                return Response({'error': 'Invalid user.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

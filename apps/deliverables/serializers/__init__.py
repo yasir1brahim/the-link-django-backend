@@ -43,13 +43,13 @@ class ProjectMembershipSerializer(serializers.ModelSerializer):
 class BaseProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
-        fields = ['id', 'name', 'description', 'team', 'members', 'entitlements',
-                  'user_limit', 'status', 'start_date', 'end_date', 'is_archived',
-                  'project_number', 'project_type']
+        fields = ['id', 'name', 'description', 'team', 'members',
+                   'user_limit', 'start_date', 'end_date', 'is_archived', 
+                   'project_number', 'project_type']
 
     members = ProjectMembershipSerializer(source="project_memberships", many=True, required=False)
     team = serializers.ReadOnlyField(source="team.id")
-    entitlements = serializers.SerializerMethodField(read_only=True)
+    # entitlements = serializers.SerializerMethodField(read_only=True)
     user_limit = serializers.ReadOnlyField()
 
     def get_entitlements(self, obj) -> list[str]:
@@ -165,7 +165,12 @@ class DocumentSerializer(EmbedDocumentSerializer):
         ]
 
 
-class ProjectReadSerializer(BaseProjectSerializer):
+class ProjectListSerializer(BaseProjectSerializer):
+    class Meta:
+        model = Project
+        fields = BaseProjectSerializer.Meta.fields
+
+class ProjectDetailsSerializer(BaseProjectSerializer):
     doc_parsed = serializers.SerializerMethodField()
     document_details = serializers.SerializerMethodField()
 
@@ -196,13 +201,19 @@ class ProjectReadSerializer(BaseProjectSerializer):
 class FileUploadSerializer(serializers.Serializer):
     files = serializers.ListField(child=serializers.FileField())
     project_id = serializers.IntegerField()
+    extract_notices = serializers.BooleanField(required=False)
+
+
+class CombineSubmittalItemsSerializer(serializers.Serializer):
+    lst_all_logs = serializers.ListField(child=serializers.DictField())
+    project_id = serializers.IntegerField()
+    prepared_object = serializers.DictField()
 
 
 class SubmittalItemReadSerializer(serializers.ModelSerializer):
     additional_text_locations = serializers.JSONField()
     doc_id = serializers.IntegerField(source='document.id', allow_null=True)
     doc_link = serializers.SerializerMethodField()
-    full_edit = serializers.SerializerMethodField()
     id = serializers.IntegerField()
     item_desc = serializers.CharField(source='submittal_description')
     para_context = serializers.CharField(source='submittal_content')
@@ -228,17 +239,7 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
                 "https://") and "cloudfront.net" in obj.document.document_path:
             return obj.document.document_path
         else:
-            return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET,
-                                                                   'Key': obj.document.document_path},
-                                             ExpiresIn=3600)
-
-    def get_full_edit(self, obj):
-        try:
-            if obj.updated_by.id != 1:
-                return "true"
-        except AttributeError:
-            return "false"
-        return "false"
+            return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.document.document_path}, ExpiresIn=3600)
 
     class Meta:
         model = SubmittalItem
@@ -246,7 +247,6 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
             'additional_text_locations',
             'doc_id',
             'doc_link',
-            'full_edit',
             'id',
             'item_desc',
             'para_context',

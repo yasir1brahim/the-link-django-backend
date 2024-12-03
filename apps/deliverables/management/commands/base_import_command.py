@@ -72,7 +72,6 @@ class BaseImportCommand(BaseCommand):
         team = Team.objects.filter(legacy_customer_id=legacy_customer_id).first()
         if not team:
             legacy_team = legacy_team_from_import or self.get_legacy_team(legacy_customer_id)
-            print("Creating team:", legacy_team)
             team = Team(
                 legacy_account_id=legacy_team['account_id'],
                 legacy_customer_id=legacy_team['customer_id'],
@@ -147,7 +146,6 @@ class BaseImportCommand(BaseCommand):
             project = Project(
                 legacy_id=legacy_project['project_id'],
                 name=legacy_project['project_name'],
-                status=legacy_project['status'],
                 start_date=legacy_project['start_date'],
                 end_date=legacy_project['end_date'],
                 team=self.get_or_create_team(legacy_project['customer_id']),

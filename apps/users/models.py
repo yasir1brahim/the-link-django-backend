@@ -54,13 +54,19 @@ class CustomUser(AbstractUser):
     
     def is_admin_for_team(self, team):
         from apps.teams.roles import ROLE_ADMIN
+        if self.is_superuser:
+            return True
         return self.teams.through.objects.filter(user=self, team=team, role=ROLE_ADMIN).exists()
     
     def is_member_of_team(self, team):
+        if self.is_superuser:
+            return True
         return self.teams.filter(id=team.id).exists()
     
     def is_admin_for_project(self, project):
         from apps.deliverables.models import ROLE_PROJECT_ADMIN, Project
+        if self.is_superuser:
+            return True
         if isinstance(project, int):
             project = Project.objects.get(id=project)
         if self.is_admin_for_team(project.team):
@@ -69,6 +75,8 @@ class CustomUser(AbstractUser):
     
     def is_member_of_project(self, project):
         from apps.deliverables.models import Project
+        if self.is_superuser:
+            return True
         if isinstance(project, int):
             project = Project.objects.get(id=project)
         if self.is_admin_for_team(project.team):

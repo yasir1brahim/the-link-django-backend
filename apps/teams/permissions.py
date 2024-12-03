@@ -31,6 +31,8 @@ class TeamModelAccessPermissions(permissions.BasePermission):
 
 
 def _view_for_members_edit_for_admins(request: Request, team: Team):
+    if request.user.is_superuser:
+        return True
     if request.method in permissions.SAFE_METHODS:
         return is_member(request.user, team)
     return is_admin(request.user, team)

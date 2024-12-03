@@ -83,3 +83,10 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
     
     def get_projects(self, obj):
         return BaseProjectSerializer(obj.project_set.all(), many=True).data
+
+class InvitedUserResetPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    team_id = serializers.IntegerField()
+    role = serializers.CharField()

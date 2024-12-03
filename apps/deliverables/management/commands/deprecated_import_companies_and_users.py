@@ -50,6 +50,7 @@ class Command(BaseImportCommand):
         # Convert to list of dictionaries
         results = [dict(zip(columns, row)) for row in rows]
         return results
+    
     def get_legacy_user_to_team_mappings(self):
         cursor = self.connection.cursor()
         cursor.execute("SELECT * FROM employees ORDER BY user_id ASC")
@@ -87,18 +88,23 @@ class Command(BaseImportCommand):
         print("Importing users from legacy database...")
         users = self.get_legacy_users()
         for user in users:
+            if 'pjdick' in user['email_address']:   
+                print(user)
+                print("--------------------------------")
             if CustomUser.objects.filter(legacy_id=user['id']).exists():
                 print(f"User with legacy_id {user['id']} already exists")
                 continue
             self.get_or_create_user(user['id'])
 
-        projects = self.get_legacy_projects()        
-        print(f"Importing {len(projects)} projects from legacy database...")
-        for project in projects:
-            if Project.objects.filter(legacy_id=project['project_id']).exists():
-                print(f"Project with legacy_id {project['project_id']} already exists")
-                continue
-            self.get_or_create_project(project['project_id'])
+        import_projects = False
+        if import_projects:
+            projects = self.get_legacy_projects()        
+            print(f"Importing {len(projects)} projects from legacy database...")
+            for project in projects:
+                if Project.objects.filter(legacy_id=project['project_id']).exists():
+                    print(f"Project with legacy_id {project['project_id']} already exists")
+                    continue
+                self.get_or_create_project(project['project_id'])
         
         print("Mapping users to teams...")
         user_to_team_mappings = self.get_legacy_user_to_team_mappings()
@@ -110,16 +116,16 @@ class Command(BaseImportCommand):
                 team=team, 
                 role=self.map_legacy_role_to_team_role(user.legacy_role_id)
             )
-
-        print("Mapping users to projects...")
-        user_to_project_mappings = self.get_legacy_user_to_project_mappings()
-        for user_mapping in user_to_project_mappings:
-            user = self.get_or_create_user(user_mapping['user_id'])
-            project = self.get_or_create_project(user_mapping['project_id'])
-            ProjectMembership.objects.get_or_create(
-                user=user, 
-                project=project, 
-                role=self.map_legacy_role_to_project_role(user.legacy_role_id)
-            )
+        if import_projects:
+            print("Mapping users to projects...")
+            user_to_project_mappings = self.get_legacy_user_to_project_mappings()
+            for user_mapping in user_to_project_mappings:
+                user = self.get_or_create_user(user_mapping['user_id'])
+                project = self.get_or_create_project(user_mapping['project_id'])
+                ProjectMembership.objects.get_or_create(
+                    user=user, 
+                    project=project, 
+                    role=self.map_legacy_role_to_project_role(user.legacy_role_id)
+                )
 
         print("Import complete!")

@@ -35,6 +35,10 @@ SECRET_KEY = os.environ.get("SECRET_KEY", default="django-insecure-BUNZkldzVq9rk
 
 # SECURITY WARNING: don"t run with debug turned on in production!
 DEBUG = os.environ.get("DEBUG", default=False)
+if ENVIRONMENT == 'local':
+    USE_HTTPS = False
+else:
+    USE_HTTPS = True
 ENABLE_DEBUG_TOOLBAR = os.environ.get("ENABLE_DEBUG_TOOLBAR", default=False) and "test" not in sys.argv
 
 # Note: It is not recommended to set ALLOWED_HOSTS to "*" in production
@@ -387,7 +391,7 @@ REST_AUTH = {
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", default="http://localhost:3000")
 
 CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", default="http://localhost:5173," + FRONTEND_BASE_URL).split(",")
-CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", default="http://localhost:8000,https://app-dj-qa-api.thelink.ai").split(",")
+CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", default="http://localhost:8000,https://app-dj-qa-api.thelink.ai,https://log-manager-api-prod.thelink.ai").split(",")
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "The Link",
@@ -567,3 +571,4 @@ BACKEND_CALLBACK_URL = os.environ.get("BACKEND_CALLBACK_URL", default="")
 
 NOTICES_LAMBDA_FUNCTION_URL = os.environ.get("NOTICES_LAMBDA_FUNCTION_URL", default="")
 BACKEND_NOTICES_CALLBACK_URL = os.environ.get("BACKEND_NOTICES_CALLBACK_URL", default="")
+NOTICES_FEATURE_FLAG_NAME = 'notices'

@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("deliverables", "0022_merge_20241114_0728"),
+        ("deliverables", "0023_remove_project_status"),
     ]
 
     operations = [
