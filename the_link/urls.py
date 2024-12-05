@@ -79,6 +79,7 @@ urlpatterns = [
     # Deliverables URLs
     path("api/deliverables/", include((deliverables_urls, 'deliverables'))),
     path("api/deliverables/<int:project_id>/", include(single_project_urlpatterns)),
+    path('waffle/', include('waffle.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 if settings.ENABLE_DEBUG_TOOLBAR:

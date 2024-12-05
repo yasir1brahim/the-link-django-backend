@@ -142,12 +142,14 @@ class DocumentSubsectionSerializer(serializers.ModelSerializer):
 class EmbedDocumentSerializer(serializers.ModelSerializer):
     document_id = serializers.IntegerField(source="id")
     document_name = serializers.CharField(source="name")
+    document_status = serializers.CharField(source="processing_status")
 
     class Meta:
         model = UploadedFile
         fields = [
             'document_id',
             'document_name',
+            'document_status',
         ]
 
 

@@ -176,4 +176,8 @@ class NoticeProcessingCallbackSerializer(serializers.Serializer):
                 notice_excerpt = anchor2excerpt_map[anchor]
                 notice_excerpt.matches.set(excerpts)
 
+            # Then mark the document as processed
+            document.processing_status = 'PROCESSED'
+            document.save(update_fields=['processing_status'])
+
 # endregion processing

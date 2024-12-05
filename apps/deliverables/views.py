@@ -876,12 +876,12 @@ def call_extract_notices_lambda(callback_url, document_id, object_key):
     # update the document status to processing
     UploadedFile.objects.filter(id=document_id).update(last_retry=datetime.now())
 
-    print(f"Invoking lambda with URL: {settings.LAMBDA_FUNCTION_URL}")
+    print(f"Invoking lambda with URL: {settings.NOTICES_LAMBDA_FUNCTION_URL}")
     print(f"Invoking lambda with payload: {payload}")
 
     invoke_lambda(
         payload=payload,
-        lambda_url=settings.LAMBDA_FUNCTION_URL
+        lambda_url=settings.NOTICES_LAMBDA_FUNCTION_URL
     )
 
     return "Kicked off processing job"
@@ -952,7 +952,7 @@ def upload_file(request):
             )
             if flag_is_active(request, settings.NOTICES_FEATURE_FLAG_NAME) and extract_notices:
                 call_extract_notices_lambda(
-                    callback_url=settings.BACKEND_CALLBACK_URL,
+                    callback_url=settings.BACKEND_NOTICES_CALLBACK_URL,
                     document_id=str(uploaded_file.id),
                     object_key=document_path,
                 )
@@ -1146,11 +1146,16 @@ class GetExcelExportHeaderView(generics.RetrieveAPIView):
 
 class NoticeViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     serializer_class = NoticeMatchSerializer
+    permission_classes = [IsAuthenticated, SubmittalItemAccessPermissions]
     queryset = (
         NoticeMatch.objects
         .select_related('document')
         .prefetch_related('excerpt_anchors')
     )
+
+    def get_queryset(self):
+        project_id = self.kwargs.get('project_id')
+        return self.queryset.filter(project_id=project_id)
 
 
 class NoticeProcessingWebhookView(CreateAPIView):
