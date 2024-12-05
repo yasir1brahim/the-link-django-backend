@@ -1,17 +1,24 @@
-import json
 import boto3
-
+from django.conf import settings
+from django.db.models import Case, When, IntegerField
 from rest_framework import serializers
-from .models import Project, ProjectMembership, PROJECT_MEMBERSHIP_ROLE_CHOICES, ExcelExportHeader
+
 from apps.users.serializers import CustomUserSerializer
 from apps.users.models import CustomUser
 from apps.teams.models import Team
-from apps.deliverables.models import SubmittalItem, UploadedFile, SpecSection, SubmittalItemList, MasterFormatSection, DocProcessingStatus
-from drf_spectacular.utils import extend_schema_field
-from django.conf import settings
-from django.db.models import Case, When, IntegerField
+from ..models import (
+    SubmittalItem,
+    UploadedFile,
+    SpecSection,
+    SubmittalItemList,
+    MasterFormatSection,
+    DocProcessingStatus,
+    Project,
+    ProjectMembership,
+    ExcelExportHeader,
+)
+from ..constants import masterformat_to_section_title_map
 
-from .constants import masterformat_to_section_title_map
 
 s3 = boto3.client(
     "s3",
@@ -20,8 +27,10 @@ s3 = boto3.client(
     aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
 )
 
+
 class ProjectMembershipSerializer(serializers.ModelSerializer):
-    user_id = serializers.PrimaryKeyRelatedField(source="user.id", queryset=CustomUserSerializer.Meta.model.objects.all())
+    user_id = serializers.PrimaryKeyRelatedField(source="user.id",
+                                                 queryset=CustomUserSerializer.Meta.model.objects.all())
     first_name = serializers.ReadOnlyField(source="user.first_name")
     last_name = serializers.ReadOnlyField(source="user.last_name")
     display_name = serializers.ReadOnlyField(source="user.get_display_name")
@@ -73,7 +82,7 @@ class ProjectWriteSerializer(BaseProjectSerializer):
                 if not member_user.is_member_of_team(team):
                     raise serializers.ValidationError("All members must be a member of the team.")
         return data
-    
+
     def update(self, instance, validated_data):
         print(validated_data)
         memberships_data = validated_data.pop('project_memberships', [])
@@ -84,7 +93,8 @@ class ProjectWriteSerializer(BaseProjectSerializer):
         instance.save()
 
         # Update project memberships
-        existing_members = {membership.user.id: membership for membership in instance.project_memberships.all()}
+        existing_members = {membership.user.id: membership for membership in
+                            instance.project_memberships.all()}
         new_members = []
 
         for membership_data in memberships_data:
@@ -120,21 +130,42 @@ class ProjectWriteSerializer(BaseProjectSerializer):
 
         return project
 
+
 class DocumentSubsectionSerializer(serializers.ModelSerializer):
     masterformat_number = serializers.CharField(source="masterformat_section.masterformat_number")
+
     class Meta:
         model = SpecSection
         fields = ['id', 'masterformat_number', 'processing_status']
 
-class DocumentSerializer(serializers.ModelSerializer):
+
+class EmbedDocumentSerializer(serializers.ModelSerializer):
     document_id = serializers.IntegerField(source="id")
     document_name = serializers.CharField(source="name")
     document_status = serializers.CharField(source="processing_status")
-    document_subsections = DocumentSubsectionSerializer(source="specsection_set", many=True)
-    
+
     class Meta:
         model = UploadedFile
-        fields = ['document_id', 'document_name', 'document_status', 'created_at', 'updated_at', 'document_subsections']
+        fields = [
+            'document_id',
+            'document_name',
+            'document_status',
+        ]
+
+
+class DocumentSerializer(EmbedDocumentSerializer):
+    document_status = serializers.CharField(source="processing_status")
+    document_subsections = DocumentSubsectionSerializer(source="specsection_set", many=True)
+
+    class Meta(EmbedDocumentSerializer.Meta):
+        fields = [
+            *EmbedDocumentSerializer.Meta.fields,
+            'document_status',
+            'document_subsections',
+            'created_at',
+            'updated_at',
+        ]
+
 
 class ProjectListSerializer(BaseProjectSerializer):
     class Meta:
@@ -147,7 +178,7 @@ class ProjectDetailsSerializer(BaseProjectSerializer):
 
     def get_doc_parsed(self, obj):
         return obj.uploadedfile_set.count()
-    
+
     def get_document_details(self, obj):
         queryset = obj.uploadedfile_set.all().annotate(
             status_order=Case(
@@ -164,7 +195,6 @@ class ProjectDetailsSerializer(BaseProjectSerializer):
         ).order_by("status_order", '-created_at')
         return DocumentSerializer(queryset, many=True).data
 
-    
     class Meta:
         model = Project
         fields = BaseProjectSerializer.Meta.fields + ['doc_parsed', 'document_details']
@@ -173,6 +203,7 @@ class ProjectDetailsSerializer(BaseProjectSerializer):
 class FileUploadSerializer(serializers.Serializer):
     files = serializers.ListField(child=serializers.FileField())
     project_id = serializers.IntegerField()
+    extract_notices = serializers.BooleanField(required=False)
 
 
 class CombineSubmittalItemsSerializer(serializers.Serializer):
@@ -197,15 +228,17 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
     type = serializers.CharField(source='submittal_type')
 
     def get_section_title(self, obj):
-        return obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(obj.masterformat_section.masterformat_number, 'Custom Title')
-        
+        return obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(
+            obj.masterformat_section.masterformat_number, 'Custom Title')
+
     def get_doc_link(self, obj):
         # TBL-76: Older documents using the legacy parsing approach have a full cloudfront URL stored in the doc_link column.
         # New documents just store the S3 object key in the doc_link column. To handle this, we return the Cloudfront URL if it exists,
         # and if not, we return a presigned URL generated from the S3 object key
         if not obj.document:
             return ""
-        if obj.document.document_path.startswith("https://") and "cloudfront.net" in obj.document.document_path:
+        if obj.document.document_path.startswith(
+                "https://") and "cloudfront.net" in obj.document.document_path:
             return obj.document.document_path
         else:
             return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.document.document_path}, ExpiresIn=3600)
@@ -230,8 +263,10 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
 
 
 class SubmittalItemWriteSerializer(serializers.ModelSerializer):
-    document = serializers.PrimaryKeyRelatedField(queryset=UploadedFile.objects.all(), required=False)
-    updated_by = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(), required=False)
+    document = serializers.PrimaryKeyRelatedField(queryset=UploadedFile.objects.all(),
+                                                  required=False)
+    updated_by = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(),
+                                                    required=False)
 
     spec_section = serializers.CharField(required=False)
     item_desc = serializers.CharField(required=False)
@@ -240,7 +275,8 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
     type = serializers.CharField(required=False)
 
     def create(self, validated_data):
-        mf_section = MasterFormatSection.objects.get(masterformat_number=validated_data.get('spec_section'))
+        mf_section = MasterFormatSection.objects.get(
+            masterformat_number=validated_data.get('spec_section'))
         return SubmittalItem.objects.create(
             project_id=validated_data.get('project_id'),
             updated_by=validated_data.get('updated_by'),
@@ -253,7 +289,8 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         if validated_data.get('spec_section'):
-            mf_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=validated_data.get('spec_section'))
+            mf_section, created = MasterFormatSection.objects.get_or_create(
+                masterformat_number=validated_data.get('spec_section'))
         instance.masterformat_section = mf_section
         if validated_data.get('item_desc'):
             instance.submittal_description = validated_data.get('item_desc')
@@ -282,11 +319,14 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
 class SubmittalItemListSerializer(serializers.ModelSerializer):
     project_id = serializers.IntegerField(source='project.id', required=False)
     name = serializers.CharField()
-    created_by = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(), required=False)
-    submittals = serializers.PrimaryKeyRelatedField(queryset=SubmittalItem.objects.all(), many=True, required=False)
+    created_by = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(),
+                                                    required=False)
+    submittals = serializers.PrimaryKeyRelatedField(queryset=SubmittalItem.objects.all(), many=True,
+                                                    required=False)
 
     def create(self, validated_data):
-        validated_data['project'] = Project.objects.get(id=self.context['view'].kwargs.get('project_id'))
+        validated_data['project'] = Project.objects.get(
+            id=self.context['view'].kwargs.get('project_id'))
         validated_data['created_by'] = self.context['request'].user
         return super().create(validated_data)
 
@@ -299,3 +339,11 @@ class ExcelExportHeaderSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExcelExportHeader
         fields = ['user', 'options', 'updated_at']
+
+
+# TODO: This should be moved to the top when all the serializers within the file
+#       are moved to their own files
+from .notices import (
+    NoticeMatchSerializer,
+    NoticeProcessingCallbackSerializer,
+)

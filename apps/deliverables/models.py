@@ -199,3 +199,54 @@ class ExcelExportHeader(BaseModel):
 
     class Meta:
         unique_together = ("user", )
+
+
+# region notices
+# TODO:
+#   - Split `models.py` into a module
+#   - move this region into a separate file
+
+class NoticeExcerpt(BaseModel):
+    document = models.ForeignKey(
+        "UploadedFile",
+        on_delete=models.CASCADE,
+        related_name="notice_excerpts",
+    )
+    anchor = models.CharField(max_length=256)
+    lines = models.JSONField()
+
+
+class NoticeMatch(BaseModel):
+    project = models.ForeignKey(
+        "Project",
+        on_delete=models.CASCADE,
+        related_name="notice_matches",
+    )
+    document = models.ForeignKey(
+        "UploadedFile",
+        on_delete=models.CASCADE,
+        related_name="notice_matches",
+    )
+
+    notice_type = models.CharField(max_length=256, null=True, blank=True)
+    notice_type_match = models.CharField(max_length=256, blank=True, null=True)
+
+    highlight_heuristic_match = models.TextField(blank=True, null=True)
+    highlight_discriminators = models.JSONField()
+
+    excerpt_anchors = models.ManyToManyField(
+        "NoticeExcerpt",
+        related_name="matches",
+    )
+    leading_anchor = models.CharField(max_length=256)
+
+    masterformat_section = models.ForeignKey(
+        "MasterFormatSection",
+        on_delete=models.CASCADE,
+        # This one is NULL for now, but it will be filled out when we update
+        # the parsers.
+        null=True,
+        default=None,
+    )
+
+# endregion notices

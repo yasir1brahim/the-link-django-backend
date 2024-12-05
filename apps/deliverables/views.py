@@ -21,9 +21,10 @@ from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from rest_framework import generics, status
+from rest_framework import generics, status, mixins
 from rest_framework.exceptions import (
     PermissionDenied,
     ValidationError as DRFValidationError,
@@ -38,6 +39,9 @@ from drf_spectacular.utils import (
     OpenApiResponse,
 )
 from drf_spectacular.types import OpenApiTypes
+from waffle import flag_is_active
+
+from rest_framework import viewsets
 
 from apps.teams.models import Team
 from .serializers import (
@@ -60,6 +64,7 @@ from .models import (
     SpecSection,
     DocProcessingStatus,
     ExcelExportHeader,
+    NoticeMatch,
 )
 from .permissions import (
     ProjectAccessPermissions,
@@ -67,6 +72,7 @@ from .permissions import (
     SubmittalListAccessPermissions,
 )
 from .constants import masterformat_to_section_title_map
+from .serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
 from .services import SubmittalService
 
 
@@ -857,6 +863,32 @@ def parse_spec(callback_url, document_id, project_id, object_key, filename, user
 
 
 
+def call_extract_notices_lambda(callback_url, document_id, object_key):
+    logging.debug(f"call_extract_notices_lambda: {object_key}")
+
+    payload = {
+        "source_file_s3_uri": f"s3://{settings.S3_BUCKET}/{object_key}",
+        "document_id": str(document_id),
+        "callback_url": callback_url,
+        "ENVIRONMENT": settings.ENVIRONMENT,
+    }
+
+    # update the document status to processing
+    UploadedFile.objects.filter(id=document_id).update(last_retry=datetime.now())
+
+    print(f"Invoking lambda with URL: {settings.NOTICES_LAMBDA_FUNCTION_URL}")
+    print(f"Invoking lambda with payload: {payload}")
+
+    invoke_lambda(
+        payload=payload,
+        lambda_url=settings.NOTICES_LAMBDA_FUNCTION_URL
+    )
+
+    return "Kicked off processing job"
+
+
+
+
 @extend_schema(
     request=FileUploadSerializer,
     responses={200: {'description': 'File uploaded successfully'}},
@@ -873,6 +905,8 @@ def upload_file(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     project_id = serializer.validated_data['project_id']
+    print(serializer.validated_data)
+    extract_notices = serializer.validated_data.get('extract_notices', False)
     project = Project.objects.get(id=project_id)
     if not request.user.is_member_of_project(project):
         return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
@@ -916,15 +950,21 @@ def upload_file(request):
                 Bucket=settings.S3_BUCKET,
                 Key=document_path,
             )
-
-            parse_spec(
-                callback_url=settings.BACKEND_CALLBACK_URL,
-                document_id=str(uploaded_file.id),
-                project_id=str(project_id),
-                object_key=document_path,
-                filename=file.name,
-                user_id=str(user.id)
-            )
+            if flag_is_active(request, settings.NOTICES_FEATURE_FLAG_NAME) and extract_notices:
+                call_extract_notices_lambda(
+                    callback_url=settings.BACKEND_NOTICES_CALLBACK_URL,
+                    document_id=str(uploaded_file.id),
+                    object_key=document_path,
+                )
+            else:
+                parse_spec(
+                    callback_url=settings.BACKEND_CALLBACK_URL,
+                    document_id=str(uploaded_file.id),
+                    project_id=str(project_id),
+                    object_key=document_path,
+                    filename=file.name,
+                    user_id=str(user.id)
+                )
             async_processing.append(document_path)
         except Exception as e:
             logging.error(f"Error uploading file: {e}")
@@ -1097,3 +1137,29 @@ class GetExcelExportHeaderView(generics.RetrieveAPIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except ExcelExportHeader.DoesNotExist:
             return Response({"options": []}, status=status.HTTP_200_OK)
+
+
+# region notices
+# TODO:
+#   - Split `views.py` into a module
+#   - move this region into a separate file
+
+class NoticeViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    serializer_class = NoticeMatchSerializer
+    permission_classes = [IsAuthenticated, SubmittalItemAccessPermissions]
+    queryset = (
+        NoticeMatch.objects
+        .select_related('document')
+        .prefetch_related('excerpt_anchors')
+    )
+
+    def get_queryset(self):
+        project_id = self.kwargs.get('project_id')
+        return self.queryset.filter(project_id=project_id)
+
+
+class NoticeProcessingWebhookView(CreateAPIView):
+    serializer_class = NoticeProcessingCallbackSerializer
+    permission_classes = [AllowAny]
+
+# endregion notices
