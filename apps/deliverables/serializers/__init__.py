@@ -143,6 +143,10 @@ class EmbedDocumentSerializer(serializers.ModelSerializer):
     document_id = serializers.IntegerField(source="id")
     document_name = serializers.CharField(source="name")
     document_status = serializers.CharField(source="processing_status")
+    document_link = serializers.SerializerMethodField()
+
+    def get_document_link(self, obj):
+        return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.document_path}, ExpiresIn=3600)
 
     class Meta:
         model = UploadedFile
@@ -150,6 +154,7 @@ class EmbedDocumentSerializer(serializers.ModelSerializer):
             'document_id',
             'document_name',
             'document_status',
+            'document_link',
         ]
 
 
