@@ -65,6 +65,7 @@ from .models import (
     DocProcessingStatus,
     ExcelExportHeader,
     NoticeMatch,
+    ProcoreToken,
 )
 from .permissions import (
     ProjectAccessPermissions,
@@ -73,8 +74,9 @@ from .permissions import (
 )
 from .constants import masterformat_to_section_title_map
 from .serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
+from .serializers.procore import ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer
 from .services import SubmittalService
-
+from .integrations.procore import get_procore_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -1163,3 +1165,36 @@ class NoticeProcessingWebhookView(CreateAPIView):
     permission_classes = [AllowAny]
 
 # endregion notices
+
+
+# region Procore
+
+class ProcoreFetchAccessTokenView(generics.CreateAPIView):
+    serializer_class = ProcoreFetchAccessTokenSerializer
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        request_serializer = self.get_serializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+        code = request_serializer.validated_data['code']
+        redirect_uri = request_serializer.validated_data['redirect_uri']
+
+        response = get_procore_access_token(code, redirect_uri)
+        if response.status_code != 200:
+            return Response(response.text, status=status.HTTP_400_BAD_REQUEST)
+        access_token_serializer = ProcoreAccessTokenSerializer(data=response.json())
+        access_token_serializer.is_valid(raise_exception=True)
+
+        ProcoreToken.objects.create(
+            user=request.user,
+            access_token=access_token_serializer.validated_data['access_token'],
+            refresh_token=access_token_serializer.validated_data['refresh_token'],
+            expires_in=access_token_serializer.validated_data['expires_in'],
+            token_type=access_token_serializer.validated_data['token_type'],
+            code=code,
+        )
+
+        return Response(access_token_serializer.data, status=status.HTTP_200_OK)
+
+
+# endregion Procore

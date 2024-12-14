@@ -250,3 +250,16 @@ class NoticeMatch(BaseModel):
     )
 
 # endregion notices
+
+
+# region Procore
+
+class ProcoreToken(BaseModel):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="procore_tokens")
+    access_token = models.CharField(max_length=1020)
+    refresh_token = models.CharField(max_length=1020)
+    expires_in = models.IntegerField()
+    token_type = models.CharField(max_length=256)
+    code = models.CharField(max_length=1020)
+
+# endregion Procore
