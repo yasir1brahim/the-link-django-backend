@@ -141,6 +141,13 @@ class ProjectViewSetQuerySetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['results']), 3)
 
+    def test_superuser_can_see_all_projects_for_team(self):
+        """Test that superusers can see all projects for a team"""
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.get(f"{self.url}?team_id={self.team1.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 2)
+
     def test_team_admin_can_access_project_detail(self):
         """Test that team admins can access project detail"""
         self.client.force_authenticate(user=self.team1_admin)
@@ -390,6 +397,7 @@ class ProjectViewSetTests(APITestCase):
         self.client.force_authenticate(user=self.company_member)
         response = self.client.get(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
 
 
 class UploadFileTests(APITestCase):
