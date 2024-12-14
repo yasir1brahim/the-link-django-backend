@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
-    SavedSubmittalItemList, UploadedFile, SpecSection, MasterFormatSection,
+    UploadedFile, SpecSection, MasterFormatSection,
     SubmittalItemList, ExcelExportHeader
 )
 
@@ -52,14 +52,6 @@ class SubmittalItemInlineAdmin(admin.TabularInline):
     list_display = ["id", "project", "document", "masterformat_section", "paragraph_number", "submittal_type", "submittal_description"]
     list_filter = ["project", "document", "masterformat_section", "paragraph_number", "submittal_type", "submittal_description"]
     search_fields = ["project__name", "document__name", "masterformat_section__masterformat_number", "paragraph_number", "submittal_type", "submittal_description"]
-
-
-@admin.register(SavedSubmittalItemList)
-class SavedSubmittalItemListAdmin(admin.ModelAdmin):
-    list_display = ["id", "project", "name", "description", "created_by"]
-    list_filter = ["project", "created_by"]
-    search_fields = ["project__name", "name", "description", "created_by__email"]
-    filter_horizontal = ("submittal_items",)
 
 
 @admin.register(UploadedFile)
