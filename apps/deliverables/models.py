@@ -1,4 +1,5 @@
 from enum import Enum
+from datetime import datetime, timedelta
 
 from django.db import models
 from apps.utils.models import BaseModel
@@ -262,4 +263,7 @@ class ProcoreToken(BaseModel):
     token_type = models.CharField(max_length=256)
     code = models.CharField(max_length=1020)
 
+    def is_expired(self):
+        return datetime.now() > (self.created_at + timedelta(seconds=self.expires_in))
+    
 # endregion Procore

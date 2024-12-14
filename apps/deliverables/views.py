@@ -76,7 +76,7 @@ from .constants import masterformat_to_section_title_map
 from .serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
 from .serializers.procore import ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer, ProcoreCompanyMappingSerializer
 from .services import SubmittalService
-from .integrations.procore import get_procore_access_token
+from .integrations.procore import get_procore_access_token, get_companies
 
 logger = logging.getLogger(__name__)
 
@@ -1217,6 +1217,15 @@ class GetProcoreCompanyMappingView(generics.RetrieveAPIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         else:
             return Response(serializer.data, status=status.HTTP_204_NO_CONTENT)
+        
+
+class GetProcoreCompaniesView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        procore_token = request.user.procore_token
+        response = get_companies(procore_token)
+        return Response(response.json(), status=status.HTTP_200_OK)
 
 
 # endregion Procore
