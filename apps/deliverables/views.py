@@ -74,7 +74,7 @@ from .permissions import (
 )
 from .constants import masterformat_to_section_title_map
 from .serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
-from .serializers.procore import ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer
+from .serializers.procore import ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer, ProcoreCompanyMappingSerializer
 from .services import SubmittalService
 from .integrations.procore import get_procore_access_token
 
@@ -1170,19 +1170,20 @@ class NoticeProcessingWebhookView(CreateAPIView):
 # region Procore
 
 class ProcoreFetchAccessTokenView(generics.CreateAPIView):
-    serializer_class = ProcoreFetchAccessTokenSerializer
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
-        request_serializer = self.get_serializer(data=request.data)
+        request_serializer = ProcoreFetchAccessTokenSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
         code = request_serializer.validated_data['code']
         redirect_uri = request_serializer.validated_data['redirect_uri']
 
         response = get_procore_access_token(code, redirect_uri)
+        print(response)
         if response.status_code != 200:
             return Response(response.text, status=status.HTTP_400_BAD_REQUEST)
         access_token_serializer = ProcoreAccessTokenSerializer(data=response.json())
+        print(access_token_serializer)
         access_token_serializer.is_valid(raise_exception=True)
 
         ProcoreToken.objects.create(
@@ -1195,6 +1196,27 @@ class ProcoreFetchAccessTokenView(generics.CreateAPIView):
         )
 
         return Response(access_token_serializer.data, status=status.HTTP_200_OK)
+
+
+class GetProcoreCompanyMappingView(generics.RetrieveAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        company_id = kwargs.get('company_id')
+        company = get_object_or_404(Team, id=company_id)
+        if not request.user.is_admin_for_team(company):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        procore_data = {
+            'procore_company_id': company.procore_id,
+            'procore_company_name': company.procore_name
+        }
+        serializer = ProcoreCompanyMappingSerializer(data=procore_data)
+        serializer.is_valid(raise_exception=True)
+        if company.procore_id is not None:
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            return Response(serializer.data, status=status.HTTP_204_NO_CONTENT)
 
 
 # endregion Procore

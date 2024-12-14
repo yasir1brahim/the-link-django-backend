@@ -12,3 +12,7 @@ class ProcoreAccessTokenSerializer(serializers.Serializer):
     token_type = serializers.CharField()
     created_at = serializers.IntegerField()
 
+
+class ProcoreCompanyMappingSerializer(serializers.Serializer):
+    procore_company_id = serializers.IntegerField(required=False, allow_null=True)
+    procore_company_name = serializers.CharField(required=False, allow_null=True)
