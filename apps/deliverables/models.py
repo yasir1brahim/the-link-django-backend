@@ -112,17 +112,6 @@ class SpecSection(BaseModel):
         return f"{self.document.name} - {self.masterformat_section.masterformat_number}"
 
 
-class SavedSubmittalItemList(BaseModel):
-    name = models.CharField(max_length=256)
-    description = models.TextField(blank=True)
-    project = models.ForeignKey("Project", on_delete=models.CASCADE)
-    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    submittal_items = models.ManyToManyField("SubmittalItem", blank=True)
-
-    def __str__(self):
-        return self.name
-
-
 class SubmittalItem(BaseModel):
     legacy_id = models.IntegerField(blank=True, null=True)
     legacy_updated_at = models.DateTimeField(blank=True, null=True)
