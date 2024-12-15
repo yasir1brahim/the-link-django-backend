@@ -47,6 +47,7 @@ urlpatterns = [
     ),
     path('procore/access_token/', views.ProcoreFetchAccessTokenView.as_view(), name='procore-fetch-access-token'),
     path('procore/company_mapping/<int:company_id>/', views.GetProcoreCompanyMappingView.as_view(), name='procore-company-mapping'),
+    path('procore/companies/', views.GetProcoreCompaniesView.as_view(), name='procore-companies'),
 ]
 
 

@@ -74,9 +74,10 @@ from .permissions import (
 )
 from .constants import masterformat_to_section_title_map
 from .serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
-from .serializers.procore import ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer, ProcoreCompanyMappingSerializer
+from .serializers.procore import (ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer,
+                                   ProcoreCompanyMappingSerializer, ProcoreCompanySerializer)
 from .services import SubmittalService
-from .integrations.procore import get_procore_access_token, get_companies
+from .integrations.procore import get_procore_access_token, get_companies, get_fresh_token_for_user, ProcoreException
 
 logger = logging.getLogger(__name__)
 
@@ -1223,9 +1224,13 @@ class GetProcoreCompaniesView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
-        procore_token = request.user.procore_token
-        response = get_companies(procore_token)
-        return Response(response.json(), status=status.HTTP_200_OK)
-
+        try:
+            procore_token = get_fresh_token_for_user(request.user)
+        except ProcoreException as e:
+            return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
+        response = get_companies(procore_token.access_token)
+        serializer = ProcoreCompanySerializer(data=response.json(), many=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 # endregion Procore

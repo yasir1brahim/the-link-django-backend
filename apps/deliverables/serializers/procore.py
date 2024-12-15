@@ -16,3 +16,12 @@ class ProcoreAccessTokenSerializer(serializers.Serializer):
 class ProcoreCompanyMappingSerializer(serializers.Serializer):
     procore_company_id = serializers.IntegerField(required=False, allow_null=True)
     procore_company_name = serializers.CharField(required=False, allow_null=True)
+
+
+class ProcoreCompanySerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    is_active = serializers.BooleanField()
+    logo_url = serializers.URLField()
+    pcn_business_experience = serializers.BooleanField()
+    my_company = serializers.BooleanField()

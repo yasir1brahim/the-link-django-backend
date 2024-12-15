@@ -5,6 +5,8 @@ from django.urls import reverse
 from django.contrib.auth import get_user_model
 from ..models import ProcoreToken
 from apps.teams.models import Team
+from apps.deliverables.integrations.procore import ProcoreException
+
 class TestProcoreFetchAccessTokenView(APITestCase):
     def setUp(self):
         # Create a test user
@@ -180,3 +182,92 @@ class TestGetProcoreCompanyMappingView(APITestCase):
             response = self.client.get(url)
             
             self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class TestGetProcoreCompaniesView(APITestCase):
+    def setUp(self):
+        self.url = reverse('deliverables:procore-companies')
+        self.user = get_user_model().objects.create_user(
+            username='testuser',
+            password='testpass123'
+        )
+        self.client.force_authenticate(user=self.user)
+
+        self.mock_procore_company_response = [
+            {
+                'id': 1,
+                'name': 'Company 1',
+                'is_active': True,
+                'logo_url': 'https://pro-core.com/prostore/logo.gif',
+                'pcn_business_experience': True,
+                'my_company': True
+            },
+            {
+                'id': 2,
+                'name': 'Company 2',
+                'is_active': True,
+                'logo_url': 'https://pro-core.com/prostore/logo.gif',
+                'pcn_business_experience': True,
+                'my_company': True
+            }
+        ]
+    
+
+    @patch('apps.deliverables.views.get_fresh_token_for_user')
+    @patch('apps.deliverables.views.get_companies') 
+    def test_get_companies_success(self, mock_get_companies, mock_get_token):
+        # Arrange
+        mock_token = Mock(access_token='fake-token')
+        mock_get_token.return_value = mock_token
+        
+        mock_response = Mock()
+        mock_response.json.return_value = self.mock_procore_company_response
+        mock_get_companies.return_value = mock_response
+
+        # Act
+        response = self.client.get(self.url)
+
+        # Assert
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_get_token.assert_called_once_with(self.user)
+        mock_get_companies.assert_called_once_with('fake-token')
+        self.assertEqual(response.data, self.mock_procore_company_response)
+
+    def test_get_companies_unauthenticated(self):
+        # Arrange
+        self.client.force_authenticate(user=None)
+
+        # Act
+        response = self.client.get(self.url)
+
+        # Assert
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    @patch('apps.deliverables.views.get_fresh_token_for_user')
+    def test_get_companies_token_error(self, mock_get_token):
+        # Arrange
+        mock_get_token.side_effect = ProcoreException('Token error')
+
+        # Act
+        response = self.client.get(self.url)
+
+        # Assert
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, 'Token error')
+
+    @patch('apps.deliverables.views.get_fresh_token_for_user')
+    @patch('apps.deliverables.views.get_companies')
+    def test_get_companies_invalid_response(self, mock_get_companies, mock_get_token):
+        # Arrange
+        mock_token = Mock(access_token='fake-token')
+        mock_get_token.return_value = mock_token
+        
+        mock_response = Mock()
+        mock_response.json.return_value = {'invalid': 'data'}
+        mock_get_companies.return_value = mock_response
+
+        # Act
+        response = self.client.get(self.url)
+
+        # Assert
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
