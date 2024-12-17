@@ -336,8 +336,8 @@ FORMS_URLFIELD_ASSUME_HTTPS = True
 # Email setup
 
 # default email used by your server
-SERVER_EMAIL = os.environ.get("SERVER_EMAIL", default="noreply@thelink.ai")
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", default="noreply@thelink.ai")
+SERVER_EMAIL = os.environ.get("SERVER_EMAIL", default="noreply@tlsignup.com")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", default="noreply@tlsignup.com")
 
 # The default value will print emails to the console, but you can change that here
 # and in your environment.
