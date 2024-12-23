@@ -266,4 +266,17 @@ class ProcoreToken(BaseModel):
     def is_expired(self):
         return datetime.now() > (self.created_at + timedelta(seconds=self.expires_in))
     
+
+class ProcoreSubmittalTypeMapping(BaseModel):
+    company = models.ForeignKey("teams.Team", on_delete=models.CASCADE)
+    procore_company_id = models.CharField(max_length=256)
+    link_type = models.CharField(max_length=256)
+    procore_type = models.CharField(max_length=256)
+
+    class Meta:
+        unique_together = ("company", "link_type")
+
+    def __str__(self):
+        return f"{self.link_type} -> {self.procore_type}"
+
 # endregion Procore
