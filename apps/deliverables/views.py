@@ -81,7 +81,7 @@ from .serializers.procore import (ProcoreFetchAccessTokenSerializer, ProcoreAcce
                                    ProcoreCompanyMappingSerializer, ProcoreCompanySerializer, ProcoreMeSerializer,
                                    ProcoreProjectMappingSerializer, ProcoreSubmittalSerializer,
                                    ProcoreSubmittalCreationResponseSerializer, CreateProcoreProjectMappingSerializer,
-                                   CreateProcoreCompanyMappingSerializer,)
+                                   CreateProcoreCompanyMappingSerializer, UpdateProcoreSubmittalMappingsSerializer)
 from .services import SubmittalService
 from .integrations.procore import (get_procore_access_token, get_companies, get_fresh_token_for_user, 
                                    ProcoreException, get_me, get_status, get_spec_divisions, get_spec_sections,
@@ -1384,6 +1384,10 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
             # num_dict[spec] = procore.get_next_number(request, spec_dict[spec])
 
         submittals_dict = {}
+        submittal_type_mapping = {}
+        submittal_types_for_company = ProcoreSubmittalTypeMapping.objects.filter(company=project.team)
+        for mapping in submittal_types_for_company:
+            submittal_type_mapping[mapping.link_type] = mapping.procore_type
         submittals_not_created = []
         for submittal in submittals:
             if submittal.masterformat_section.masterformat_number == "":
@@ -1395,7 +1399,7 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                 procore_status_id=status_id or 1,
                 procore_submittal_manager_id=project.procore_submittal_manager_id,
                 submittal_title=submittal.submittal_description,
-                submittal_type=submittal.submittal_type,
+                submittal_type=submittal_type_mapping.get(submittal.submittal_type, submittal.submittal_type),
                 project_id=project.procore_id,
                 procore_token=procore_token.access_token
             )
@@ -1513,7 +1517,7 @@ class CreateProcoreCompanyMappingView(generics.CreateAPIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
     
 
-class GetProcoreSubmittalMappingsView(generics.ListAPIView):
+class ProcoreSubmittalMappingsView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
@@ -1557,19 +1561,27 @@ class GetProcoreSubmittalMappingsView(generics.ListAPIView):
             }
         }
         return Response(response_payload, status=status.HTTP_200_OK)
-
-class UpdateProcoreSubmittalTypesView(generics.CreateAPIView):
-    permission_classes = [IsAuthenticated]
-
+    
     def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        serializer = UpdateProcoreSubmittalMappingsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         company_id = serializer.validated_data.get('company_id')
         company = get_object_or_404(Team, id=company_id)
         if not request.user.is_admin_for_team(company):
             return Response(status=status.HTTP_403_FORBIDDEN)
         
+        mappings = serializer.validated_data.get('mappings')
+        for mapping in mappings:
+            ProcoreSubmittalTypeMapping.objects.update_or_create(
+                id=mapping.get('id'),
+                defaults={
+                    'link_type': mapping.get('link_submittal'),
+                    'procore_type': mapping.get('procore_type')
+                }
+            )
+        return Response(status=status.HTTP_200_OK)
 
 
+    
         
 # endregion Procore

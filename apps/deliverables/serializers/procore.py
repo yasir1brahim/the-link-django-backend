@@ -68,3 +68,12 @@ class CreateProcoreCompanyMappingSerializer(serializers.Serializer):
     link_company_id = serializers.IntegerField()
     procore_company_id = serializers.IntegerField()
     procore_company_name = serializers.CharField()
+
+
+class ProcoreSubmittalMappingSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    link_submittal = serializers.CharField()
+    procore_type = serializers.CharField()
+
+class UpdateProcoreSubmittalMappingsSerializer(serializers.Serializer):
+    mappings = ProcoreSubmittalMappingSerializer(many=True)

@@ -56,7 +56,7 @@ urlpatterns = [
     path('procore/projects/<int:company_id>/', views.GetProcoreProjectsView.as_view(), name='procore-projects'),
     path('procore/managers/<int:project_id>/', views.GetProcoreManagersView.as_view(), name='procore-managers'),
     path('procore/company_mapping/', views.CreateProcoreCompanyMappingView.as_view(), name='create-procore-company-mapping'),
-    path('procore/submittal_mappings/<int:company_id>/', views.GetProcoreSubmittalMappingsView.as_view(), name='get-procore-submittal-mappings'),
+    path('procore/submittal_mappings/<int:company_id>/', views.ProcoreSubmittalMappingsView.as_view(), name='procore-submittal-mappings'),
 ]
 
 

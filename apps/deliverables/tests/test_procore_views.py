@@ -4,10 +4,11 @@ from rest_framework import status
 from django.urls import reverse
 from django.contrib.auth import get_user_model
 from ..models import ProcoreToken
-from apps.teams.models import Team
+from apps.teams.models import Team, Membership
 from apps.deliverables.integrations.procore import ProcoreException
 from apps.deliverables.models import Project, MasterFormatSection, SubmittalItem, ProcoreSubmittalTypeMapping
 from apps.users.models import CustomUser
+from apps.teams.roles import ROLE_ADMIN
 
 class TestProcoreFetchAccessTokenView(APITestCase):
     def setUp(self):
@@ -527,6 +528,91 @@ class TestCreateProcoreSubmittalsView(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['message'], 'Submittal created')
         self.assertIn(str(self.submittal_item.id), response.data['submittals'])
+
+        mock_create_submittal.assert_called_once_with(
+            submittal_content='Test Content',
+            paragraph_number='1.1',
+            procore_spec_section_id='sec-123',
+            procore_status_id='123',
+            procore_submittal_manager_id='789',
+            submittal_title='Test Description',
+            submittal_type='Test Type',
+            project_id=456,
+            procore_token='fake-token'
+        )
+        
+        # Verify submittal was updated
+        updated_submittal = SubmittalItem.objects.get(id=self.submittal_item.id)
+        self.assertEqual(updated_submittal.procore_submittal_id, 'sub-123')
+        self.assertIsNotNone(updated_submittal.procore_export_date)
+
+    @patch('apps.deliverables.views.get_fresh_token_for_user')
+    @patch('apps.deliverables.views.get_status')
+    @patch('apps.deliverables.views.get_spec_divisions')
+    @patch('apps.deliverables.views.get_spec_sections')
+    @patch('apps.deliverables.views.create_submittal')
+    def test_successful_submittal_creation_with_defined_mapping(
+        self, 
+        mock_create_submittal,
+        mock_get_spec_sections,
+        mock_get_spec_divisions,
+        mock_get_status,
+        mock_get_fresh_token
+    ):
+        # Mock responses
+        mock_get_fresh_token.return_value = MagicMock(access_token='fake-token')
+        mock_get_status.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [{"name": "Open", "id": "123"}]
+        )
+        mock_get_spec_divisions.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [{"number": "12", "id": "div-123"}]
+        )
+        mock_get_spec_sections.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [{"number": "123456", "id": "sec-123"}]
+        )
+        mock_create_submittal.return_value = MagicMock(
+            status_code=201,
+            json=lambda: {"id": "sub-123"}
+        )
+
+        # Create a test mapping
+        ProcoreSubmittalTypeMapping.objects.create(
+            link_type='Test Type',
+            procore_type='Test Procore Type',
+            company=self.team,
+            procore_company_id="1"
+        )
+
+        # Test data
+        data = {
+            'project_id': self.project.id,
+            'records': [self.submittal_item.id],
+            'export_all': False
+        }
+
+        # Make request
+        response = self.client.post(self.url, data, format='json')
+
+        # Assertions
+        print(response.data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['message'], 'Submittal created')
+        self.assertIn(str(self.submittal_item.id), response.data['submittals'])
+
+        mock_create_submittal.assert_called_once_with(
+            submittal_content='Test Content',
+            paragraph_number='1.1',
+            procore_spec_section_id='sec-123',
+            procore_status_id='123',
+            procore_submittal_manager_id='789',
+            submittal_title='Test Description',
+            submittal_type='Test Procore Type',
+            project_id=456,
+            procore_token='fake-token'
+        )
         
         # Verify submittal was updated
         updated_submittal = SubmittalItem.objects.get(id=self.submittal_item.id)
@@ -1091,7 +1177,7 @@ class TestGetProcoreSubmittalMappingsView(APITestCase):
         )
         
         # URL for the view
-        self.url = reverse('deliverables:get-procore-submittal-mappings', kwargs={'company_id': self.company.id})
+        self.url = reverse('deliverables:procore-submittal-mappings', kwargs={'company_id': self.company.id})
 
     def test_unauthorized_access(self):
         """Test that unauthorized users cannot access the endpoint"""
@@ -1182,3 +1268,139 @@ class TestGetProcoreSubmittalMappingsView(APITestCase):
         
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data, "API Error")
+
+
+class TestUpdateProcoreSubmittalTypesView(APITestCase):
+    def setUp(self):
+        # Create test users
+        self.admin_user = CustomUser.objects.create_user(
+            username='admin_user',
+            email='admin@test.com',
+            password='testpass123'
+        )
+        self.non_admin_user = CustomUser.objects.create_user(
+            username='non_admin_user',
+            email='user@test.com',
+            password='testpass123'
+        )
+        
+        # Create test company
+        self.company = Team.objects.create(
+            name='Test Company'
+        )
+        
+        # Add admin user to company
+        Membership.objects.create(
+            user=self.admin_user,
+            team=self.company,
+            role=ROLE_ADMIN
+        )
+        
+        # Add non-admin user to company
+        self.company.members.add(self.non_admin_user)
+        
+        # Create initial mapping
+        self.existing_mapping = ProcoreSubmittalTypeMapping.objects.create(
+            company=self.company,
+            link_type='Shop Drawings',
+            procore_type='Drawings'
+        )
+        
+        # URL for the view
+        self.url = reverse('deliverables:procore-submittal-mappings', kwargs={'company_id': self.company.id})
+        
+    def test_successful_update_mapping(self):
+        """Test successful update of submittal type mappings"""
+        self.client.force_authenticate(user=self.admin_user)
+        
+        data = {
+            'mappings': [
+                {
+                    'id': self.existing_mapping.id,
+                    'link_submittal': 'Product Data',
+                    'procore_type': 'Product Info'
+                },
+                {
+                    'link_submittal': 'Samples',
+                    'procore_type': 'Sample'
+                }
+            ]
+        }
+        
+        response = self.client.post(self.url, data, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify the existing mapping was updated
+        updated_mapping = ProcoreSubmittalTypeMapping.objects.get(id=self.existing_mapping.id)
+        self.assertEqual(updated_mapping.link_type, 'Product Data')
+        self.assertEqual(updated_mapping.procore_type, 'Product Info')
+        
+        # Verify new mapping was created
+        new_mapping = ProcoreSubmittalTypeMapping.objects.get(link_type='Samples')
+        self.assertEqual(new_mapping.procore_type, 'Sample')
+        
+    def test_unauthorized_user(self):
+        """Test that non-admin users cannot update mappings"""
+        self.client.force_authenticate(user=self.non_admin_user)
+        
+        data = {
+            'mappings': [
+                {
+                    'id': self.existing_mapping.id,
+                    'link_submittal': 'Product Data',
+                    'procore_type': 'Product Info'
+                }
+            ]
+        }
+        
+        response = self.client.post(self.url, data, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        
+        # Verify the mapping wasn't changed
+        unchanged_mapping = ProcoreSubmittalTypeMapping.objects.get(id=self.existing_mapping.id)
+        self.assertEqual(unchanged_mapping.link_type, 'Shop Drawings')
+        
+    def test_unauthenticated_user(self):
+        """Test that unauthenticated users cannot access the view"""
+        data = {
+            'company_id': self.company.id,
+            'mappings': []
+        }
+        
+        response = self.client.post(self.url, data, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        
+    def test_invalid_company_id(self):
+        """Test handling of invalid company ID"""
+        self.client.force_authenticate(user=self.admin_user)
+        
+        data = {
+            'company_id': 99999,  # Non-existent company ID
+            'mappings': []
+        }
+        
+        response = self.client.post(self.url, data, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        
+    def test_missing_required_fields(self):
+        """Test handling of missing required fields in mapping data"""
+        self.client.force_authenticate(user=self.admin_user)
+        
+        data = {
+            'company_id': self.company.id,
+            'mappings': [
+                {
+                    'id': self.existing_mapping.id,
+                    # Missing link_submittal
+                    'procore_type': 'Product Info'
+                }
+            ]
+        }
+        
+        response = self.client.post(self.url, data, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
