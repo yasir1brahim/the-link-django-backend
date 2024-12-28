@@ -1202,9 +1202,32 @@ class ProcoreFetchAccessTokenView(generics.CreateAPIView):
             refresh_token=access_token_serializer.validated_data['refresh_token'],
             expires_in=access_token_serializer.validated_data['expires_in'],
             token_type=access_token_serializer.validated_data['token_type'],
+            redirect_uri=redirect_uri,
             code=code,
         )
 
+        return Response(access_token_serializer.data, status=status.HTTP_200_OK)
+    
+class ProcoreRefreshAccessTokenView(generics.CreateAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        try:
+            procore_token = get_fresh_token_for_user(request.user)
+        except ProcoreException as e:
+            return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
+
+        access_token_serializer = ProcoreAccessTokenSerializer(
+            data={
+                'access_token': procore_token.access_token,
+                'refresh_token': procore_token.refresh_token,
+                'expires_in': procore_token.expires_in,
+                'token_type': procore_token.token_type,
+                'created_at': procore_token.created_at,
+            }
+        )
+        print(access_token_serializer)
+        access_token_serializer.is_valid(raise_exception=True)
         return Response(access_token_serializer.data, status=status.HTTP_200_OK)
 
 
@@ -1217,6 +1240,9 @@ class GetProcoreCompanyMappingView(generics.RetrieveAPIView):
         if not request.user.is_admin_for_team(company):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
+        if company.procore_id is None:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
         procore_data = {
             'procore_company_id': company.procore_id,
             'procore_company_name': company.procore_name
@@ -1225,8 +1251,6 @@ class GetProcoreCompanyMappingView(generics.RetrieveAPIView):
         serializer.is_valid(raise_exception=True)
         if company.procore_id is not None:
             return Response(serializer.data, status=status.HTTP_200_OK)
-        else:
-            return Response(serializer.data, status=status.HTTP_204_NO_CONTENT)
         
 
 class GetProcoreCompaniesView(generics.ListAPIView):
@@ -1265,6 +1289,8 @@ class GetProcoreProjectMappingView(generics.RetrieveAPIView):
         project = get_object_or_404(Project, id=project_id)
         if not request.user.is_member_of_project(project):
             return Response(status=status.HTTP_403_FORBIDDEN)
+        if project.procore_id is None:
+            return Response(status=status.HTTP_204_NO_CONTENT)
         procore_data = {
             'procore_project_id': project.procore_id,
             'procore_project_name': project.procore_name,
@@ -1286,7 +1312,7 @@ class SetProcoreProjectMappingView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         project_id = serializer.validated_data.get('project_id')
         project = get_object_or_404(Project, id=project_id)
-        if not request.user.is_admin_for_project(project):
+        if not request.user.is_member_of_project(project):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         company = project.team
@@ -1373,9 +1399,17 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                 print("Division: " + spec_section_division + " already exists")
             
             if spec_section not in procore_spec_section_numbers:
-                create_spec_response = create_spec_section(project.procore_id, spec_section, procore_division_dict[spec_section_division])
+                create_spec_response = create_spec_section(
+                    spec_section=spec_section,
+                    division_id=procore_division_dict[spec_section_division],
+                    project_id=project.procore_id,
+                    procore_token=procore_token.access_token
+                )
                 if create_spec_response.status_code != 201:
-                    return create_spec_response['id']
+                    print("Error creating procore spec section")
+                    print("create_spec_response status code: " + str(create_spec_response.status_code))
+                    print("create_spec_response json: " + str(create_spec_response.json()))
+                    return Response(create_spec_response.json(), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 else:
                     procore_spec_section_dict[spec_section] = create_spec_response.json()
             else:
@@ -1447,16 +1481,13 @@ class GetProcoreProjectsView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
-        company_id = kwargs.get('company_id')
-        company = get_object_or_404(Team, id=company_id)
-        if not request.user.is_member_of_team(company):
-            return Response(status=status.HTTP_403_FORBIDDEN)
+        procore_company_id = kwargs.get('procore_company_id')
         try:
             procore_token = get_fresh_token_for_user(request.user)
         except ProcoreException as e:
             return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
         
-        response = get_projects(company.procore_id, procore_token.access_token)
+        response = get_projects(procore_company_id, procore_token.access_token)
         if response.status_code != 200:
             return Response(response.text, status=status.HTTP_400_BAD_REQUEST)
         projects_list = []
@@ -1476,16 +1507,13 @@ class GetProcoreManagersView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
-        project_id = kwargs.get('project_id')
-        project = get_object_or_404(Project, id=project_id)
-        if not request.user.is_member_of_project(project):
-            return Response(status=status.HTTP_403_FORBIDDEN)
+        procore_project_id = kwargs.get('procore_project_id')
         try:
             procore_token = get_fresh_token_for_user(request.user)
         except ProcoreException as e:
             return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
         
-        response = get_managers(project.procore_id, procore_token.access_token)
+        response = get_managers(procore_project_id, procore_token.access_token)
         if response.status_code != 200:
             return Response(response.text, status=status.HTTP_400_BAD_REQUEST)
         managers_list = []
@@ -1509,7 +1537,7 @@ class CreateProcoreCompanyMappingView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         company_id = serializer.validated_data.get('link_company_id')
         company = get_object_or_404(Team, id=company_id)
-        if not request.user.is_admin_for_team(company):
+        if not request.user.is_member_of_team(company):
             return Response(status=status.HTTP_403_FORBIDDEN)
         company.procore_id = serializer.validated_data.get('procore_company_id')
         company.procore_name = serializer.validated_data.get('procore_company_name')
@@ -1544,20 +1572,31 @@ class ProcoreSubmittalMappingsView(generics.ListCreateAPIView):
                 'procore_type': mapping.procore_type
             })
 
-        all_link_submittal_types = list(SubmittalItem.objects.values_list('submittal_type', flat=True).distinct())
+        all_link_submittal_types = list(SubmittalItem.objects.all().values_list('submittal_type', flat=True).distinct())
         link_submittal_types_in_procore_format = []
-        for index, submittal_type in enumerate(all_link_submittal_types):
+        for submittal_type in all_link_submittal_types:
             link_submittal_types_in_procore_format.append({
-                'id': f'Link{index}',
+                'id': None,
                 'name': submittal_type,
                 'translated_name': submittal_type
+            })
+
+        all_submittal_types = procore_submittal_types + link_submittal_types_in_procore_format
+        list_of_mapped_types = [mapping['link_submittal'] for mapping in existing_mappings_dicts]
+        for submittal_type in all_submittal_types:
+            if submittal_type['name'] in list_of_mapped_types:
+                continue
+            existing_mappings_dicts.append({
+                'id': submittal_type['id'],
+                'link_submittal': submittal_type['name'],
+                'procore_type': submittal_type['name']
             })
 
         response_payload = {
             'message': 'List of submittal types',
             'data': {
                 'link_sub_mapping': existing_mappings_dicts,
-                'procore_submittal_types': procore_submittal_types + link_submittal_types_in_procore_format
+                'procore_submittal_types': all_submittal_types
             }
         }
         return Response(response_payload, status=status.HTTP_200_OK)
@@ -1565,7 +1604,7 @@ class ProcoreSubmittalMappingsView(generics.ListCreateAPIView):
     def post(self, request, *args, **kwargs):
         serializer = UpdateProcoreSubmittalMappingsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        company_id = serializer.validated_data.get('company_id')
+        company_id = kwargs.get('company_id')
         company = get_object_or_404(Team, id=company_id)
         if not request.user.is_admin_for_team(company):
             return Response(status=status.HTTP_403_FORBIDDEN)
@@ -1576,7 +1615,9 @@ class ProcoreSubmittalMappingsView(generics.ListCreateAPIView):
                 id=mapping.get('id'),
                 defaults={
                     'link_type': mapping.get('link_submittal'),
-                    'procore_type': mapping.get('procore_type')
+                    'procore_type': mapping.get('procore_type'),
+                    'company': company,
+                    'procore_company_id': company.procore_id
                 }
             )
         return Response(status=status.HTTP_200_OK)

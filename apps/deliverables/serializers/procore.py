@@ -23,7 +23,7 @@ class ProcoreCompanySerializer(serializers.Serializer):
     name = serializers.CharField()
     is_active = serializers.BooleanField()
     logo_url = serializers.URLField()
-    pcn_business_experience = serializers.BooleanField()
+    pcn_business_experience = serializers.BooleanField(required=False, allow_null=True)
     my_company = serializers.BooleanField()
 
 
@@ -71,7 +71,7 @@ class CreateProcoreCompanyMappingSerializer(serializers.Serializer):
 
 
 class ProcoreSubmittalMappingSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
+    id = serializers.IntegerField(allow_null=True)
     link_submittal = serializers.CharField()
     procore_type = serializers.CharField()
 

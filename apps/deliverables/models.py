@@ -1,5 +1,5 @@
 from enum import Enum
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from django.db import models
 from apps.utils.models import BaseModel
@@ -261,10 +261,11 @@ class ProcoreToken(BaseModel):
     refresh_token = models.CharField(max_length=1020)
     expires_in = models.IntegerField()
     token_type = models.CharField(max_length=256)
+    redirect_uri = models.CharField(max_length=1020, blank=True, null=True)
     code = models.CharField(max_length=1020)
 
     def is_expired(self):
-        return datetime.now() > (self.created_at + timedelta(seconds=self.expires_in))
+        return datetime.now(tz=timezone.utc) > (self.created_at + timedelta(seconds=self.expires_in))
     
 
 class ProcoreSubmittalTypeMapping(BaseModel):

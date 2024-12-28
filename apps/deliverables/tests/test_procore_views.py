@@ -139,10 +139,6 @@ class TestGetProcoreCompanyMappingView(APITestCase):
             response = self.client.get(self.url_no_procore)
             
             self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-            self.assertEqual(response.data, {
-                'procore_company_id': None,
-                'procore_company_name': None
-            })
 
     def test_get_company_mapping_not_admin(self):
         """Test access denied when user is not company admin"""
@@ -433,6 +429,23 @@ class TestGetProcoreProjectMappingView(APITestCase):
         url = reverse('deliverables:procore-project-mapping', kwargs={'project_id': 99999})
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_returns_status_204_when_no_procore_project_mapping(self):
+        """Test response when no procore project mapping exists"""
+        self.client.force_authenticate(user=self.user)
+        # Create test project
+        self.project = Project.objects.create(
+            name='Test No Procore Project',
+            team=self.team,
+            procore_id=None,
+            procore_name=None,
+            procore_submittal_manager_id=None,
+            procore_submittal_manager_name=None
+        )
+        self.project.members.add(self.user)
+        url = reverse('deliverables:procore-project-mapping', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 
 
 class TestCreateProcoreSubmittalsView(APITestCase):
@@ -987,11 +1000,11 @@ class TestSetProcoreProjectMappingView(APITestCase):
         response = self.client.post(self.url, self.valid_payload)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_non_admin_user(self):
-        """Test that non-admin users cannot update project mapping"""
+    def test_non_admin_user_can_update_mapping(self):
+        """Test that non-admin users can update project mapping"""
         self.client.force_authenticate(user=self.user)
         response = self.client.post(self.url, self.valid_payload)
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_successful_mapping_update(self):
         """Test successful procore mapping update"""
@@ -1076,6 +1089,7 @@ class TestCreateProcoreCompanyMappingView(APITestCase):
         """Test successful company mapping creation when user is admin"""
         # Make user admin of the team
         self.user.is_admin_for_team = lambda x: True
+        self.user.is_member_of_team = lambda x: True
         
         # Authenticate user
         self.client.force_authenticate(user=self.user)
@@ -1096,13 +1110,14 @@ class TestCreateProcoreCompanyMappingView(APITestCase):
         response = self.client.post(self.url, self.valid_payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_create_mapping_forbidden(self):
-        """Test mapping creation fails when user is not team admin"""
+    def test_non_admin_can_create_mapping(self):
+        """Test non-admin users can create company mappings"""
         # Authenticate user but don't make them admin
         self.client.force_authenticate(user=self.user)
+        self.user.is_member_of_team = lambda x: True
         
         response = self.client.post(self.url, self.valid_payload, format='json')
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_create_mapping_invalid_team(self):
         """Test mapping creation fails with non-existent team"""
@@ -1151,7 +1166,11 @@ class TestGetProcoreSubmittalMappingsView(APITestCase):
         self.company.members.add(self.user)
         self.project = Project.objects.create(
             name='Test Project',
-            team=self.company
+            team=self.company,
+            procore_id='456',
+            procore_name='Test Procore Project',
+            procore_submittal_manager_id='789',
+            procore_submittal_manager_name='Test Manager'
         )
         self.project.members.add(self.user)
         
@@ -1169,6 +1188,15 @@ class TestGetProcoreSubmittalMappingsView(APITestCase):
         
         self.submittal_item = SubmittalItem.objects.create(
             submittal_type='Shop Drawing',
+            project_id=self.project.id,
+            masterformat_section=masterformat_section,
+            submittal_description='Test Description',
+            submittal_content='Test Content',
+            paragraph_number='1.1'
+        )
+
+        self.submittal_item_2 = SubmittalItem.objects.create(
+            submittal_type='Action/Information Submittal',
             project_id=self.project.id,
             masterformat_section=masterformat_section,
             submittal_description='Test Description',
@@ -1227,12 +1255,20 @@ class TestGetProcoreSubmittalMappingsView(APITestCase):
         
         # Check that the response contains both Procore and Link submittal types
         data = response.data['data']
+        print("MAPPING DATA: ", data)
         self.assertIn('link_sub_mapping', data)
         self.assertIn('procore_submittal_types', data)
         
         # Verify the existing mapping is included
-        self.assertEqual(len(data['link_sub_mapping']), 1)
+        self.assertEqual(len(data['link_sub_mapping']), 3)
         self.assertEqual(data['link_sub_mapping'][0]['link_submittal'], 'Shop Drawing')
+        self.assertEqual(data['link_sub_mapping'][0]['procore_type'], 'Drawing')
+
+        # Verify that the other submittal types are mapped with identity
+        self.assertEqual(data['link_sub_mapping'][1]['link_submittal'], 'Drawing')
+        self.assertEqual(data['link_sub_mapping'][1]['procore_type'], 'Drawing')
+        self.assertEqual(data['link_sub_mapping'][2]['link_submittal'], 'Action/Information Submittal')
+        self.assertEqual(data['link_sub_mapping'][2]['procore_type'], 'Action/Information Submittal')
         
         # Verify both Procore and Link types are included
         self.assertTrue(len(data['procore_submittal_types']) > 1)  # Should include both Procore and Link types
@@ -1286,7 +1322,8 @@ class TestUpdateProcoreSubmittalTypesView(APITestCase):
         
         # Create test company
         self.company = Team.objects.create(
-            name='Test Company'
+            name='Test Company',
+            procore_id='123',
         )
         
         # Add admin user to company
@@ -1321,6 +1358,7 @@ class TestUpdateProcoreSubmittalTypesView(APITestCase):
                     'procore_type': 'Product Info'
                 },
                 {
+                    'id': None,
                     'link_submittal': 'Samples',
                     'procore_type': 'Sample'
                 }
@@ -1328,6 +1366,7 @@ class TestUpdateProcoreSubmittalTypesView(APITestCase):
         }
         
         response = self.client.post(self.url, data, format='json')
+        print("RESPONSE: ", response.data)
         
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         
@@ -1339,6 +1378,7 @@ class TestUpdateProcoreSubmittalTypesView(APITestCase):
         # Verify new mapping was created
         new_mapping = ProcoreSubmittalTypeMapping.objects.get(link_type='Samples')
         self.assertEqual(new_mapping.procore_type, 'Sample')
+        self.assertEqual(new_mapping.link_type, 'Samples')
         
     def test_unauthorized_user(self):
         """Test that non-admin users cannot update mappings"""
@@ -1356,7 +1396,7 @@ class TestUpdateProcoreSubmittalTypesView(APITestCase):
         
         response = self.client.post(self.url, data, format='json')
         
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         
         # Verify the mapping wasn't changed
         unchanged_mapping = ProcoreSubmittalTypeMapping.objects.get(id=self.existing_mapping.id)
@@ -1381,8 +1421,10 @@ class TestUpdateProcoreSubmittalTypesView(APITestCase):
             'company_id': 99999,  # Non-existent company ID
             'mappings': []
         }
+        url = reverse('deliverables:procore-submittal-mappings', kwargs={'company_id': 99999})
+
         
-        response = self.client.post(self.url, data, format='json')
+        response = self.client.post(url, data, format='json')
         
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         

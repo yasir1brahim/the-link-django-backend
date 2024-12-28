@@ -5,6 +5,7 @@ from django.conf import settings
 from django.shortcuts import get_object_or_404
 from apps.deliverables.models import ProcoreToken
 from apps.deliverables.serializers.procore import ProcoreAccessTokenSerializer
+from django.http import Http404
 
 GRANT_TYPE_ACCESS_TOKEN = 'authorization_code'
 GRANT_TYPE_REFRESH_TOKEN = 'refresh_token'
@@ -44,8 +45,11 @@ def get_me(procore_token):
     response = requests.get(url, headers=headers)
     return response
 
+
 def get_fresh_token_for_user(user) -> ProcoreToken:
-    existing_token = get_object_or_404(ProcoreToken, user=user)
+    existing_token = ProcoreToken.objects.filter(user=user).order_by('-created_at').first()
+    if not existing_token:
+        raise Http404("No Procore token found for user")
     if not existing_token.is_expired():
         return existing_token
     
@@ -90,7 +94,7 @@ def get_spec_sections(project_id, procore_token):
 
 def get_projects(company_id, procore_token):
     url = settings.PROCORE_BASE_URL + '/rest/v1.0/projects?company_id=' + str(company_id)
-    headers = {'Authorization': "Bearer " + procore_token}
+    headers = {'Authorization': "Bearer " + procore_token, 'Procore-Company-Id': str(company_id)}
     response = requests.get(url, headers=headers)
     return response
 

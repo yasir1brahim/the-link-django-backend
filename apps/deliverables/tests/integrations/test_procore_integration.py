@@ -1,7 +1,10 @@
-from unittest import TestCase, mock
+from unittest import mock
 from unittest.mock import patch, Mock
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+from django.http import Http404
 
 from apps.deliverables.integrations.procore import (get_procore_access_token, get_fresh_token_for_user,
                                                      GRANT_TYPE_ACCESS_TOKEN, ProcoreException)
@@ -70,89 +73,95 @@ class TestProcoreIntegration(TestCase):
 
 class TestGetFreshTokenForUser(TestCase):
     def setUp(self):
-        self.mock_user = mock.Mock()
-        self.mock_existing_token = mock.Mock(spec=ProcoreToken)
-        self.mock_existing_token.code = "test_code"
-        self.mock_existing_token.redirect_uri = "test_uri"
+        # Create real user with unique username
+        self.user = get_user_model().objects.create_user(
+            username='test_user',
+            email='test_user@example.com',  # Assuming email is the main identifier
+            password='testpassword'
+        )
+        
+        # Create initial token
+        self.existing_token = ProcoreToken.objects.create(
+            user=self.user,
+            code="test_code",
+            access_token="test_access_token",
+            refresh_token="test_refresh_token",
+            expires_in=3600
+        )
 
     def test_returns_existing_token_if_not_expired(self):
-        # Arrange
-        self.mock_existing_token.is_expired.return_value = False
-        with mock.patch('apps.deliverables.integrations.procore.get_object_or_404') as mock_get:
-            mock_get.return_value = self.mock_existing_token
-            
-            # Act
-            result = get_fresh_token_for_user(self.mock_user)
-            
-            # Assert
-            self.assertEqual(result, self.mock_existing_token)
-            mock_get.assert_called_once_with(ProcoreToken, user=self.mock_user)
-            self.mock_existing_token.is_expired.assert_called_once()
+        # Act
+        result = get_fresh_token_for_user(self.user)  # Use self.user instead of self.mock_user
+        
+        # Assert
+        self.assertEqual(result, self.existing_token)
 
     def test_raises_404_if_token_not_found(self):
-        # Arrange
-        with mock.patch('apps.deliverables.integrations.procore.get_object_or_404') as mock_get:
-            mock_get.side_effect = ProcoreException("Test error")
+        # Create a user without a token
+        new_user = get_user_model().objects.create_user(
+            username='no_token_user',
+            email='no_token@example.com',
+            password='testpassword'
+        )
             
-            # Act & Assert
-            with self.assertRaises(ProcoreException):
-                get_fresh_token_for_user(self.mock_user)
+        # Act & Assert
+        with self.assertRaises(Http404):
+            get_fresh_token_for_user(new_user)
+
+    def test_returns_latest_token_if_multiple_tokens_exist(self):
+        newest_token = ProcoreToken.objects.create(
+            user=self.user,
+            code="test_code_2",
+            access_token="test_access_token_2",
+            refresh_token="test_refresh_token_2",
+            expires_in=3600
+        )
+        # Act
+        result = get_fresh_token_for_user(self.user)  # Use self.user instead of self.mock_user
+        
+        # Assert
+        self.assertEqual(result, newest_token)
 
     def test_creates_new_token_if_existing_expired(self):
-        # Arrange
-        self.mock_existing_token.is_expired.return_value = True
-        mock_response = mock.Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            'access_token': 'new_token',
-            'refresh_token': 'new_refresh',
-            'expires_in': 3600,
-            'token_type': 'bearer'
-        }
-        
-        # Create mock serializer instance
-        mock_serializer = mock.Mock()
-        mock_serializer.is_valid.return_value = True
-        mock_serializer.validated_data = mock_response.json()
-        mock_serializer_class = mock.Mock(return_value=mock_serializer)
-        
-        # Use individual patches instead of patch.multiple for better control
-        with mock.patch('apps.deliverables.integrations.procore.get_object_or_404') as mock_get_404, \
-             mock.patch('apps.deliverables.integrations.procore.get_procore_access_token') as mock_get_token, \
-             mock.patch('apps.deliverables.integrations.procore.ProcoreAccessTokenSerializer', mock_serializer_class):
-            
-            # Setup mock returns
-            mock_get_404.return_value = self.mock_existing_token
-            mock_get_token.return_value = mock_response
-            
-            new_token = mock.Mock(spec=ProcoreToken)
-            with mock.patch.object(ProcoreToken.objects, 'create', return_value=new_token):
-                # Act
-                result = get_fresh_token_for_user(self.mock_user)
-                
-                # Assert
-                self.assertEqual(result, new_token)
-                mock_get_token.assert_called_once_with(
-                    self.mock_existing_token.code, 
-                    self.mock_existing_token.redirect_uri
-                )
-    
-    def test_raises_exception_on_failed_procore_response(self):
-        # Arrange
-        self.mock_existing_token.is_expired.return_value = True
-        mock_response = mock.Mock()
-        mock_response.status_code = 400
-        mock_response.text = "Error message"
-        
-        with mock.patch('apps.deliverables.integrations.procore.get_object_or_404') as mock_get_404, \
+        # Patch the is_expired method of ProcoreToken
+        with mock.patch.object(ProcoreToken, 'is_expired', return_value=True), \
              mock.patch('apps.deliverables.integrations.procore.get_procore_access_token') as mock_get_token:
             
-            mock_get_404.return_value = self.mock_existing_token
+            # Setup mock response
+            mock_response = mock.Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                'access_token': 'new_token',
+                'refresh_token': 'new_refresh',
+                'expires_in': 3600,
+                'token_type': 'bearer',
+                'created_at': 1718361600
+            }
+            mock_get_token.return_value = mock_response
+            
+            # Act
+            result = get_fresh_token_for_user(self.user)
+            
+            # Assert
+            self.assertEqual(result.access_token, 'new_token')
+            self.assertEqual(result.refresh_token, 'new_refresh')
+            mock_get_token.assert_called_once_with(
+                self.existing_token.code, 
+                self.existing_token.redirect_uri
+            )
+    
+    def test_raises_exception_on_failed_procore_response(self):
+        # Patch the is_expired method of ProcoreToken
+        with mock.patch.object(ProcoreToken, 'is_expired', return_value=True), \
+             mock.patch('apps.deliverables.integrations.procore.get_procore_access_token') as mock_get_token:
+            
+            mock_response = mock.Mock()
+            mock_response.status_code = 400
+            mock_response.text = "Error message"
             mock_get_token.return_value = mock_response
             
             # Act & Assert
             with self.assertRaises(ProcoreException) as context:
-                get_fresh_token_for_user(self.mock_user)
+                get_fresh_token_for_user(self.user)
             
             self.assertEqual(str(context.exception), "Error message")
-    
