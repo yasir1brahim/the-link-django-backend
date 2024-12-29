@@ -793,7 +793,7 @@ class TestGetProcoreProjectsView(APITestCase):
             name='Test Company',
             procore_id='12345'
         )
-        self.url = reverse('deliverables:procore-projects', kwargs={'company_id': self.company.id})
+        self.url = reverse('deliverables:procore-projects', kwargs={'procore_company_id': self.company.procore_id})
 
     def test_unauthenticated_user(self):
         """Test that unauthenticated users cannot access the endpoint"""
@@ -883,7 +883,7 @@ class TestGetProcoreManagersView(APITestCase):
         self.project.members.add(self.user)
         
         # URL for the view
-        self.url = reverse('deliverables:procore-managers', kwargs={'project_id': self.project.id})
+        self.url = reverse('deliverables:procore-managers', kwargs={'procore_project_id': self.project.procore_id})
         
         # Authenticate the user
         self.client.force_authenticate(user=self.user)
