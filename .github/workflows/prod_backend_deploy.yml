@@ -56,7 +56,7 @@ jobs:
             --build-arg FRONTEND_BASE_URL="${{ vars.FRONTEND_BASE_URL }}" \
             --build-arg SENDGRID_API_KEY="${{ secrets.SENDGRID_API_KEY }}" \
             --build-arg PROCORE_CLIENT_ID="${{ vars.PROCORE_CLIENT_ID }}" \
-            --build-arg PROCORE_CLIENT_SECRET="${{ vars.PROCORE_CLIENT_SECRET }}" \
+            --build-arg PROCORE_CLIENT_SECRET="${{ secrets.PROCORE_CLIENT_SECRET }}" \
             --build-arg PROCORE_REDIRECT_URL="${{ vars.PROCORE_REDIRECT_URL }}" \
             --build-arg PROCORE_AUTH_BASE_URL="${{ vars.PROCORE_AUTH_BASE_URL }}" \
             --build-arg PROCORE_BASE_URL="${{ vars.PROCORE_BASE_URL }}" \
