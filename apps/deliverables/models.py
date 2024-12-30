@@ -1,4 +1,5 @@
 from enum import Enum
+from datetime import datetime, timedelta, timezone
 
 from django.db import models
 from apps.utils.models import BaseModel
@@ -239,3 +240,33 @@ class NoticeMatch(BaseModel):
     )
 
 # endregion notices
+
+
+# region Procore
+
+class ProcoreToken(BaseModel):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="procore_tokens")
+    access_token = models.CharField(max_length=1020)
+    refresh_token = models.CharField(max_length=1020)
+    expires_in = models.IntegerField()
+    token_type = models.CharField(max_length=256)
+    redirect_uri = models.CharField(max_length=1020, blank=True, null=True)
+    code = models.CharField(max_length=1020)
+
+    def is_expired(self):
+        return datetime.now(tz=timezone.utc) > (self.created_at + timedelta(seconds=self.expires_in))
+    
+
+class ProcoreSubmittalTypeMapping(BaseModel):
+    company = models.ForeignKey("teams.Team", on_delete=models.CASCADE)
+    procore_company_id = models.CharField(max_length=256)
+    link_type = models.CharField(max_length=256)
+    procore_type = models.CharField(max_length=256)
+
+    class Meta:
+        unique_together = ("company", "link_type")
+
+    def __str__(self):
+        return f"{self.link_type} -> {self.procore_type}"
+
+# endregion Procore

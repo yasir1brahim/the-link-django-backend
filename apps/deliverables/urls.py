@@ -45,6 +45,19 @@ urlpatterns = [
         views.NoticeProcessingWebhookView.as_view(),
         name='webhook-notice-processing',
     ),
+    path('procore/access_token/', views.ProcoreFetchAccessTokenView.as_view(), name='procore-fetch-access-token'),
+    path('procore/refresh_token/', views.ProcoreRefreshAccessTokenView.as_view(), name='procore-refresh-access-token'),
+    path('procore/company_mapping/<int:company_id>/', views.GetProcoreCompanyMappingView.as_view(), name='procore-company-mapping'),
+    path('procore/companies/', views.GetProcoreCompaniesView.as_view(), name='procore-companies'),
+    path('procore/me/', views.GetCurrentUserProcoreInfoView.as_view(), name='get-current-user-procore-info'),
+    path('procore/project_mapping/<int:project_id>/', views.GetProcoreProjectMappingView.as_view(), name='procore-project-mapping'),
+    path('procore/project_mapping/', views.SetProcoreProjectMappingView.as_view(), name='set-procore-project-mapping'),
+    path('procore/create_submittals/', views.CreateProcoreSubmittalsView.as_view(), name='procore-create-submittals'),
+    path('procore/delete_token/', views.DeleteProcoreTokenView.as_view(), name='delete-procore-token'),
+    path('procore/projects/<int:procore_company_id>/', views.GetProcoreProjectsView.as_view(), name='procore-projects'),
+    path('procore/managers/<int:procore_project_id>/', views.GetProcoreManagersView.as_view(), name='procore-managers'),
+    path('procore/company_mapping/', views.CreateProcoreCompanyMappingView.as_view(), name='create-procore-company-mapping'),
+    path('procore/submittal_mappings/<int:company_id>/', views.ProcoreSubmittalMappingsView.as_view(), name='procore-submittal-mappings'),
 ]
 
 

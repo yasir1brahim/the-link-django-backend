@@ -336,8 +336,8 @@ FORMS_URLFIELD_ASSUME_HTTPS = True
 # Email setup
 
 # default email used by your server
-SERVER_EMAIL = os.environ.get("SERVER_EMAIL", default="noreply@thelink.ai")
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", default="noreply@thelink.ai")
+SERVER_EMAIL = os.environ.get("SERVER_EMAIL", default="noreply@tlsignup.com")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", default="noreply@tlsignup.com")
 
 # The default value will print emails to the console, but you can change that here
 # and in your environment.
@@ -572,3 +572,9 @@ BACKEND_CALLBACK_URL = os.environ.get("BACKEND_CALLBACK_URL", default="")
 NOTICES_LAMBDA_FUNCTION_URL = os.environ.get("NOTICES_LAMBDA_FUNCTION_URL", default="")
 BACKEND_NOTICES_CALLBACK_URL = os.environ.get("BACKEND_NOTICES_CALLBACK_URL", default="")
 NOTICES_FEATURE_FLAG_NAME = 'notices'
+
+PROCORE_CLIENT_ID = os.environ.get("PROCORE_CLIENT_ID", default="")
+PROCORE_CLIENT_SECRET = os.environ.get("PROCORE_CLIENT_SECRET", default="")
+PROCORE_REDIRECT_URL = os.environ.get("PROCORE_REDIRECT_URL", default="")
+PROCORE_AUTH_BASE_URL = os.environ.get("PROCORE_AUTH_BASE_URL", default="")
+PROCORE_BASE_URL = os.environ.get("PROCORE_BASE_URL", default="")
