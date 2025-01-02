@@ -553,6 +553,7 @@ LOGGING = {
     },
 }
 
+DATA_UPLOAD_MAX_NUMBER_FILES = 250
 
 BACKEND_CALLBACK_URL = os.environ.get("BACKEND_CALLBACK_URL", default="http://localhost:8000")
 

@@ -1,3 +1,4 @@
+from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APITestCase, APIClient
@@ -445,8 +446,9 @@ class UploadFileTests(APITestCase):
             'files': [self.mock_file],
         })
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-
-    def test_project_member_can_upload_file_to_their_project(self):
+    
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_project_member_can_upload_file_to_their_project(self, mock_invoke_lambda):
         """Test that a project member can upload a file to their project"""
         ProjectMembership.objects.create(
             project=self.existing_project,
@@ -460,7 +462,40 @@ class UploadFileTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_company_admin_can_upload_file_to_project(self):
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_project_member_can_upload_upto_250_files_at_once(self, mock_invoke_lambda):
+        """Test that a project member can upload a file to their project"""
+        ProjectMembership.objects.create(
+            project=self.existing_project,
+            user=self.company_member,
+            role=ROLE_PROJECT_MEMBER
+        )
+        self.client.force_authenticate(user=self.company_member)
+        list_of_files = [SimpleUploadedFile(
+            name=f'test_file_{i+1}.txt',
+            content=b'This is some test file content',
+            content_type='text/plain'
+        ) for i in range(250)]
+        response = self.client.post(reverse('deliverables:upload_file'), {
+            'project_id': self.existing_project.id,
+            'files': list_of_files,
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        list_of_files.append(SimpleUploadedFile(
+            name='test_file_251.txt',
+            content=b'This is some test file content',
+            content_type='text/plain'
+        ))
+        too_many_files_response = self.client.post(reverse('deliverables:upload_file'), {
+            'project_id': self.existing_project.id,
+            'files': list_of_files,
+        })
+        self.assertEqual(too_many_files_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_company_admin_can_upload_file_to_project(self, mock_invoke_lambda):
         """Test that a company admin can upload a file to a project"""
         self.client.force_authenticate(user=self.company_admin)
         response = self.client.post(reverse('deliverables:upload_file'), {
@@ -469,7 +504,8 @@ class UploadFileTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_superuser_can_upload_file_to_project(self):
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_superuser_can_upload_file_to_project(self, mock_invoke_lambda):
         """Test that a superuser can upload a file to a project"""
         self.client.force_authenticate(user=self.superuser)
         response = self.client.post(reverse('deliverables:upload_file'), {
@@ -478,7 +514,8 @@ class UploadFileTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_company_member_cannot_upload_file_to_project_they_are_not_a_member_of(self):
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_company_member_cannot_upload_file_to_project_they_are_not_a_member_of(self, mock_invoke_lambda):
         """Test that a company member cannot upload a file to a project they are not a member of"""
         self.client.force_authenticate(user=self.company_member)
         response = self.client.post(reverse('deliverables:upload_file'), {
