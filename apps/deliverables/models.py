@@ -159,7 +159,7 @@ class SubmittalItem(BaseModel):
         period_separated_parts = [part.zfill(5) for part in period_separated_parts.split('.')]
         heirarchical_period_part = '.'.join(period_separated_parts)
         if appendage:
-            return heirarchical_period_part + '-' + appendage
+            return heirarchical_period_part + '-' + appendage.zfill(5)
         else:
             return heirarchical_period_part
         
