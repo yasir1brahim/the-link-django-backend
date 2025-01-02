@@ -292,6 +292,21 @@ class Command(BaseImportCommand):
         except json.JSONDecodeError:
             print(f"Error decoding JSON: {text}")
             return []
+        
+    def convert_paragraph_number_to_heirarchical_number(self, paragraph_number):
+        split_paragraph_number = self.paragraph_number.split('-')
+        period_separated_parts = split_paragraph_number[0]
+        if len(split_paragraph_number) > 1:
+            appendage = split_paragraph_number[1]
+        else:
+            appendage = ""
+
+        period_separated_parts = [part.zfill(5) for part in period_separated_parts.split('.')]
+        heirarchical_period_part = '.'.join(period_separated_parts)
+        if appendage:
+            return heirarchical_period_part + '-' + appendage.zfill(5)
+        else:
+            return heirarchical_period_part
 
     def map_legacy_log_to_submittal_item(self, log, project_id, document_id):
         submittal_item = SubmittalItem()
@@ -310,6 +325,7 @@ class Command(BaseImportCommand):
         submittal_item.text_location = self.convert_to_valid_json(log['text_loc'])
         submittal_item.additional_text_locations = self.convert_to_valid_json(log['additional_text_locations'])
         submittal_item.updated_by_id = self.get_or_create_user(log['updated_by'])
+        submittal_item.heirarchical_paragraph_number = self.convert_paragraph_number_to_heirarchical_number(log['para_no'] or "")
         return submittal_item
 
 

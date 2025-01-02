@@ -1013,16 +1013,18 @@ def change_encode_value(text):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def spec_status_webhook(request):
-    logger.debug(f"SPEC STATUS WEBHOOK: Received request")
-    logger.debug(f"SPEC STATUS WEBHOOK: {request.data}")
+    print(f"SPEC STATUS WEBHOOK: Received request")
+    print(request.__dict__)
+    request_payload = request.data
+    print(f"SPEC STATUS WEBHOOK: {request_payload}")
 
-    request_data = SpecStatusRequest(**request.data)
+    request_data = SpecStatusRequest(**request_payload)
 
     if request_data['new_status'] == 'SUBSECTIONS_EXTRACTED':
-        logger.debug(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to SUBSECTIONS_EXTRACTED")
-        UploadedFile.objects.filter(id=request_data['document_id']).update(processing_status=DocProcessingStatus.SUBSECTIONS_EXTRACTED)
+        print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to SUBSECTIONS_EXTRACTED")
+        UploadedFile.objects.filter(id=int(request_data['document_id'])).update(processing_status=DocProcessingStatus.SUBSECTIONS_EXTRACTED)
         for subsection in request_data['subsections']:
-            logger.debug(f"SPEC STATUS WEBHOOK: inserting subsection {subsection['master_format_section_number']} for document {request_data['document_id']}")
+            print(f"SPEC STATUS WEBHOOK: inserting subsection {subsection['master_format_section_number']} for document {request_data['document_id']}")
             masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=subsection['master_format_section_number'])
             section, created = SpecSection.objects.get_or_create(
                 document_id=request_data['document_id'],
@@ -1031,12 +1033,11 @@ def spec_status_webhook(request):
             section.processing_status = DocProcessingStatus.PENDING_PROCESSING
             section.save()
     elif request_data['new_status'] == 'PROCESSED_SECTION':
-        logger.debug(f"SPEC STATUS WEBHOOK: saving submittals")
-        submittal_items = []
+        print(f"SPEC STATUS WEBHOOK: saving submittals")
         for submittal in request_data['submittals']:
             submittal_text = change_encode_value(submittal['submittal_text'])
             masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=request_data['master_format_section_number'])
-            submittal_item = SubmittalItem(
+            submittal_item = SubmittalItem.objects.create(
                 project_id=request_data['project_id'],
                 masterformat_section=masterformat_section,
                 submittal_type=submittal['submittal_type'],
@@ -1048,14 +1049,12 @@ def spec_status_webhook(request):
                 parsing_method=submittal.get('parsing_method', 'UNKNOWN'),
                 additional_text_locations=submittal.get('additional_text_locations', [])
             )
-            submittal_items.append(submittal_item)
-        SubmittalItem.objects.bulk_create(submittal_items, ignore_conflicts=True)
         SpecSection.objects.filter(
-            document_id=request_data['document_id'],
+            document_id=int(request_data['document_id']),
             masterformat_section__masterformat_number=request_data['master_format_section_number']
         ).update(processing_status=DocProcessingStatus.PROCESSED)
     elif request_data['new_status'] == 'FAILED':
-        document = UploadedFile.objects.filter(id=request_data['document_id']).first()
+        document = UploadedFile.objects.filter(id=int(request_data['document_id'])).first()
         if document.processing_status == DocProcessingStatus.SUBSECTIONS_EXTRACTED:
             document.processing_status = DocProcessingStatus.SECTION_PROCESSING_FAILED
             document.save()
@@ -1064,15 +1063,15 @@ def spec_status_webhook(request):
             document.save()
     """IF document.processing_status == SUBSECTIONS_EXTRACTED or SECTION_PROCESSING_FAILED then we have records of all extracted subsections.
     If so, then update document.processing_status to PROCESSED if all subsections have been processed"""
-    logger.debug(f"SPEC STATUS WEBHOOK: checking if all subsections have been processed for document {request_data['document_id']}")
-    document = UploadedFile.objects.filter(id=request_data['document_id']).first()
+    print(f"SPEC STATUS WEBHOOK: checking if all subsections have been processed for document {request_data['document_id']}")
+    document = UploadedFile.objects.filter(id=int(request_data['document_id'])).first()
     if document.processing_status in [DocProcessingStatus.SUBSECTIONS_EXTRACTED, DocProcessingStatus.SECTION_PROCESSING_FAILED]:
-        logger.debug(f"SPEC STATUS WEBHOOK: getting unprocessed section count for document {request_data['document_id']}")
+        print(f"SPEC STATUS WEBHOOK: getting unprocessed section count for document {request_data['document_id']}")
         unprocessed_spec_section_count = SpecSection.objects.filter(document_id=request_data['document_id']).exclude(
             processing_status=DocProcessingStatus.PROCESSED
         ).count()
         if unprocessed_spec_section_count == 0:
-            logger.debug(f"SPEC STATUS WEBHOOK: all subsections have been processed for document {request_data['document_id']}")
+            print(f"SPEC STATUS WEBHOOK: all subsections have been processed for document {request_data['document_id']}")
             document.processing_status = DocProcessingStatus.PROCESSED
             document.save()
 
