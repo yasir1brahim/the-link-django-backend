@@ -353,6 +353,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             queryset = self.apply_order(queryset, order_col, order)
         else:
             queryset = queryset.order_by(
+                'submittal_number',
                 'masterformat_section__masterformat_number',
                 'heirarchical_paragraph_number'
             )
