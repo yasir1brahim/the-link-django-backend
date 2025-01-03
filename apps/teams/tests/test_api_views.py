@@ -2,7 +2,7 @@ from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
 from django.urls import reverse
 
-from apps.teams.models import Team, Membership as TeamMembership, Invitation
+from apps.teams.models import Team, Membership as TeamMembership, Invitation, Flag
 from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
 from apps.users.models import CustomUser
 
@@ -52,6 +52,23 @@ class TeamViewSetTest(APITestCase):
         response = self.client.get(reverse('teams:team-detail', kwargs={'pk': self.team.id}))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['id'], self.team.id)
+
+    def test_team_details_includes_active_flags(self):
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(reverse('teams:team-detail', kwargs={'pk': self.team.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['active_flags'], [])
+
+        flag = Flag.objects.create(name='test_flag')
+        flag.teams.add(self.team)
+        flag.save()
+
+        inactive_flag = Flag.objects.create(name='inactive_flag')
+
+        response = self.client.get(reverse('teams:team-detail', kwargs={'pk': self.team.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['active_flags'], ['test_flag'])
+
 
     def test_team_admin_cannot_view_other_teams_details(self):
         self.client.force_authenticate(user=self.team_admin)

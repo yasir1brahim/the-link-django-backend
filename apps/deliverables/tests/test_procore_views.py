@@ -806,7 +806,7 @@ class TestGetProcoreProjectsView(APITestCase):
         # Mock is_member_of_team to return False
         with patch.object(CustomUser, 'is_member_of_team', return_value=False):
             response = self.client.get(self.url)
-            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+            self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_procore_token_exception(self):
         """Test handling of ProcoreException when getting token"""
@@ -903,7 +903,7 @@ class TestGetProcoreManagersView(APITestCase):
         )
         self.client.force_authenticate(user=other_user)
         response = self.client.get(self.url)
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     @patch('apps.deliverables.views.get_fresh_token_for_user')
     @patch('apps.deliverables.views.get_managers')

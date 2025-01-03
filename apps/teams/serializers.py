@@ -5,7 +5,7 @@ from drf_writable_nested import WritableNestedModelSerializer
 from apps.subscriptions.serializers import SubscriptionSerializer
 
 from .helpers import get_next_unique_team_slug
-from .models import Team, Membership, Invitation
+from .models import Team, Membership, Invitation, Flag
 from .roles import is_admin
 from django.contrib.auth import get_user_model
 
@@ -44,6 +44,7 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
     is_admin = serializers.SerializerMethodField()
     subscription = SubscriptionSerializer(source="wrapped_subscription", read_only=True)
     projects = serializers.SerializerMethodField()
+    active_flags = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Team
@@ -60,6 +61,7 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
             "has_active_subscription",
             "legacy_logo_url",
             "projects",
+            "active_flags",
         )
 
     def get_members(self, obj) -> list[Membership]:
@@ -83,6 +85,11 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
     
     def get_projects(self, obj):
         return BaseProjectSerializer(obj.project_set.all(), many=True).data
+    
+    def get_active_flags(self, obj):
+        team = obj
+        team_flags = Flag.objects.filter(teams=team)
+        return [flag.name for flag in team_flags]
 
 class InvitedUserResetPasswordSerializer(serializers.Serializer):
     email = serializers.EmailField()
