@@ -51,7 +51,7 @@ class TeamViewSet(
     mixins.UpdateModelMixin,
     viewsets.GenericViewSet
 ):
-    queryset = Team.objects.all()
+    queryset = Team.objects.all().prefetch_related('flag_set')
     serializer_class = TeamSerializer
     permission_classes = (IsAuthenticatedOrHasUserAPIKey, TeamAccessPermissions)
 

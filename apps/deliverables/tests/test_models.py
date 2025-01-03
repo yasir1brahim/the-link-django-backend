@@ -2,10 +2,17 @@ from datetime import datetime, timedelta
 from django.test import TestCase
 from unittest.mock import patch
 from apps.deliverables.models import ProcoreToken
+from apps.users.models import CustomUser
 
 class ProcoreTokenTests(TestCase):
     def setUp(self):
+        self.user = CustomUser.objects.create(
+            username="test_user",
+            email="test@test.com",
+            password="test_password"
+        )
         self.token = ProcoreToken.objects.create(
+            user=self.user,
             access_token="test_access_token",
             refresh_token="test_refresh_token",
             expires_in=3600,  # 1 hour in seconds

@@ -10,15 +10,22 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.contrib.auth.tokens import default_token_generator
 from django.contrib.sites.models import Site
 from apps.utils.constants import PASSWORD_RESET_SUBJECT
+from apps.teams.models import Flag
 class CustomUserSerializer(serializers.ModelSerializer):
     """
     Basic serializer to pass CustomUser details to the front end.
     Extend with any fields your app needs.
     """
+    active_flags = serializers.SerializerMethodField()
+
+    def get_active_flags(self, obj):
+        all_flags = Flag.objects.all()
+        return [flag.name for flag in all_flags if flag.is_active_for_user(obj)]
+
 
     class Meta:
         model = CustomUser
-        fields = ("id", "first_name", "last_name", "email", "avatar_url", "get_display_name", "is_superuser")
+        fields = ("id", "first_name", "last_name", "email", "avatar_url", "get_display_name", "is_superuser", "active_flags")
 
 class CustomPasswordResetSerializer(serializers.Serializer):
     email = serializers.EmailField()

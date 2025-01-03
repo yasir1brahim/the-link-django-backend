@@ -44,7 +44,7 @@ from waffle import flag_is_active
 
 from rest_framework import viewsets
 
-from apps.teams.models import Team
+from apps.teams.models import Team, Flag
 from apps.users.models import CustomUser
 from .serializers import (
     ProjectDetailsSerializer,
@@ -900,6 +900,9 @@ def call_extract_notices_lambda(callback_url, document_id, object_key):
     return "Kicked off processing job"
 
 
+def is_notices_flag_active(request, team):
+    return flag_is_active(request, settings.NOTICES_FEATURE_FLAG_NAME) or Flag.objects.filter(name=settings.NOTICES_FEATURE_FLAG_NAME, teams=team).exists()
+
 
 
 @extend_schema(
@@ -963,7 +966,7 @@ def upload_file(request):
                 Bucket=settings.S3_BUCKET,
                 Key=document_path,
             )
-            if flag_is_active(request, settings.NOTICES_FEATURE_FLAG_NAME) and extract_notices:
+            if is_notices_flag_active(request, project.team) and extract_notices:
                 call_extract_notices_lambda(
                     callback_url=settings.BACKEND_NOTICES_CALLBACK_URL,
                     document_id=str(uploaded_file.id),

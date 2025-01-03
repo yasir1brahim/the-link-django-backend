@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from django.test import TestCase
 
 from django.utils import timezone
@@ -55,8 +56,10 @@ class ProjectReadSerializerTest(TestCase):
             created_at=timezone.now()
         )
 
-    def test_serializer_contains_expected_fields(self):
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_serializer_contains_expected_fields(self, mock_generate_presigned_url):
         """Test that serializer contains all expected fields"""
+        mock_generate_presigned_url.return_value = "https://test.com"
         serializer = ProjectDetailsSerializer(instance=self.project)
         expected_fields = {
             'id', 'name', 'description', 'team', 
@@ -67,13 +70,17 @@ class ProjectReadSerializerTest(TestCase):
         }
         self.assertEqual(set(serializer.data.keys()), expected_fields)
 
-    def test_team_field_returns_id(self):
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_team_field_returns_id(self, mock_generate_presigned_url):
         """Test that team field returns only the ID"""
+        mock_generate_presigned_url.return_value = "https://test.com"
         serializer = ProjectDetailsSerializer(instance=self.project)
         self.assertEqual(serializer.data['team'], self.team.id)
 
-    def test_members_field_serialization(self):
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_members_field_serialization(self, mock_generate_presigned_url):
         """Test that members field properly serializes project memberships"""
+        mock_generate_presigned_url.return_value = "https://test.com"
         membership = ProjectMembership.objects.create(
             project=self.project,
             user=self.user,
@@ -107,8 +114,9 @@ class ProjectReadSerializerTest(TestCase):
             ['team_level_entitlement']
         )
 
-
-    def test_document_ordering(self):
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_document_ordering(self, mock_generate_presigned_url):
+        mock_generate_presigned_url.return_value = "https://test.com"
         serializer = ProjectDetailsSerializer(self.project)
         documents = serializer.data['document_details']
         
@@ -118,8 +126,10 @@ class ProjectReadSerializerTest(TestCase):
         self.assertEqual(documents[2]['document_name'], "Doc 1")  # PROCESSED (6)
 
 
-    def test_document_ordering_same_status(self):
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_document_ordering_same_status(self, mock_generate_presigned_url):
         # Create two documents with same status but different timestamps
+        mock_generate_presigned_url.return_value = "https://test.com"
         older_time = timezone.now() - timezone.timedelta(hours=1)
         newer_time = timezone.now()
         
@@ -148,8 +158,10 @@ class ProjectReadSerializerTest(TestCase):
         self.assertEqual(pending_docs[0]['document_name'], "Doc 5")
         self.assertEqual(pending_docs[1]['document_name'], "Doc 4")
 
-    def test_get_doc_parsed_returns_correct_count(self):
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_get_doc_parsed_returns_correct_count(self, mock_generate_presigned_url):
         # Arrange
+        mock_generate_presigned_url.return_value = "https://test.com"
         UploadedFile.objects.create(
             project=self.project,
             name="test1.pdf",
