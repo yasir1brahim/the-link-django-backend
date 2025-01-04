@@ -40,7 +40,6 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
     members = serializers.SerializerMethodField()
     invitations = InvitationSerializer(many=True, read_only=True, source="pending_invitations")
     project_count = serializers.SerializerMethodField()
-    dashboard_url = serializers.ReadOnlyField()
     is_admin = serializers.SerializerMethodField()
     subscription = SubscriptionSerializer(source="wrapped_subscription", read_only=True)
     projects = serializers.SerializerMethodField()
@@ -55,7 +54,6 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
             "members",
             "invitations",
             "project_count",
-            "dashboard_url",
             "is_admin",
             "subscription",
             "has_active_subscription",

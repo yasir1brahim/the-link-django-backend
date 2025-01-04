@@ -62,10 +62,6 @@ class Team(SubscriptionModelBase, BaseModel):
     def pending_invitations(self):
         return self.invitations.filter(is_accepted=False)
 
-    @property
-    def dashboard_url(self) -> str:
-        return reverse("web_team:home", args=[self.id])
-
 
 class Membership(BaseModel):
     """
