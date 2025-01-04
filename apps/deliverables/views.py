@@ -1047,8 +1047,8 @@ def spec_status_webhook(request):
                 submittal_type=submittal['submittal_type'],
                 submittal_description=submittal['submittal_description'],
                 submittal_content=submittal_text,
-                paragraph_number=submittal['section'],
-                text_location=submittal['text_location'],
+                paragraph_number=submittal.get('section', '') or '',
+                text_location=submittal.get('text_location'),
                 document_id=request_data['document_id'],
                 parsing_method=submittal.get('parsing_method', 'UNKNOWN'),
                 additional_text_locations=submittal.get('additional_text_locations', [])

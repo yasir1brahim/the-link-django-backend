@@ -480,7 +480,10 @@ if ENVIRONMENT == 'local':
 else:
     USE_HTTPS_IN_ABSOLUTE_URLS = True
 
-ADMINS = [("Avery Pawelek", "avery.pawelek@thelink.ai")]
+if ENVIRONMENT == 'local':
+    ADMINS = []
+else:
+    ADMINS = [("Avery Pawelek", "avery.pawelek@thelink.ai")]
 
 # Add your google analytics ID to the environment to connect to Google Analytics
 GOOGLE_ANALYTICS_ID = os.environ.get("GOOGLE_ANALYTICS_ID", default="")

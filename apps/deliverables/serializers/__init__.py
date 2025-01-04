@@ -231,6 +231,7 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
     submittal_number = serializers.CharField()
     text_loc = serializers.JSONField(source='text_location')
     type = serializers.CharField(source='submittal_type')
+    parsing_method = serializers.CharField()
 
     def get_section_title(self, obj):
         return obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(
@@ -264,6 +265,7 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
             'submittal_number',
             'text_loc',
             'type',
+            'parsing_method',
         ]
 
 
