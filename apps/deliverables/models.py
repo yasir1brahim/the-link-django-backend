@@ -149,6 +149,8 @@ class SubmittalItem(BaseModel):
         ]
 
     def convert_paragraph_number_to_heirarchical_number(self):
+        if self.paragraph_number is None:
+            return ""
         split_paragraph_number = self.paragraph_number.split('-')
         period_separated_parts = split_paragraph_number[0]
         if len(split_paragraph_number) > 1:
