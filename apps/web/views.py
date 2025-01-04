@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.contrib import messages
-from django.http import HttpResponseRedirect, Http404
+from django.http import HttpResponseRedirect, Http404, HttpResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
@@ -10,7 +10,7 @@ from apps.teams.decorators import login_and_team_required
 
 
 def home(request):
-    return render(request, "web/landing_page.html")
+    return HttpResponse("The Link API")
 
 
 @login_and_team_required
