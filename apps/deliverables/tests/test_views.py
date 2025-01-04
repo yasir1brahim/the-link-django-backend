@@ -560,6 +560,7 @@ class SubmittalItemViewSetTests(APITestCase):
         self.submittal_item = SubmittalItem.objects.create(
             project=self.project,
             masterformat_section=MasterFormatSection.objects.create(masterformat_number='033000'),
+            parsing_method='PLACEHOLDER',
         )
 
     def test_user_can_see_submittal_items_for_their_project(self):
@@ -584,6 +585,13 @@ class SubmittalItemViewSetTests(APITestCase):
         self.client.force_authenticate(user=self.non_member)
         response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_submittal_item_list_returns_correct_parsing_method(self):
+        """Test that the submittal item list returns the correct parsing method"""
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['message'][0]['parsing_method'], 'PLACEHOLDER')
 
 class ProjectArchiveTests(APITestCase):
     def setUp(self):

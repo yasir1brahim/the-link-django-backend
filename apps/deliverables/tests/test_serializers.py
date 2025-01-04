@@ -401,6 +401,7 @@ class TestSubmittalItemReadSerializer(TestCase):
             'submittal_number',
             'text_loc',
             'type',
+            'parsing_method',
         }
         self.assertEqual(set(serializer.data.keys()), expected_fields)
 
