@@ -304,7 +304,7 @@ class Command(BaseImportCommand):
             return []
         
     def convert_paragraph_number_to_heirarchical_number(self, paragraph_number):
-        split_paragraph_number = self.paragraph_number.split('-')
+        split_paragraph_number = paragraph_number.split('-')
         period_separated_parts = split_paragraph_number[0]
         if len(split_paragraph_number) > 1:
             appendage = split_paragraph_number[1]
@@ -367,7 +367,7 @@ class Command(BaseImportCommand):
             self.masterformat_number_to_masterformat_section_id[masterformat_section.masterformat_number] = masterformat_section.id
         teams = Team.objects.all()
         for team in teams:
-            self.legacy_customer_id_to_team_id[team.legacy_id] = team.id
+            self.legacy_customer_id_to_team_id[team.legacy_customer_id] = team.id
         users = CustomUser.objects.all()
         for user in users:
             self.legacy_user_id_to_user_id[user.legacy_id] = user.id
@@ -375,7 +375,7 @@ class Command(BaseImportCommand):
         for project in projects:
             self.legacy_project_id_to_project_id[project.legacy_id] = project.id
             self.django_project_id_to_team_id_map[project.id] = project.team_id
-            self.legacy_project_user_counts[project.legacy_id] = project.users
+            self.legacy_project_user_counts[project.legacy_id] = project.members.count()
 
     def get_legacy_lists(self, cursor):
         self.cursor.execute("SELECT * FROM saved_logs ORDER BY id DESC LIMIT 10")
