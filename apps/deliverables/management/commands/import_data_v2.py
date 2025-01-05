@@ -47,6 +47,8 @@ class Command(BaseImportCommand):
         legacy_companies = self.get_legacy_companies()
 
         for legacy_company in legacy_companies:
+            if legacy_company['customer_id'] in self.legacy_customer_id_to_team_id:
+                continue
             team = self.get_or_create_team(legacy_company['customer_id'], legacy_company)
             self.legacy_customer_id_to_team_id[legacy_company['customer_id']] = team.id
             self.legacy_customer_user_counts[legacy_company['customer_id']] = legacy_company['users']
@@ -137,6 +139,8 @@ class Command(BaseImportCommand):
         legacy_projects = self.get_legacy_projects()
 
         for legacy_project in legacy_projects:
+            if legacy_project['project_id'] in self.legacy_project_id_to_project_id:
+                continue
             project = self.get_or_create_project(legacy_project['project_id'], legacy_project)
             self.legacy_project_id_to_project_id[legacy_project['project_id']] = project.id
             self.django_project_id_to_team_id_map[project.id] = project.team_id
@@ -173,6 +177,8 @@ class Command(BaseImportCommand):
         print("Importing users from legacy database...")
         users = self.get_legacy_users()
         for user in users:
+            if user['id'] in self.legacy_user_id_to_user_id:
+                continue
             user_id = self.get_or_create_user(user['id'], user)
             self.legacy_user_id_to_user_id[user['id']] = user_id
         print(f"Imported {len(users)} users from legacy database")
@@ -206,11 +212,15 @@ class Command(BaseImportCommand):
         for user_mapping in user_to_team_mappings:
             user_id = self.legacy_user_id_to_user_id[user_mapping['user_id']]
             team_id = self.legacy_customer_id_to_team_id[user_mapping['customer_id']]
-            Membership.objects.create(
-                user_id=user_id, 
-                team_id=team_id, 
-                role=ROLE_MEMBER
-            )
+            try:
+                membership, created = Membership.objects.get_or_create(
+                    user_id=user_id, 
+                    team_id=team_id, 
+                    role=ROLE_MEMBER
+                )
+            except IntegrityError:
+                print(f"Membership for user {user_id} and team {team_id} already exists")
+                continue
     
     def map_users_to_projects(self):
         print("Mapping users to projects...")
@@ -221,7 +231,7 @@ class Command(BaseImportCommand):
                 continue
             project_id = self.legacy_project_id_to_project_id[user_mapping['project_id']]
             try:
-                ProjectMembership.objects.create(
+                project_membership, created = ProjectMembership.objects.get_or_create(
                     user_id=user_id,
                     project_id=project_id,
                     role=ROLE_PROJECT_MEMBER
@@ -390,7 +400,7 @@ class Command(BaseImportCommand):
         input("Press Enter to continue...")
         self.connect_to_legacy_db()
         self.cursor = self.connection.cursor()
-        # self.set_idempotency_maps()
+        self.set_idempotency_maps()
         self.import_companies()
         self.import_projects()
         self.import_users()
