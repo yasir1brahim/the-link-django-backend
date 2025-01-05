@@ -34,18 +34,20 @@ class Command(BaseImportCommand):
             except Exception as e:
                 print(f"Error getting or creating project for legacy list {legacy_list['view_name']}: {e}")
                 continue
-            new_list = SubmittalItemList(
+            new_list, created = SubmittalItemList.objects.get_or_create(
                 project=project,
                 name=legacy_list['view_name'],
             )
-            new_list.save()
-
-            submittal_item_ids = legacy_list['records'][1:-1].split(', ')
-            django_submittal_item_ids = []
-            for submittal_item_id in submittal_item_ids:
-                django_id = legacy_ids_to_django_ids.get(int(submittal_item_id))
-                if django_id:
-                    django_submittal_item_ids.append(django_id)
-            new_list.submittals.add(*django_submittal_item_ids)
-            new_list.save()
-            print(new_list)
+            if created:
+                submittal_item_ids = legacy_list['records'][1:-1].split(', ')
+                django_submittal_item_ids = []
+                for submittal_item_id in submittal_item_ids:
+                    django_id = legacy_ids_to_django_ids.get(int(submittal_item_id))
+                    if django_id:
+                        django_submittal_item_ids.append(django_id)
+                new_list.submittals.add(*django_submittal_item_ids)
+                new_list.save()
+                print(new_list)
+            else:
+                print(f"Submittal list {legacy_list['view_name']} already exists")
+                continue
