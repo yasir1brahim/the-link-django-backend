@@ -387,10 +387,10 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         queryset = self.queryset.filter(project_id=project_id)
         queryset = queryset.exclude(submittal_type='Unclassified', masterformat_section__masterformat_number__regex='^0[012]\\d+')
         return {
-            'item_desc': queryset.values_list('submittal_description', flat=True).distinct().order_by(),
-            'para_no': queryset.values_list('paragraph_number', flat=True).distinct().order_by(),
-            'spec_section': queryset.values_list('masterformat_section__masterformat_number', flat=True).distinct().order_by(),
-            'type': queryset.values_list('submittal_type', flat=True).distinct().order_by(),
+            'item_desc': queryset.exclude(submittal_description='').values_list('submittal_description', flat=True).distinct().order_by('submittal_description'),
+            'para_no': queryset.exclude(paragraph_number='').values_list('paragraph_number', flat=True).distinct().order_by('heirarchical_paragraph_number'),
+            'spec_section': queryset.values_list('masterformat_section__masterformat_number', flat=True).distinct().order_by('masterformat_section__masterformat_number'),
+            'type': queryset.exclude(submittal_type='').values_list('submittal_type', flat=True).distinct().order_by('submittal_type'),
         }
 
     def _get_submittal_heading_lov(self, result_queryset):

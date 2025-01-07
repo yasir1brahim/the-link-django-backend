@@ -126,6 +126,16 @@ class TeamViewSetTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['results']), 2)
 
+    def test_teams_are_ordered_by_name(self):
+        Team.objects.create(name='ZZZZ', slug='zzzz')
+        Team.objects.create(name='Team 4', slug='team-4')
+        Team.objects.create(name='Team 3', slug='team-3')
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.get(reverse('teams:team-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = [team['name'] for team in response.data['results']]
+        self.assertEqual(names, ['Team 1', 'Team 2', 'Team 3', 'Team 4', 'ZZZZ'])
+
     def test_superuser_can_view_other_teams(self):
         self.client.force_authenticate(user=self.superuser)
         response = self.client.get(reverse('teams:team-detail', kwargs={'pk': self.other_team.id}))

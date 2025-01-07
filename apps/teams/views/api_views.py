@@ -57,7 +57,7 @@ class TeamViewSet(
 
     def get_queryset(self):
         if self.request.user.is_superuser:
-            return self.queryset
+            return self.queryset.order_by("name")
         # filter queryset based on logged in user
         return self.request.user.teams.order_by("name")
 

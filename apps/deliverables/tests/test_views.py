@@ -556,10 +556,11 @@ class SubmittalItemViewSetTests(APITestCase):
             user=self.user,
             role=ROLE_PROJECT_MEMBER
         )
+        self.masterformat_section = MasterFormatSection.objects.create(masterformat_number='033000')
 
         self.submittal_item = SubmittalItem.objects.create(
             project=self.project,
-            masterformat_section=MasterFormatSection.objects.create(masterformat_number='033000'),
+            masterformat_section=self.masterformat_section,
             parsing_method='PLACEHOLDER',
         )
 
@@ -592,6 +593,67 @@ class SubmittalItemViewSetTests(APITestCase):
         response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['message'][0]['parsing_method'], 'PLACEHOLDER')
+
+    def test_submittal_item_list_returns_filter_values_in_correct_order(self):
+        """Test that the submittal item list returns filter values in lexical order"""
+        SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=self.masterformat_section,
+            paragraph_number='1.2',
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=self.masterformat_section,
+            paragraph_number='1.1',
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=self.masterformat_section,
+            paragraph_number='1.3-1',
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=self.masterformat_section,
+            paragraph_number='1.3',
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=self.masterformat_section,
+            paragraph_number='1.3-1',
+            submittal_type='ZZZ',
+            submittal_description='ZZZ',
+        )
+
+        SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=MasterFormatSection.objects.create(masterformat_number='102000'),
+            paragraph_number='1.3',
+            submittal_type='Type 2',
+            submittal_description='Description B',
+        )
+        
+        SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=MasterFormatSection.objects.create(masterformat_number='123456'),
+            paragraph_number='1.3',
+            submittal_type='Type 1',
+            submittal_description='Description A',
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=MasterFormatSection.objects.create(masterformat_number='033001'),
+            paragraph_number='1.3',
+            submittal_type='Type 1',
+            submittal_description='Description A',
+        )
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(list(response.data['all_filter_vals']['item_desc']), ['Description A', 'Description B', 'ZZZ'])
+        self.assertEqual(list(response.data['all_filter_vals']['para_no']), ['1.1', '1.2', '1.3', '1.3-1'])
+        self.assertEqual(list(response.data['all_filter_vals']['spec_section']), ['033000', '033001', '102000', '123456'])
+        self.assertEqual(list(response.data['all_filter_vals']['type']), ['Type 1', 'Type 2', 'ZZZ'])
+
 
 class ProjectArchiveTests(APITestCase):
     def setUp(self):
