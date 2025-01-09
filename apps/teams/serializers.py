@@ -10,7 +10,7 @@ from .roles import is_admin
 from django.contrib.auth import get_user_model
 
 from apps.deliverables.serializers import BaseProjectSerializer
-
+from apps.utils.feature_flags import get_active_flags_for_team
 class MembershipSerializer(serializers.ModelSerializer):
     user_id = serializers.ReadOnlyField(source="user.id")
     first_name = serializers.ReadOnlyField(source="user.first_name")
@@ -85,9 +85,7 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
         return BaseProjectSerializer(obj.project_set.all(), many=True).data
     
     def get_active_flags(self, obj):
-        team = obj
-        team_flags = Flag.objects.filter(teams=team)
-        return [flag.name for flag in team_flags]
+        return get_active_flags_for_team(obj)
 
 class InvitedUserResetPasswordSerializer(serializers.Serializer):
     email = serializers.EmailField()
