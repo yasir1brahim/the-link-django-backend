@@ -5,7 +5,7 @@ from django.db import transaction, models
 from .models import (
     Project,
     UploadedFile,
-    DocProcessingStatus, SubmittalItem,
+    DocProcessingStatus, SubmittalItem, SpecSection
 )
 from ..utils.database import apply_advisory_lock_submittal_number_assignment
 
@@ -44,8 +44,9 @@ class SubmittalService:
         targets_qs = (
             SubmittalItem.objects
             .filter(project=project)
+            .exclude(spec_section__processing_method=SpecSection.ProcessingMethod.REGEX_UNABLE_TO_DETECT)
             .order_by(
-                'document__specsection__masterformat_section__masterformat_number',  # NOQA
+                'masterformat_section__masterformat_number',  # NOQA
                 'heirarchical_paragraph_number',
             )
         )

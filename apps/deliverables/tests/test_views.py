@@ -6,7 +6,9 @@ from rest_framework import status
 from django.contrib.auth import get_user_model
 from apps.teams.models import Team, Membership as TeamMembership
 from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
-from apps.deliverables.models import Project, ProjectMembership, SubmittalItemList, SubmittalItem, MasterFormatSection, ROLE_PROJECT_ADMIN, ROLE_PROJECT_MEMBER
+from apps.deliverables.models import (Project, ProjectMembership, SubmittalItemList,
+    SubmittalItem, MasterFormatSection, ROLE_PROJECT_ADMIN, ROLE_PROJECT_MEMBER,
+    SpecSection, DocProcessingStatus, UploadedFile)
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -563,6 +565,13 @@ class SubmittalItemViewSetTests(APITestCase):
             masterformat_section=self.masterformat_section,
             parsing_method='PLACEHOLDER',
         )
+        self.document = UploadedFile.objects.create(
+            project=self.project,
+            uploaded_by=self.user,
+            document_path='test_file.txt',
+            md5='1234567890',
+            processing_status=DocProcessingStatus.PROCESSED,
+        )
 
     def test_user_can_see_submittal_items_for_their_project(self):
         """Test that users can see submittal items for their project"""
@@ -593,6 +602,137 @@ class SubmittalItemViewSetTests(APITestCase):
         response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['message'][0]['parsing_method'], 'PLACEHOLDER')
+
+    def test_default_ordering(self):
+        # Create MasterFormatSections
+        mf1 = MasterFormatSection.objects.create(masterformat_number="033001")
+        mf2 = MasterFormatSection.objects.create(masterformat_number="033002")
+        mf3 = MasterFormatSection.objects.create(masterformat_number="033003")
+        mf4 = MasterFormatSection.objects.create(masterformat_number="033004")
+        
+        # Create SpecSections with different processing methods
+        spec1 = SpecSection.objects.create(
+            masterformat_section=mf1,
+            document=self.document,
+            processing_method=SpecSection.ProcessingMethod.REGEX_UNABLE_TO_DETECT
+        )
+        spec2 = SpecSection.objects.create(
+            masterformat_section=mf2,
+            document=self.document,
+            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS
+        )
+        spec3 = SpecSection.objects.create(
+            masterformat_section=mf3,
+            document=self.document,
+            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS
+        )
+        spec4 = SpecSection.objects.create(
+            masterformat_section=mf4,
+            document=self.document,
+            processing_method=SpecSection.ProcessingMethod.REGEX_UNABLE_TO_DETECT
+        )
+
+        # Create SubmittalItems in non-ordered sequence
+        SubmittalItem.objects.create(
+            project=self.project,
+            document=self.document,
+            masterformat_section=mf2,
+            spec_section=spec2,
+            paragraph_number="2.1",
+            submittal_number="2",
+            submittal_type="Shop Drawings"
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            document=self.document,
+            masterformat_section=mf1,
+            spec_section=spec1,
+            paragraph_number="1.1",
+            submittal_number="1",
+            submittal_type="Product Data"
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            document=self.document,
+            masterformat_section=mf1,
+            spec_section=spec1,
+            paragraph_number="1.2",
+            submittal_number="3",
+            submittal_type="Samples"
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            document=self.document,
+            masterformat_section=mf3,
+            spec_section=spec3,
+            paragraph_number="3.1",
+            submittal_number="3",
+            submittal_type="Samples"
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            document=self.document,
+            masterformat_section=mf4,
+            spec_section=spec4,
+            paragraph_number="4.1",
+            submittal_number="4",
+            submittal_type="Samples"
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            document=self.document,
+            masterformat_section=mf4,
+            spec_section=spec4,
+            paragraph_number="4.1",
+            submittal_number="5",
+            submittal_type="Samples"
+        )
+
+
+        # Make API request
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
+        
+        # Verify response status
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify ordering
+        results = response.data['message']
+        
+        # Items should be ordered by:
+        # 1. Processing method (REGEX_SUCCESS before AI_SUCCESS)
+        # 2. Masterformat number (051200 before 052100)
+        # 3. Hierarchical paragraph number (1.1 before 1.2)
+        # 4. Submittal number (1 before 2 before 3)
+
+        self.assertEqual(results[0]['spec_section'], "033000")
+        self.assertEqual(results[0]['para_no'], '')
+        self.assertEqual(results[0]['submittal_number'], None)
+        
+        print(f"results[1]: {results[1]}")
+        self.assertEqual(results[1]['spec_section'], "033002")
+        self.assertEqual(results[1]['para_no'], "2.1")
+        self.assertEqual(results[1]['submittal_number'], "2.0")
+        
+        self.assertEqual(results[2]['spec_section'], "033003")
+        self.assertEqual(results[2]['para_no'], "3.1")
+        self.assertEqual(results[2]['submittal_number'], "3.0")
+
+        self.assertEqual(results[3]['spec_section'], "033001")
+        self.assertEqual(results[3]['para_no'], "1.1")
+        self.assertEqual(results[3]['submittal_number'], "1.0")
+
+        self.assertEqual(results[4]['spec_section'], "033001")
+        self.assertEqual(results[4]['para_no'], "1.2")
+        self.assertEqual(results[4]['submittal_number'], "3.0")
+
+        self.assertEqual(results[5]['spec_section'], "033004")
+        self.assertEqual(results[5]['para_no'], "4.1")
+        self.assertEqual(results[5]['submittal_number'], "4.0")
+
+        self.assertEqual(results[6]['spec_section'], "033004")
+        self.assertEqual(results[6]['para_no'], "4.1")
+        self.assertEqual(results[6]['submittal_number'], "5.0")
 
     def test_submittal_item_list_returns_filter_values_in_correct_order(self):
         """Test that the submittal item list returns filter values in lexical order"""

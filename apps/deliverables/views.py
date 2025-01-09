@@ -20,7 +20,7 @@ from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from django.http import HttpResponse
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from django.db.models import Q
+from django.db.models import Q, Case, When, IntegerField
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -353,9 +353,15 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             queryset = self.apply_order(queryset, order_col, order)
         else:
             queryset = queryset.order_by(
-                'submittal_number',
+                Case(
+                    *[When(spec_section__processing_method=k, then=v) 
+                    for k, v in SpecSection.ProcessingMethod.get_order().items()],
+                    default=1,
+                    output_field=IntegerField(),
+                ),
                 'masterformat_section__masterformat_number',
-                'heirarchical_paragraph_number'
+                'heirarchical_paragraph_number',
+                'submittal_number',
             )
         
         if list_id:
@@ -1038,12 +1044,17 @@ def spec_status_webhook(request):
             section.save()
     elif request_data['new_status'] == 'PROCESSED_SECTION':
         print(f"SPEC STATUS WEBHOOK: saving submittals")
+        spec_section = SpecSection.objects.filter(
+            document_id=int(request_data['document_id']),
+            masterformat_section__masterformat_number=request_data['master_format_section_number']
+        ).first()
         for submittal in request_data['submittals']:
             submittal_text = change_encode_value(submittal['submittal_text'])
             masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=request_data['master_format_section_number'])
             submittal_item = SubmittalItem.objects.create(
                 project_id=request_data['project_id'],
                 masterformat_section=masterformat_section,
+                spec_section=spec_section,
                 submittal_type=submittal['submittal_type'],
                 submittal_description=submittal['submittal_description'],
                 submittal_content=submittal_text,
@@ -1053,10 +1064,13 @@ def spec_status_webhook(request):
                 parsing_method=submittal.get('parsing_method', 'UNKNOWN'),
                 additional_text_locations=submittal.get('additional_text_locations', [])
             )
-        SpecSection.objects.filter(
-            document_id=int(request_data['document_id']),
-            masterformat_section__masterformat_number=request_data['master_format_section_number']
-        ).update(processing_status=DocProcessingStatus.PROCESSED)
+        if len(request_data['submittals']) == 1 and request_data['submittals'][0]['parsing_method'] == 'PLACEHOLDER':
+            processing_method = 'REGEX_UNABLE_TO_DETECT_SUBMITTALS'
+        else:
+            processing_method = 'REGEX_SUCCESS' 
+        spec_section.processing_status = DocProcessingStatus.PROCESSED
+        spec_section.processing_method = processing_method
+        spec_section.save()
     elif request_data['new_status'] == 'FAILED':
         document = UploadedFile.objects.filter(id=int(request_data['document_id'])).first()
         if document.processing_status == DocProcessingStatus.SUBSECTIONS_EXTRACTED:
