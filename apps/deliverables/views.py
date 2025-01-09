@@ -75,6 +75,7 @@ from .permissions import (
     SubmittalItemAccessPermissions,
     SubmittalListAccessPermissions,
 )
+from apps.utils.feature_flags import is_notices_feature_flag_active
 from .constants import masterformat_to_section_title_map
 from .serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
 from .serializers.procore import (ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer,
@@ -906,11 +907,6 @@ def call_extract_notices_lambda(callback_url, document_id, object_key):
     return "Kicked off processing job"
 
 
-def is_notices_flag_active(request, team):
-    return flag_is_active(request, settings.NOTICES_FEATURE_FLAG_NAME) or Flag.objects.filter(name=settings.NOTICES_FEATURE_FLAG_NAME, teams=team).exists()
-
-
-
 @extend_schema(
     request=FileUploadSerializer,
     responses={200: {'description': 'File uploaded successfully'}},
@@ -975,7 +971,12 @@ def upload_file(request):
                 Bucket=settings.S3_BUCKET,
                 Key=document_path,
             )
+<<<<<<< HEAD
             if is_notices_flag_active and extract_notices:
+=======
+            print(f"is_notices_flag_active: {is_notices_feature_flag_active(request.user, project.team)}")
+            if is_notices_feature_flag_active(request.user, project.team) and extract_notices:
+>>>>>>> main
                 call_extract_notices_lambda(
                     callback_url=settings.BACKEND_NOTICES_CALLBACK_URL,
                     document_id=str(uploaded_file.id),
