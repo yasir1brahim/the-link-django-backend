@@ -943,6 +943,9 @@ def upload_file(request):
     async_processing = []
     not_parsed = []
 
+    is_notices_flag_active = is_notices_feature_flag_active(request.user, project.team)
+    print(f"is_notices_flag_active: {is_notices_flag_active}")
+    
     for file in files:
         try:
             filename = f'project_{project_id}__{int(time.time())}_{file.name}'
@@ -972,7 +975,11 @@ def upload_file(request):
                 Bucket=settings.S3_BUCKET,
                 Key=document_path,
             )
+<<<<<<< Updated upstream
             if is_notices_flag_active(request, project.team) and extract_notices:
+=======
+            if is_notices_flag_active and extract_notices:
+>>>>>>> Stashed changes
                 call_extract_notices_lambda(
                     callback_url=settings.BACKEND_NOTICES_CALLBACK_URL,
                     document_id=str(uploaded_file.id),
