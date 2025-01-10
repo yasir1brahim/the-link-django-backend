@@ -152,6 +152,9 @@ class SubmittalItem(BaseModel):
     parsing_method = models.CharField(max_length=256)
     parsing_version = models.CharField(max_length=256)
 
+    added_under_submittal = models.ForeignKey("SubmittalItem", on_delete=models.CASCADE, blank=True, null=True)
+    manually_added = models.BooleanField(default=False)
+
     class Meta:
         indexes = [
             models.Index(fields=['project']),
