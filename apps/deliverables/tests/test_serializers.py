@@ -454,6 +454,35 @@ class TestSubmittalItemWriteSerializer(TestCase):
         self.assertIsNone(submittal_item.document)
         self.assertIsNone(submittal_item.spec_section)
 
+    def test_create_submittal_item_assigns_next_submittal_number(self):
+        # Create a submittal item
+        SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=self.mf_section,
+            document=self.document,
+            manually_added=False,
+            submittal_number=1
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=self.mf_section,
+            document=self.document,
+            manually_added=False,
+            submittal_number=2
+        )
+        data = {
+            "updated_by": self.user.id,
+            "spec_section": "01 33 00",
+            "item_desc": "Test Description",
+            "para_context": "Test Context",
+            "para_no": "1.2.3",
+            "type": "Product Data"
+        }
+        serializer = SubmittalItemWriteSerializer(data=data)
+        self.assertTrue(serializer.is_valid())
+        submittal_item = serializer.save(project_id=self.project.id)
+        self.assertEqual(submittal_item.submittal_number, 3.0)
+
     def test_create_submittal_item_with_parent(self):
         # Create a parent submittal item first
         spec_section = SpecSection.objects.create(

@@ -1,6 +1,6 @@
 import boto3
 from django.conf import settings
-from django.db.models import Case, When, IntegerField
+from django.db.models import Case, When, IntegerField, Max
 from rest_framework import serializers
 
 from apps.users.serializers import CustomUserSerializer
@@ -282,6 +282,20 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
     type = serializers.CharField(required=False)
     added_under_submittal_id = serializers.IntegerField(required=False)
 
+    def get_next_submittal_number(self, project_id):
+        current_max_number = (
+            SubmittalItem.objects
+            .filter(project_id=project_id)
+            .aggregate(Max('submittal_number'))
+        )['submittal_number__max']
+
+        # If there are no submittal numbers assigned yet, MAX() function
+        # will return None
+        if current_max_number is None:
+            return None
+
+        return round(current_max_number, 0) + 1
+
     def create(self, validated_data):
         mf_section = MasterFormatSection.objects.get(
             masterformat_number=validated_data.get('spec_section'))
@@ -312,6 +326,7 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             spec_section=spec_section,
             added_under_submittal=added_under_submittal,
             manually_added=True,
+            submittal_number=self.get_next_submittal_number(validated_data.get('project_id')),
         )
 
     def update(self, instance, validated_data):
