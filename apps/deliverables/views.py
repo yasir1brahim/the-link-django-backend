@@ -471,7 +471,6 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(queryset, many=True)
             data = serializer.data
 
-
         response_data = {
             'sel_filter_vals': self._get_sel_filter_vals(queryset),
             'all_filter_vals': self._get_all_filter_vals(),
@@ -480,6 +479,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             'total_count': data['count'],
             'submittal_heading_lov': self._get_submittal_heading_lov(queryset),
             'submittal_type_lov': self._get_submittal_type_lov(queryset),
+            'has_placeholder_submittals': queryset.filter(parsing_method='PLACEHOLDER').exists(),
         }
 
         if page is not None:

@@ -280,7 +280,7 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
     para_context = serializers.CharField(required=False)
     para_no = serializers.CharField(required=False)
     type = serializers.CharField(required=False)
-    added_under_submittal_id = serializers.IntegerField(required=False)
+    added_under_submittal_id = serializers.IntegerField(required=False, allow_null=True)
 
     def get_next_submittal_number(self, project_id):
         current_max_number = (
