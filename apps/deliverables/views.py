@@ -291,15 +291,20 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
 
     def apply_order(self, queryset, order_col, order):
         order_string = "-" if order == "desc" else ""
+        order_items_list = []
         if order_col == 'spec_section':
             order_string += "masterformat_section__masterformat_number"
+            order_items_list = [order_string, 'heirarchical_paragraph_number', 'submittal_number']
         elif order_col == 'type':
             order_string += "submittal_type"
+            order_items_list = [order_string, 'masterformat_section__masterformat_number', 'heirarchical_paragraph_number', 'submittal_number']
         elif order_col == 'item_desc':
             order_string += "submittal_description"
+            order_items_list = [order_string, 'masterformat_section__masterformat_number', 'heirarchical_paragraph_number', 'submittal_number']
         elif order_col == 'para_context':
             order_string += "submittal_content"
-        return queryset.order_by(order_string)
+            order_items_list = [order_string, 'masterformat_section__masterformat_number', 'heirarchical_paragraph_number', 'submittal_number']
+        return queryset.order_by(*order_items_list)
 
     def get_queryset(self):
         project_id = self.kwargs.get('project_id')

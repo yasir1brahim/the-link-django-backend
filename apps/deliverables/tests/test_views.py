@@ -603,7 +603,7 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['message'][0]['parsing_method'], 'PLACEHOLDER')
 
-    def test_default_ordering(self):
+    def set_up_test_data(self):
         # Create MasterFormatSections
         mf1 = MasterFormatSection.objects.create(masterformat_number="033001")
         mf2 = MasterFormatSection.objects.create(masterformat_number="033002")
@@ -688,6 +688,8 @@ class SubmittalItemViewSetTests(APITestCase):
             submittal_type="Samples"
         )
 
+    def test_default_ordering(self):
+        self.set_up_test_data()
 
         # Make API request
         self.client.force_authenticate(user=self.user)
@@ -733,6 +735,108 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(results[6]['spec_section'], "033004")
         self.assertEqual(results[6]['para_no'], "4.1")
         self.assertEqual(results[6]['submittal_number'], "5.0")
+
+    def test_ordering_by_masterformat_number(self):
+        self.set_up_test_data()
+
+        # Make API request
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?order_col=spec_section&order=asc'
+        )
+        
+        # Verify response status
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify ordering
+        results = response.data['message']
+        
+        # Items should be ordered by:
+        # 1. Processing method (REGEX_SUCCESS before AI_SUCCESS)
+        # 2. Masterformat number (051200 before 052100)
+        # 3. Hierarchical paragraph number (1.1 before 1.2)
+        # 4. Submittal number (1 before 2 before 3)
+
+        self.assertEqual(results[0]['spec_section'], "033000")
+        self.assertEqual(results[0]['para_no'], '')
+        self.assertEqual(results[0]['submittal_number'], None)
+
+        self.assertEqual(results[1]['spec_section'], "033001")
+        self.assertEqual(results[1]['para_no'], "1.1")
+        self.assertEqual(results[1]['submittal_number'], "1.0")
+
+        self.assertEqual(results[2]['spec_section'], "033001")
+        self.assertEqual(results[2]['para_no'], "1.2")
+        self.assertEqual(results[2]['submittal_number'], "3.0")
+        
+        self.assertEqual(results[3]['spec_section'], "033002")
+        self.assertEqual(results[3]['para_no'], "2.1")
+        self.assertEqual(results[3]['submittal_number'], "2.0")
+        
+        self.assertEqual(results[4]['spec_section'], "033003")
+        self.assertEqual(results[4]['para_no'], "3.1")
+        self.assertEqual(results[4]['submittal_number'], "3.0")
+
+        self.assertEqual(results[5]['spec_section'], "033004")
+        self.assertEqual(results[5]['para_no'], "4.1")
+        self.assertEqual(results[5]['submittal_number'], "4.0")
+
+        self.assertEqual(results[6]['spec_section'], "033004")
+        self.assertEqual(results[6]['para_no'], "4.1")
+        self.assertEqual(results[6]['submittal_number'], "5.0")
+
+    def test_ordering_by_masterformat_number_desc(self):
+        self.set_up_test_data()
+
+        # Make API request
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?order_col=spec_section&order=desc'
+        )
+        
+        # Verify response status
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify ordering
+        results = response.data['message']
+        
+        # Items should be ordered by:
+        # 1. Processing method (REGEX_SUCCESS before AI_SUCCESS)
+        # 2. Masterformat number (051200 before 052100)
+        # 3. Hierarchical paragraph number (1.1 before 1.2)
+        # 4. Submittal number (1 before 2 before 3)
+
+        self.assertEqual(results[0]['spec_section'], "033004")
+        self.assertEqual(results[0]['para_no'], "4.1")
+        self.assertEqual(results[0]['submittal_number'], "4.0")
+
+        self.assertEqual(results[1]['spec_section'], "033004")
+        self.assertEqual(results[1]['para_no'], "4.1")
+        self.assertEqual(results[1]['submittal_number'], "5.0")
+
+        self.assertEqual(results[2]['spec_section'], "033003")
+        self.assertEqual(results[2]['para_no'], "3.1")
+        self.assertEqual(results[2]['submittal_number'], "3.0")
+
+        self.assertEqual(results[3]['spec_section'], "033002")
+        self.assertEqual(results[3]['para_no'], "2.1")
+        self.assertEqual(results[3]['submittal_number'], "2.0")
+
+        self.assertEqual(results[4]['spec_section'], "033001")
+        self.assertEqual(results[4]['para_no'], "1.1")
+        self.assertEqual(results[4]['submittal_number'], "1.0")
+
+        self.assertEqual(results[5]['spec_section'], "033001")
+        self.assertEqual(results[5]['para_no'], "1.2")
+        self.assertEqual(results[5]['submittal_number'], "3.0")
+
+        self.assertEqual(results[6]['spec_section'], "033000")
+        self.assertEqual(results[6]['para_no'], '')
+        self.assertEqual(results[6]['submittal_number'], None)
+        
+        
+    
+        
 
     def test_submittal_item_list_returns_filter_values_in_correct_order(self):
         """Test that the submittal item list returns filter values in lexical order"""
