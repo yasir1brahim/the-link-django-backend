@@ -971,12 +971,7 @@ def upload_file(request):
                 Bucket=settings.S3_BUCKET,
                 Key=document_path,
             )
-<<<<<<< HEAD
             if is_notices_flag_active and extract_notices:
-=======
-            print(f"is_notices_flag_active: {is_notices_feature_flag_active(request.user, project.team)}")
-            if is_notices_feature_flag_active(request.user, project.team) and extract_notices:
->>>>>>> main
                 call_extract_notices_lambda(
                     callback_url=settings.BACKEND_NOTICES_CALLBACK_URL,
                     document_id=str(uploaded_file.id),
