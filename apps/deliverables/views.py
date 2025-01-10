@@ -1027,10 +1027,8 @@ def change_encode_value(text):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def spec_status_webhook(request):
-    print(f"SPEC STATUS WEBHOOK: Received request")
-    print(request.__dict__)
     request_payload = request.data
-    print(f"SPEC STATUS WEBHOOK: {request_payload}")
+    print(f"SPEC STATUS WEBHOOK received request: {request_payload}")
 
     request_data = SpecStatusRequest(**request_payload)
 
@@ -1076,11 +1074,14 @@ def spec_status_webhook(request):
         spec_section.processing_method = processing_method
         spec_section.save()
     elif request_data['new_status'] == 'FAILED':
+        print(f"SPEC STATUS WEBHOOK: received failure for request: {request_data}")
         document = UploadedFile.objects.filter(id=int(request_data['document_id'])).first()
         if document.processing_status == DocProcessingStatus.SUBSECTIONS_EXTRACTED:
+            print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to SECTION_PROCESSING_FAILED")
             document.processing_status = DocProcessingStatus.SECTION_PROCESSING_FAILED
             document.save()
         else:
+            print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to FAILED")
             document.processing_status = DocProcessingStatus.FAILED
             document.save()
     """IF document.processing_status == SUBSECTIONS_EXTRACTED or SECTION_PROCESSING_FAILED then we have records of all extracted subsections.
@@ -1092,6 +1093,7 @@ def spec_status_webhook(request):
         unprocessed_spec_section_count = SpecSection.objects.filter(document_id=request_data['document_id']).exclude(
             processing_status=DocProcessingStatus.PROCESSED
         ).count()
+        print(f"SPEC STATUS WEBHOOK: unprocessed_spec_section_count: {unprocessed_spec_section_count}")
         if unprocessed_spec_section_count == 0:
             print(f"SPEC STATUS WEBHOOK: all subsections have been processed for document {request_data['document_id']}")
             document.processing_status = DocProcessingStatus.PROCESSED
