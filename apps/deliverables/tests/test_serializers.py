@@ -4,8 +4,9 @@ from django.test import TestCase
 
 from django.utils import timezone
 from django.db.models import QuerySet
-from ..models import Project, UploadedFile, DocProcessingStatus, Entitlement, SubmittalItem, MasterFormatSection
-from ..serializers import ProjectDetailsSerializer, ProjectMembership, ProjectWriteSerializer, SubmittalItemReadSerializer
+from ..models import Project, UploadedFile, DocProcessingStatus, Entitlement, SubmittalItem, MasterFormatSection, SpecSection
+from ..serializers import (ProjectDetailsSerializer, ProjectMembership, ProjectWriteSerializer,
+                            SubmittalItemReadSerializer, SubmittalItemWriteSerializer)
 from apps.teams.models import Membership
 from rest_framework.exceptions import ValidationError
 from apps.users.models import CustomUser
@@ -405,3 +406,168 @@ class TestSubmittalItemReadSerializer(TestCase):
         }
         self.assertEqual(set(serializer.data.keys()), expected_fields)
 
+
+class TestSubmittalItemWriteSerializer(TestCase):
+    def setUp(self):
+        # Create necessary related objects
+        self.team = Team.objects.create(name="Test Team")
+        self.user = CustomUser.objects.create(
+            email="test@example.com",
+            first_name="Test",
+            last_name="User"
+        )
+        self.project = Project.objects.create(
+            name="Test Project",
+            team=self.team
+        )
+        self.document = UploadedFile.objects.create(
+            name="Test Document",
+            project=self.project,
+            document_path="test/path",
+            md5="test.pdf",
+        )
+        self.mf_section = MasterFormatSection.objects.create(
+            masterformat_number="01 33 00",
+            masterformat_description="Submittal Procedures"
+        )
+        
+    def test_create_basic_submittal_item(self):
+        # Test creating a submittal item without added_under_submittal_id
+        data = {
+            "updated_by": self.user.id,
+            "spec_section": "01 33 00",
+            "item_desc": "Test Description",
+            "para_context": "Test Context",
+            "para_no": "1.2.3",
+            "type": "Product Data"
+        }
+        
+        serializer = SubmittalItemWriteSerializer(data=data)
+        self.assertTrue(serializer.is_valid())
+        
+        submittal_item = serializer.save(project_id=self.project.id)
+        
+        self.assertEqual(submittal_item.submittal_description, "Test Description")
+        self.assertEqual(submittal_item.masterformat_section, self.mf_section)
+        self.assertTrue(submittal_item.manually_added)
+        self.assertIsNone(submittal_item.added_under_submittal)
+        self.assertIsNone(submittal_item.document)
+        self.assertIsNone(submittal_item.spec_section)
+
+    def test_create_submittal_item_assigns_next_submittal_number(self):
+        # Create a submittal item
+        SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=self.mf_section,
+            document=self.document,
+            manually_added=False,
+            submittal_number=1
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=self.mf_section,
+            document=self.document,
+            manually_added=False,
+            submittal_number=2
+        )
+        data = {
+            "updated_by": self.user.id,
+            "spec_section": "01 33 00",
+            "item_desc": "Test Description",
+            "para_context": "Test Context",
+            "para_no": "1.2.3",
+            "type": "Product Data"
+        }
+        serializer = SubmittalItemWriteSerializer(data=data)
+        self.assertTrue(serializer.is_valid())
+        submittal_item = serializer.save(project_id=self.project.id)
+        self.assertEqual(submittal_item.submittal_number, 3.0)
+
+    def test_create_submittal_item_with_parent(self):
+        # Create a parent submittal item first
+        spec_section = SpecSection.objects.create(
+            masterformat_section=self.mf_section,
+            document=self.document,
+            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS
+        )
+        parent_submittal = SubmittalItem.objects.create(
+            project=self.project,
+            masterformat_section=self.mf_section,
+            submittal_description="Parent Submittal",
+            document=None,
+            spec_section=spec_section,
+            manually_added=False
+        )
+
+        data = {
+            "updated_by": self.user.id,
+            "spec_section": "01 33 00",
+            "item_desc": "Child Description",
+            "para_context": "Child Context",
+            "para_no": "1.2.3",
+            "type": "Product Data",
+            "added_under_submittal_id": parent_submittal.id
+        }
+        
+        serializer = SubmittalItemWriteSerializer(data=data)
+        self.assertTrue(serializer.is_valid())
+        
+        print("serializer.validated_data", serializer.validated_data)
+        submittal_item = serializer.save(project_id=self.project.id)
+        
+        self.assertEqual(submittal_item.submittal_description, "Child Description")
+        self.assertEqual(submittal_item.added_under_submittal, parent_submittal)
+        self.assertEqual(submittal_item.spec_section, spec_section)
+        self.assertEqual(submittal_item.document, parent_submittal.document)
+        self.assertTrue(submittal_item.manually_added)
+
+    def test_create_with_invalid_parent_id(self):
+        # Test creating with non-existent parent submittal ID
+        data = {
+            "updated_by": self.user.id,
+            "spec_section": "01 33 00",
+            "item_desc": "Test Description",
+            "para_context": "Test Context",
+            "para_no": "1.2.3",
+            "type": "Product Data",
+            "added_under_submittal_id": 99999  # Non-existent ID
+        }
+        
+        serializer = SubmittalItemWriteSerializer(data=data)
+        self.assertTrue(serializer.is_valid())
+        
+        submittal_item = serializer.save(project_id=self.project.id)
+        
+        self.assertIsNone(submittal_item.added_under_submittal)
+        self.assertIsNone(submittal_item.document)
+        self.assertIsNone(submittal_item.spec_section)
+
+    def test_create_with_parent_in_different_project(self):
+        other_project = Project.objects.create(
+            name="Other Project",
+            team=self.team
+        )
+        other_submittal = SubmittalItem.objects.create(
+            project=other_project,
+            masterformat_section=self.mf_section,
+            document=self.document,
+            manually_added=False
+        )
+        data = {
+            "updated_by": self.user.id,
+            "spec_section": "01 33 00",
+            "item_desc": "Test Description",
+            "para_context": "Test Context",
+            "para_no": "1.2.3",
+            "type": "Product Data",
+            "added_under_submittal_id": other_submittal.id
+        }
+        
+        serializer = SubmittalItemWriteSerializer(data=data)
+        self.assertTrue(serializer.is_valid())
+        
+        submittal_item = serializer.save(project_id=self.project.id)
+        
+        self.assertIsNone(submittal_item.added_under_submittal)
+        self.assertIsNone(submittal_item.document)
+        self.assertIsNone(submittal_item.spec_section)

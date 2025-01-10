@@ -1,6 +1,6 @@
 import boto3
 from django.conf import settings
-from django.db.models import Case, When, IntegerField
+from django.db.models import Case, When, IntegerField, Max
 from rest_framework import serializers
 
 from apps.users.serializers import CustomUserSerializer
@@ -280,10 +280,40 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
     para_context = serializers.CharField(required=False)
     para_no = serializers.CharField(required=False)
     type = serializers.CharField(required=False)
+    added_under_submittal_id = serializers.IntegerField(required=False, allow_null=True)
+
+    def get_next_submittal_number(self, project_id):
+        current_max_number = (
+            SubmittalItem.objects
+            .filter(project_id=project_id)
+            .aggregate(Max('submittal_number'))
+        )['submittal_number__max']
+
+        # If there are no submittal numbers assigned yet, MAX() function
+        # will return None
+        if current_max_number is None:
+            return None
+
+        return round(current_max_number, 0) + 1
 
     def create(self, validated_data):
         mf_section = MasterFormatSection.objects.get(
             masterformat_number=validated_data.get('spec_section'))
+        if validated_data.get('added_under_submittal_id'):
+            try:
+                added_under_submittal = SubmittalItem.objects.get(id=validated_data.get('added_under_submittal_id'))
+                if added_under_submittal.project_id != validated_data.get('project_id'):
+                    raise SubmittalItem.DoesNotExist
+                document = added_under_submittal.document
+                spec_section = added_under_submittal.spec_section
+            except SubmittalItem.DoesNotExist:
+                added_under_submittal = None
+                document = None
+                spec_section = None
+        else:
+            added_under_submittal = None
+            document = None
+            spec_section = None
         return SubmittalItem.objects.create(
             project_id=validated_data.get('project_id'),
             updated_by=validated_data.get('updated_by'),
@@ -292,6 +322,11 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             paragraph_number=validated_data.get('para_no'),
             submittal_type=validated_data.get('type'),
             masterformat_section=mf_section,
+            document=document,
+            spec_section=spec_section,
+            added_under_submittal=added_under_submittal,
+            manually_added=True,
+            submittal_number=self.get_next_submittal_number(validated_data.get('project_id')),
         )
 
     def update(self, instance, validated_data):
@@ -320,6 +355,7 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             'para_context',
             'para_no',
             'type',
+            'added_under_submittal_id',
         ]
 
 

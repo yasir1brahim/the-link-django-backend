@@ -5,7 +5,7 @@ from django.db import transaction, models
 from .models import (
     Project,
     UploadedFile,
-    DocProcessingStatus, SubmittalItem,
+    DocProcessingStatus, SubmittalItem, SpecSection
 )
 from ..utils.database import apply_advisory_lock_submittal_number_assignment
 
@@ -22,7 +22,6 @@ class SubmittalService:
 
         final_document_states = [
             DocProcessingStatus.PROCESSED,
-            DocProcessingStatus.FAILED,
         ]
 
         pending_documents_qs = (
@@ -44,8 +43,9 @@ class SubmittalService:
         targets_qs = (
             SubmittalItem.objects
             .filter(project=project)
+            .exclude(spec_section__processing_method=SpecSection.ProcessingMethod.REGEX_UNABLE_TO_DETECT)
             .order_by(
-                'document__specsection__masterformat_section__masterformat_number',  # NOQA
+                'masterformat_section__masterformat_number', 
                 'heirarchical_paragraph_number',
             )
         )
@@ -56,7 +56,7 @@ class SubmittalService:
         target_count = targets_qs.count()
 
         if not target_count:
-            logger.info(f'No submittal items to assign for project {project}')
+            print(f'No submittal items to assign for project {project}')
             return
 
         to_assign = list(targets_qs)
@@ -79,6 +79,8 @@ class SubmittalService:
 
         next_number = round(current_max_number, 0) + 1
 
+        print("submittals in order:", targets_qs.values_list('masterformat_section__masterformat_number', 'paragraph_number', 'submittal_type'))
+
         for entry in to_assign:
             entry.submittal_number = next_number
             next_number += 1
@@ -87,7 +89,7 @@ class SubmittalService:
             to_assign,
             fields=['submittal_number'],
         )
-        logger.info(
+        print(
             f'Assigned submittal numbers for project {project}, '
             f'count={target_count}'
         )
@@ -110,13 +112,13 @@ class SubmittalService:
             # one gets finalized and this gets called again
             pending_count = pending_documents_qs.count()
             if pending_count:
-                logger.info(
+                print(
                     f'Not assigning submittal number for project {project}, '
                     f'there are still {pending_count} documents being processed.'
                 )
                 return
 
-        logging.debug(
+        print(
             f'Assigning submittal numbers for project {project}, '
             f'reassign={reassign}',
         )

@@ -772,6 +772,180 @@ sample_subsections_extracted_webhook = {
     ]
 }
 
+sample_multiple_subsections_extracted_webhook = {
+    "new_status": "SUBSECTIONS_EXTRACTED",
+    "document_id": "1",
+    "project_id": "1",
+    "user_id": "2787",
+    "filename": "03_3001_-WLA_CAST-IN-PLACE_LANDSCAPE_CONCRETE.pdf",
+    "subsections": [
+        {
+            "master_format_section_number": "033001",
+            "subsection_type": "SUBMITTAL_SECTION",
+            "text_chunks": [
+                {
+                    "text": "Product Data:  Submit preprinted data for each type of manufactured material",
+                    "text_location": {
+                        "page_no": 1,
+                        "x": 122.41244506835938,
+                        "y": 599.1375732421875,
+                        "width": 420.5254821777344,
+                        "height": 27.88702392578125,
+                        "end_x": 542.9379272460938,
+                        "end_y": 627.0245971679688
+                    },
+                    "paragraph_number": "1.4.A"
+                },
+            ],
+            "associated_product_section_chunks": [
+                {
+                    "text": "Formed Concrete:  Form-facing panels that will provide continuous, true, and\n1. For all above-grade faces of concrete walls exposed to view: Smooth\n2. Rust-free metal.\n3. Exterior-grade undamaged, unpatched plywood panels, suitable for\na. Medium-density overlay, Class 1, or better, mill-release agent\nb. Structural 1, B-B, or better, mill oiled and edge sealed.\nc. B-B (Concrete Form), Class 1, or better, mill oiled and edge\n4. Architecturally Exposed Concrete:  Medium-density overlay, class 1 or\n",
+                    "text_location": {
+                        "page_no": 4,
+                        "x": 122.43452453613281,
+                        "y": 388.88055419921875,
+                        "width": 420.66380310058594,
+                        "height": 217.95166015625,
+                        "end_x": 543.0983276367188,
+                        "end_y": 606.8322143554688
+                    },
+                    "paragraph_number": "A"
+                },
+            ],
+            "subsection_index": 0,
+            "subsection_id": "17552407-85f4-47c6-85c6-6b76219d17fa"
+        },
+        {
+            "master_format_section_number": "033002",
+            "subsection_type": "SUBMITTAL_SECTION",
+            "text_chunks": [
+                {
+                    "text": "Product Data:  Submit preprinted data for each type of manufactured material",
+                    "text_location": {
+                        "page_no": 1,
+                        "x": 122.41244506835938,
+                        "y": 599.1375732421875,
+                        "width": 420.5254821777344,
+                        "height": 27.88702392578125,
+                        "end_x": 542.9379272460938,
+                        "end_y": 627.0245971679688
+                    },
+                    "paragraph_number": "1.4.A"
+                },
+            ],
+            "associated_product_section_chunks": [
+                {
+                    "text": "Formed Concrete:  Form-facing panels that will provide continuous, true, and\n1. For all above-grade faces of concrete walls exposed to view: Smooth\n2. Rust-free metal.\n3. Exterior-grade undamaged, unpatched plywood panels, suitable for\na. Medium-density overlay, Class 1, or better, mill-release agent\nb. Structural 1, B-B, or better, mill oiled and edge sealed.\nc. B-B (Concrete Form), Class 1, or better, mill oiled and edge\n4. Architecturally Exposed Concrete:  Medium-density overlay, class 1 or\n",
+                    "text_location": {
+                        "page_no": 4,
+                        "x": 122.43452453613281,
+                        "y": 388.88055419921875,
+                        "width": 420.66380310058594,
+                        "height": 217.95166015625,
+                        "end_x": 543.0983276367188,
+                        "end_y": 606.8322143554688
+                    },
+                    "paragraph_number": "A"
+                },
+            ],
+            "subsection_index": 1,
+            "subsection_id": "17552407-85f4-47c6-85c6-6b76219aaaaa"
+        },
+        {
+            "master_format_section_number": "033003",
+            "subsection_type": "SUBMITTAL_SECTION",
+            "text_chunks": [
+                {
+                    "text": "Product Data:  Submit preprinted data for each type of manufactured material",
+                    "text_location": {
+                        "page_no": 1,
+                        "x": 122.41244506835938,
+                        "y": 599.1375732421875,
+                        "width": 420.5254821777344,
+                        "height": 27.88702392578125,
+                        "end_x": 542.9379272460938,
+                        "end_y": 627.0245971679688
+                    },
+                    "paragraph_number": "1.4.A"
+                },
+            ],
+            "associated_product_section_chunks": [
+                {
+                    "text": "Formed Concrete:  Form-facing panels that will provide continuous, true, and\n1. For all above-grade faces of concrete walls exposed to view: Smooth\n2. Rust-free metal.\n3. Exterior-grade undamaged, unpatched plywood panels, suitable for\na. Medium-density overlay, Class 1, or better, mill-release agent\nb. Structural 1, B-B, or better, mill oiled and edge sealed.\nc. B-B (Concrete Form), Class 1, or better, mill oiled and edge\n4. Architecturally Exposed Concrete:  Medium-density overlay, class 1 or\n",
+                    "text_location": {
+                        "page_no": 4,
+                        "x": 122.43452453613281,
+                        "y": 388.88055419921875,
+                        "width": 420.66380310058594,
+                        "height": 217.95166015625,
+                        "end_x": 543.0983276367188,
+                        "end_y": 606.8322143554688
+                    },
+                    "paragraph_number": "A"
+                },
+            ],
+            "subsection_index": 2,
+            "subsection_id": "17552407-85f4-47c6-85c6-6b76219aaaab"
+        },
+        {
+            "master_format_section_number": "033004",
+            "subsection_type": "SUBMITTAL_SECTION",
+            "text_chunks": [
+                {
+                    "text": "Product Data:  Submit preprinted data for each type of manufactured material",
+                    "text_location": {
+                        "page_no": 1,
+                        "x": 122.41244506835938,
+                        "y": 599.1375732421875,
+                        "width": 420.5254821777344,
+                        "height": 27.88702392578125,
+                        "end_x": 542.9379272460938,
+                        "end_y": 627.0245971679688
+                    },
+                    "paragraph_number": "1.4.A"
+                },
+            ],
+            "associated_product_section_chunks": [
+                {
+                    "text": "Formed Concrete:  Form-facing panels that will provide continuous, true, and\n1. For all above-grade faces of concrete walls exposed to view: Smooth\n2. Rust-free metal.\n3. Exterior-grade undamaged, unpatched plywood panels, suitable for\na. Medium-density overlay, Class 1, or better, mill-release agent\nb. Structural 1, B-B, or better, mill oiled and edge sealed.\nc. B-B (Concrete Form), Class 1, or better, mill oiled and edge\n4. Architecturally Exposed Concrete:  Medium-density overlay, class 1 or\n",
+                    "text_location": {
+                        "page_no": 4,
+                        "x": 122.43452453613281,
+                        "y": 388.88055419921875,
+                        "width": 420.66380310058594,
+                        "height": 217.95166015625,
+                        "end_x": 543.0983276367188,
+                        "end_y": 606.8322143554688
+                    },
+                    "paragraph_number": "A"
+                },
+            ],
+            "subsection_index": 3,
+            "subsection_id": "17552407-85f4-47c6-85c6-6b76219aaaaac"
+        },
+    ]
+}
+
+sample_processed_placeholder_webhook = {
+    "new_status": "PROCESSED_SECTION",
+    "master_format_section_number": "033001",
+    "document_id": "1",
+    "project_id": "1",
+    "user_id": "2787",
+    "filename": "03_3001_-WLA_CAST-IN-PLACE_LANDSCAPE_CONCRETE.pdf",
+    "submittals": [
+        {
+            "submittal_type": "N/A",
+            "submittal_description": "N/A",
+            "submittal_text": "Unable to extract submittals from text",
+            "parsing_method": "PLACEHOLDER",
+            "master_format_section_number": "033001",
+            "contextual_text": "Unable to extract submittals from text",
+            "section": ""
+        }
+    ]
+}
+
 
 sample_processed_section_webhook = {
     "new_status": "PROCESSED_SECTION",

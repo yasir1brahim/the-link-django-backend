@@ -20,7 +20,7 @@ from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from django.http import HttpResponse
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from django.db.models import Q
+from django.db.models import Q, Case, When, IntegerField
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -291,15 +291,20 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
 
     def apply_order(self, queryset, order_col, order):
         order_string = "-" if order == "desc" else ""
+        order_items_list = []
         if order_col == 'spec_section':
             order_string += "masterformat_section__masterformat_number"
+            order_items_list = [order_string, 'heirarchical_paragraph_number', 'submittal_number']
         elif order_col == 'type':
             order_string += "submittal_type"
+            order_items_list = [order_string, 'masterformat_section__masterformat_number', 'heirarchical_paragraph_number', 'submittal_number']
         elif order_col == 'item_desc':
             order_string += "submittal_description"
+            order_items_list = [order_string, 'masterformat_section__masterformat_number', 'heirarchical_paragraph_number', 'submittal_number']
         elif order_col == 'para_context':
             order_string += "submittal_content"
-        return queryset.order_by(order_string)
+            order_items_list = [order_string, 'masterformat_section__masterformat_number', 'heirarchical_paragraph_number', 'submittal_number']
+        return queryset.order_by(*order_items_list)
 
     def get_queryset(self):
         project_id = self.kwargs.get('project_id')
@@ -354,9 +359,15 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             queryset = self.apply_order(queryset, order_col, order)
         else:
             queryset = queryset.order_by(
-                'submittal_number',
+                Case(
+                    *[When(spec_section__processing_method=k, then=v) 
+                    for k, v in SpecSection.ProcessingMethod.get_order().items()],
+                    default=1,
+                    output_field=IntegerField(),
+                ),
                 'masterformat_section__masterformat_number',
-                'heirarchical_paragraph_number'
+                'heirarchical_paragraph_number',
+                'submittal_number',
             )
         
         if list_id:
@@ -460,7 +471,6 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(queryset, many=True)
             data = serializer.data
 
-
         response_data = {
             'sel_filter_vals': self._get_sel_filter_vals(queryset),
             'all_filter_vals': self._get_all_filter_vals(),
@@ -469,6 +479,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             'total_count': data['count'],
             'submittal_heading_lov': self._get_submittal_heading_lov(queryset),
             'submittal_type_lov': self._get_submittal_type_lov(queryset),
+            'has_placeholder_submittals': queryset.filter(parsing_method='PLACEHOLDER').exists(),
         }
 
         if page is not None:
@@ -933,6 +944,9 @@ def upload_file(request):
     async_processing = []
     not_parsed = []
 
+    is_notices_flag_active = is_notices_feature_flag_active(request.user, project.team)
+    print(f"is_notices_flag_active: {is_notices_flag_active}")
+    
     for file in files:
         try:
             filename = f'project_{project_id}__{int(time.time())}_{file.name}'
@@ -962,8 +976,7 @@ def upload_file(request):
                 Bucket=settings.S3_BUCKET,
                 Key=document_path,
             )
-            print(f"is_notices_flag_active: {is_notices_feature_flag_active(request.user, project.team)}")
-            if is_notices_feature_flag_active(request.user, project.team) and extract_notices:
+            if is_notices_flag_active and extract_notices:
                 call_extract_notices_lambda(
                     callback_url=settings.BACKEND_NOTICES_CALLBACK_URL,
                     document_id=str(uploaded_file.id),
@@ -1014,10 +1027,8 @@ def change_encode_value(text):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def spec_status_webhook(request):
-    print(f"SPEC STATUS WEBHOOK: Received request")
-    print(request.__dict__)
     request_payload = request.data
-    print(f"SPEC STATUS WEBHOOK: {request_payload}")
+    print(f"SPEC STATUS WEBHOOK received request: {request_payload}")
 
     request_data = SpecStatusRequest(**request_payload)
 
@@ -1035,12 +1046,17 @@ def spec_status_webhook(request):
             section.save()
     elif request_data['new_status'] == 'PROCESSED_SECTION':
         print(f"SPEC STATUS WEBHOOK: saving submittals")
+        spec_section = SpecSection.objects.filter(
+            document_id=int(request_data['document_id']),
+            masterformat_section__masterformat_number=request_data['master_format_section_number']
+        ).first()
         for submittal in request_data['submittals']:
             submittal_text = change_encode_value(submittal['submittal_text'])
             masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=request_data['master_format_section_number'])
             submittal_item = SubmittalItem.objects.create(
                 project_id=request_data['project_id'],
                 masterformat_section=masterformat_section,
+                spec_section=spec_section,
                 submittal_type=submittal['submittal_type'],
                 submittal_description=submittal['submittal_description'],
                 submittal_content=submittal_text,
@@ -1050,16 +1066,22 @@ def spec_status_webhook(request):
                 parsing_method=submittal.get('parsing_method', 'UNKNOWN'),
                 additional_text_locations=submittal.get('additional_text_locations', [])
             )
-        SpecSection.objects.filter(
-            document_id=int(request_data['document_id']),
-            masterformat_section__masterformat_number=request_data['master_format_section_number']
-        ).update(processing_status=DocProcessingStatus.PROCESSED)
+        if len(request_data['submittals']) == 1 and request_data['submittals'][0]['parsing_method'] == 'PLACEHOLDER':
+            processing_method = 'REGEX_UNABLE_TO_DETECT_SUBMITTALS'
+        else:
+            processing_method = 'REGEX_SUCCESS' 
+        spec_section.processing_status = DocProcessingStatus.PROCESSED
+        spec_section.processing_method = processing_method
+        spec_section.save()
     elif request_data['new_status'] == 'FAILED':
+        print(f"SPEC STATUS WEBHOOK: received failure for request: {request_data}")
         document = UploadedFile.objects.filter(id=int(request_data['document_id'])).first()
         if document.processing_status == DocProcessingStatus.SUBSECTIONS_EXTRACTED:
+            print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to SECTION_PROCESSING_FAILED")
             document.processing_status = DocProcessingStatus.SECTION_PROCESSING_FAILED
             document.save()
         else:
+            print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to FAILED")
             document.processing_status = DocProcessingStatus.FAILED
             document.save()
     """IF document.processing_status == SUBSECTIONS_EXTRACTED or SECTION_PROCESSING_FAILED then we have records of all extracted subsections.
@@ -1071,6 +1093,7 @@ def spec_status_webhook(request):
         unprocessed_spec_section_count = SpecSection.objects.filter(document_id=request_data['document_id']).exclude(
             processing_status=DocProcessingStatus.PROCESSED
         ).count()
+        print(f"SPEC STATUS WEBHOOK: unprocessed_spec_section_count: {unprocessed_spec_section_count}")
         if unprocessed_spec_section_count == 0:
             print(f"SPEC STATUS WEBHOOK: all subsections have been processed for document {request_data['document_id']}")
             document.processing_status = DocProcessingStatus.PROCESSED

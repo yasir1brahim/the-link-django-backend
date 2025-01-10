@@ -105,9 +105,20 @@ class MasterFormatSection(BaseModel):
 
 
 class SpecSection(BaseModel):
+    class ProcessingMethod(models.TextChoices):
+        REGEX_UNABLE_TO_DETECT = 'REGEX_UNABLE_TO_DETECT_SUBMITTALS', 'Regex Unable to Detect Submittals'
+        REGEX_SUCCESS = 'REGEX_SUCCESS', 'Regex Success'
+
+        @classmethod
+        def get_order(cls):
+            return {
+                cls.REGEX_SUCCESS: 1,
+                cls.REGEX_UNABLE_TO_DETECT: 2,
+            }
     masterformat_section = models.ForeignKey("MasterFormatSection", on_delete=models.CASCADE)
     document = models.ForeignKey("UploadedFile", on_delete=models.CASCADE)
     processing_status = models.CharField(max_length=256, blank=True, null=True)
+    processing_method = models.CharField(max_length=256, blank=True, null=True, choices=ProcessingMethod.choices)
 
     def __str__(self):
         return f"{self.document.name} - {self.masterformat_section.masterformat_number}"
@@ -119,7 +130,8 @@ class SubmittalItem(BaseModel):
 
     project = models.ForeignKey("Project", on_delete=models.CASCADE)
     document = models.ForeignKey("UploadedFile", on_delete=models.CASCADE, blank=True, null=True)
-    masterformat_section = models.ForeignKey("MasterFormatSection", on_delete=models.CASCADE)
+    masterformat_section = models.ForeignKey("MasterFormatSection", on_delete=models.PROTECT)
+    spec_section = models.ForeignKey("SpecSection", on_delete=models.PROTECT, blank=True, null=True)
     paragraph_number = models.CharField(max_length=256)
     heirarchical_paragraph_number = models.CharField(max_length=256, default="", blank=True)
     submittal_type = models.CharField(max_length=256)
@@ -139,6 +151,9 @@ class SubmittalItem(BaseModel):
 
     parsing_method = models.CharField(max_length=256)
     parsing_version = models.CharField(max_length=256)
+
+    added_under_submittal = models.ForeignKey("SubmittalItem", on_delete=models.CASCADE, blank=True, null=True)
+    manually_added = models.BooleanField(default=False)
 
     class Meta:
         indexes = [
