@@ -833,10 +833,6 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(results[6]['spec_section'], "033000")
         self.assertEqual(results[6]['para_no'], '')
         self.assertEqual(results[6]['submittal_number'], None)
-        
-        
-    
-        
 
     def test_submittal_item_list_returns_filter_values_in_correct_order(self):
         """Test that the submittal item list returns filter values in lexical order"""
@@ -897,6 +893,22 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(list(response.data['all_filter_vals']['para_no']), ['1.1', '1.2', '1.3', '1.3-1'])
         self.assertEqual(list(response.data['all_filter_vals']['spec_section']), ['033000', '033001', '102000', '123456'])
         self.assertEqual(list(response.data['all_filter_vals']['type']), ['Type 1', 'Type 2', 'ZZZ'])
+
+    def test_create_submittal_with_new_masterformat_section_number(self):
+        self.client.force_authenticate(user=self.user)
+        post_payload = {
+            'document': self.document.id,
+            'spec_section': "111111",  # new spec section
+            'item_desc': "Test",
+            'para_context': "Test context",
+            'para_no': "1.1",
+            'type': "Test type",
+        }
+        self.assertEqual(0, len(SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111")))
+        response = self.client.post(reverse('submittal-item-list', kwargs={'project_id': self.project.id}), post_payload)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(1, len(SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111")))
+
 
 
 class ProjectArchiveTests(APITestCase):

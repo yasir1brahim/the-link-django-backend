@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.http import Http404
 
 from apps.deliverables.integrations.procore import (get_procore_access_token, get_fresh_token_for_user,
-                                                     GRANT_TYPE_ACCESS_TOKEN, ProcoreException)
+                                                     GRANT_TYPE_ACCESS_TOKEN, ProcoreException, create_spec_division)
 from apps.deliverables.models import ProcoreToken
 
 class TestProcoreIntegration(TestCase):
@@ -69,6 +69,26 @@ class TestProcoreIntegration(TestCase):
         # Verify response contains error
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {'error': 'invalid_grant'})
+
+    @patch('requests.post')
+    def test_create_spec_division(self, mock_post):
+        expected_data = {
+            "id": 209260,
+            "number": "15",
+            "description": "Mechanical",
+            "url": "string"
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = expected_data
+        mock_post.return_value = mock_response
+
+        # Call function
+        response = create_spec_division(15, 1, "token")
+
+        # Verify response contains error
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected_data)
 
 
 class TestGetFreshTokenForUser(TestCase):

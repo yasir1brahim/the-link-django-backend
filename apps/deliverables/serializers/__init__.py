@@ -297,8 +297,9 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
         return round(current_max_number, 0) + 1
 
     def create(self, validated_data):
-        mf_section = MasterFormatSection.objects.get(
-            masterformat_number=validated_data.get('spec_section'))
+        mf_section, created = MasterFormatSection.objects.get_or_create(
+            masterformat_number=validated_data.get('spec_section')
+        )
         if validated_data.get('added_under_submittal_id'):
             try:
                 added_under_submittal = SubmittalItem.objects.get(id=validated_data.get('added_under_submittal_id'))
