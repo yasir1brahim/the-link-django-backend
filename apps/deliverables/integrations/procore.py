@@ -107,8 +107,8 @@ def get_managers(project_id, procore_token):
 def create_spec_division(division_number, project_id, procore_token):
     payload = json.dumps({
         "specification_section_division": {
-            "number": division_number,
-            "description": "Div " + division_number
+            "number": str(division_number),
+            "description": f"Div {division_number}"
         }
     })
     headers = {
@@ -122,7 +122,7 @@ def create_spec_division(division_number, project_id, procore_token):
 def create_spec_section(spec_section, division_id, project_id, procore_token):
     payload = json.dumps({
         "specification_section": {
-            "number": spec_section,
+            "number": str(spec_section),
             "specification_section_division_id": division_id,
             "description": ""
         }
