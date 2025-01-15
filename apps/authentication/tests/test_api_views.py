@@ -6,6 +6,37 @@ from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
 from apps.users.models import CustomUser
 from django.urls import reverse
 
+class TestLogin(APITestCase):
+    def setUp(self):
+        self.user = CustomUser.objects.create_user(username='testuser', email='testuser@example.com', password='testpassword')
+        self.capitalized_email_user = CustomUser.objects.create_user(username='testuser2', email='TestUser2@example.com', password='testpassword')
+
+    def test_login(self):
+        url = reverse('authentication:rest_login')
+        response = self.client.post(url, data={'email': 'testuser@example.com', 'password': 'testpassword'})
+        print(response.data)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], 'success')
+        self.assertEqual(response.data['jwt']['user']['id'], self.user.id)
+        self.assertEqual(response.data['jwt']['user']['email'], self.user.email)
+        self.assertEqual(response.data['jwt']['user']['first_name'], self.user.first_name)
+        self.assertEqual(response.data['jwt']['user']['last_name'], self.user.last_name)
+        self.assertEqual(response.data['jwt']['user']['get_display_name'], self.user.get_display_name())
+        self.assertEqual(response.data['jwt']['user']['avatar_url'], self.user.avatar_url)
+        self.assertEqual(response.data['jwt']['user']['is_superuser'], self.user.is_superuser)
+        self.assertEqual(response.data['jwt']['user']['active_flags'], [])
+
+    def test_login_with_capitalized_email(self):
+        url = reverse('authentication:rest_login')
+        response = self.client.post(url, data={'email': 'TestUser2@example.com', 'password': 'testpassword'})
+        print(response.data)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], 'success')
+
+        
+
 class UserStatusUpdateViewTests(APITestCase):
 
     def setUp(self):
