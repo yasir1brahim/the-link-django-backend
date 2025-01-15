@@ -30,6 +30,11 @@ class CustomUser(AbstractUser):
 
     def __str__(self):
         return f"{self.get_full_name()} <{self.email or self.username}>"
+    
+    def save(self, *args, **kwargs):
+        if self.email:
+            self.email = self.email.lower()
+        super().save(*args, **kwargs)
 
     def get_display_name(self) -> str:
         if self.get_full_name().strip():
