@@ -1,4 +1,5 @@
 from typing import TypedDict, List
+from concurrent.futures import ThreadPoolExecutor
 
 import logging
 import time
@@ -912,6 +913,38 @@ def call_extract_notices_lambda(callback_url, document_id, object_key):
     return "Kicked off processing job"
 
 
+def upload_to_s3_and_process(file_data):
+    """Handle S3 upload and Lambda processing for a single file"""
+    try:
+        file = file_data['file']
+        file.seek(0)
+        s3.upload_fileobj(
+            Fileobj=file,
+            Bucket=settings.S3_BUCKET,
+            Key=file_data['document_path'],
+        )
+
+        if file_data['is_notices_flag_active'] and file_data['extract_notices']:
+            call_extract_notices_lambda(
+                callback_url=settings.BACKEND_NOTICES_CALLBACK_URL,
+                document_id=str(file_data['uploaded_file_id']),
+                object_key=file_data['document_path'],
+            )
+        else:
+            parse_spec(
+                callback_url=settings.BACKEND_CALLBACK_URL,
+                document_id=str(file_data['uploaded_file_id']),
+                project_id=str(file_data['project_id']),
+                object_key=file_data['document_path'],
+                filename=file_data['filename'],
+                user_id=str(file_data['user_id'])
+            )
+        return {'status': 'success', 'document_path': file_data['document_path']}
+    except Exception as e:
+        logging.error(f"Error processing file {file_data['filename']}: {e}")
+        return {'status': 'error', 'filename': file_data['filename'], 'error': str(e)}
+
+
 @extend_schema(
     request=FileUploadSerializer,
     responses={200: {'description': 'File uploaded successfully'}},
@@ -940,6 +973,7 @@ def upload_file(request):
     if not files:
         return Response({'detail': 'No files provided'}, status=status.HTTP_400_BAD_REQUEST)
     
+    files_to_process = []
     already_existing_files = []
     async_processing = []
     not_parsed = []
@@ -969,32 +1003,36 @@ def upload_file(request):
                 parsed_document_path=parsed_document_path,
                 processing_status='PENDING_PROCESSING',
             )
-            
-            file.seek(0)
-            s3.upload_fileobj(
-                Fileobj=file,
-                Bucket=settings.S3_BUCKET,
-                Key=document_path,
-            )
-            if is_notices_flag_active and extract_notices:
-                call_extract_notices_lambda(
-                    callback_url=settings.BACKEND_NOTICES_CALLBACK_URL,
-                    document_id=str(uploaded_file.id),
-                    object_key=document_path,
-                )
-            else:
-                parse_spec(
-                    callback_url=settings.BACKEND_CALLBACK_URL,
-                    document_id=str(uploaded_file.id),
-                    project_id=str(project_id),
-                    object_key=document_path,
-                    filename=file.name,
-                    user_id=str(user.id)
-                )
-            async_processing.append(document_path)
+
+            files_to_process.append({
+                'file': file,
+                'filename': file.name,
+                'document_path': document_path,
+                'uploaded_file_id': uploaded_file.id,
+                'project_id': project_id,
+                'user_id': request.user.id,
+                'is_notices_flag_active': is_notices_flag_active,
+                'extract_notices': extract_notices
+            })
         except Exception as e:
             logging.error(f"Error uploading file: {e}")
             not_parsed.append(file.name)
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = list(executor.map(upload_to_s3_and_process, files_to_process))
+
+    # Process results
+    for result in results:
+        if result['status'] == 'success':
+            async_processing.append(result['document_path'])
+        else:
+            not_parsed.append(result['filename'])
+            # Update the status of failed uploads
+            UploadedFile.objects.filter(
+                name=result['filename'],
+                project_id=project_id
+            ).update(processing_status='FAILED')
+        
     return Response({
         'error_parsing': not_parsed,
         'already_exist': already_existing_files,
