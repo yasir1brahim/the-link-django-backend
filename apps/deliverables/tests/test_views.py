@@ -1,3 +1,4 @@
+import time
 from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
@@ -478,10 +479,15 @@ class UploadFileTests(APITestCase):
             content=b'This is some test file content',
             content_type='text/plain'
         ) for i in range(250)]
+        
+        start_time = time.perf_counter()
         response = self.client.post(reverse('deliverables:upload_file'), {
             'project_id': self.existing_project.id,
             'files': list_of_files,
         })
+        end_time = time.perf_counter()
+        duration = end_time - start_time
+        print(f"Upload file request took {duration:.4f} seconds")
         print(f"response.data: {response.data}")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
