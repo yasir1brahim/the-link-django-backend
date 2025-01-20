@@ -21,6 +21,12 @@ class ProjectAccessPermissions(permissions.BasePermission):
             if not team_id:
                 return False
             return request.user.is_admin_for_team(team_id)
+        
+        if request.method == 'PATCH':
+            team_id = request.data.get('team')
+            if not team_id:
+                return True
+            return request.user.is_admin_for_team(team_id)
             
         # For other write operations, let has_object_permission handle it
         return True

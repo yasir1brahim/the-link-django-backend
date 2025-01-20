@@ -83,9 +83,6 @@ class ProjectWriteSerializer(BaseProjectSerializer):
         team: Team = data.get('team')
         members = data.get('project_memberships')
 
-        if team and not self.context['request'].user.is_admin_for_team(team):
-            raise serializers.ValidationError("You are not authorized to create a project for this team.")
-
         if self.instance:
             team = team or self.instance.team
         else:

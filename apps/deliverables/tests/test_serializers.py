@@ -4,14 +4,14 @@ from django.test import TestCase
 
 from django.utils import timezone
 from django.db.models import QuerySet
-from ..models import Project, UploadedFile, DocProcessingStatus, Entitlement, SubmittalItem, MasterFormatSection, SpecSection
+from ..models import Project, UploadedFile, DocProcessingStatus, Entitlement, SubmittalItem, MasterFormatSection, SpecSection, ROLE_PROJECT_ADMIN
 from ..serializers import (ProjectDetailsSerializer, ProjectMembership, ProjectWriteSerializer,
                             SubmittalItemReadSerializer, SubmittalItemWriteSerializer)
 from apps.teams.models import Membership
 from rest_framework.exceptions import ValidationError
 from apps.users.models import CustomUser
 from apps.teams.models import Team
-
+from rest_framework.test import APIRequestFactory
 class ProjectReadSerializerTest(TestCase):
     def setUp(self):
         self.user = CustomUser.objects.create(
@@ -242,6 +242,10 @@ class TestProjectWriteSerializer(TestCase):
             ]
         }
 
+        self.factory = APIRequestFactory()
+        self.request = self.factory.get('/')
+        self.request.user = self.user1
+
     def test_create_project_with_valid_data(self):
         """Test creating a project with valid data"""
         serializer = ProjectWriteSerializer(data=self.project_data)
@@ -274,7 +278,9 @@ class TestProjectWriteSerializer(TestCase):
         print("team", self.team.members.all())
         print("user2 team membership", self.user2.is_member_of_team(self.team))
         
-        serializer = ProjectWriteSerializer(data=self.project_data)
+        serializer = ProjectWriteSerializer(
+            data=self.project_data,
+        )
         print("serializer.initial_data", serializer.initial_data)
         serializer.is_valid()
         print("serializer.data", serializer.data)
@@ -294,7 +300,7 @@ class TestProjectWriteSerializer(TestCase):
         ProjectMembership.objects.create(
             project=project,
             user=self.user1,
-            role='MEMBER'
+            role=ROLE_PROJECT_ADMIN
         )
 
         # Add user2 to team and update project members
@@ -315,7 +321,8 @@ class TestProjectWriteSerializer(TestCase):
         serializer = ProjectWriteSerializer(
             instance=project,
             data=update_data,
-            partial=True
+            partial=True,
+            context={'request': self.request}
         )
         self.assertTrue(serializer.is_valid())
         updated_project = serializer.save()
@@ -342,7 +349,8 @@ class TestProjectWriteSerializer(TestCase):
         serializer = ProjectWriteSerializer(
             instance=project,
             data=update_data,
-            partial=True
+            partial=True,
+            context={'request': self.request}
         )
         self.assertTrue(serializer.is_valid())
         updated_project = serializer.save()
