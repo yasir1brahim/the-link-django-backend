@@ -496,6 +496,24 @@ class ProjectViewSetTests(APITestCase):
         self.assertEqual(ProjectMembership.objects.filter(project=self.existing_project, user=new_user).count(), 1)
         self.assertEqual(ProjectMembership.objects.get(project=self.existing_project, user=new_user).role, ROLE_PROJECT_MEMBER)
 
+    def test_adding_user_that_is_already_in_project_is_a_no_op(self):
+        """Test that adding a user that is already in the project is a no-op"""
+        ProjectMembership.objects.create(
+            project=self.existing_project,
+            user=self.company_member,
+            role=ROLE_PROJECT_ADMIN
+        )
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.post(reverse('deliverables:project-members-add', kwargs={'pk': self.existing_project.id}), {
+            'user_ids': [
+                self.company_member.id
+            ]
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(ProjectMembership.objects.filter(project=self.existing_project).count(), 1)
+        self.assertEqual(ProjectMembership.objects.get(project=self.existing_project, user=self.company_member).role, ROLE_PROJECT_ADMIN)
+
     def test_project_admin_can_add_users_to_project_with_addition_endpoint(self):
         """Test that a company member can add users to a project with the addition endpoint"""
         ProjectMembership.objects.create(
