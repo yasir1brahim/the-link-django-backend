@@ -67,15 +67,18 @@ class ProjectWriteSerializer(BaseProjectSerializer):
     team = serializers.PrimaryKeyRelatedField(queryset=Team.objects.all())
 
     def validate(self, data):
-        team = data.get('team')
+        team: Team = data.get('team')
         members = data.get('project_memberships')
+
+        if team and not self.context['request'].user.is_admin_for_team(team):
+            raise serializers.ValidationError("You are not authorized to create a project for this team.")
 
         if self.instance:
             team = team or self.instance.team
         else:
             if not team:
                 raise serializers.ValidationError("Team is required to create a project.")
-
+            
         if members:
             for member in members:
                 member_user = member.get('user').get('id')
@@ -84,11 +87,9 @@ class ProjectWriteSerializer(BaseProjectSerializer):
         return data
 
     def update(self, instance, validated_data):
-        print(validated_data)
         memberships_data = validated_data.pop('project_memberships', [])
         # Update project fields
         for attr, value in validated_data.items():
-            print(attr, value)
             setattr(instance, attr, value)
         instance.save()
 
@@ -109,14 +110,12 @@ class ProjectWriteSerializer(BaseProjectSerializer):
             else:
                 # Create new membership
                 new_members.append(ProjectMembership(user_id=user_id, project=instance, role=role))
-
         # Remove memberships not in the update data
         for membership in existing_members.values():
             membership.delete()
 
         # Add new memberships
         ProjectMembership.objects.bulk_create(new_members)
-
         return instance
 
     def create(self, validated_data):
