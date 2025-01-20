@@ -116,7 +116,6 @@ class MembershipViewSet(
         return self.queryset.filter(team__in=self.request.user.teams.all())
 
 
-
 @extend_schema(tags=["teams"])
 @extend_schema_view(
     create=extend_schema(operation_id="invitations_create"),
