@@ -212,6 +212,17 @@ class MembershipViewSetTest(APITestCase):
         response = self.client.put(reverse('teams:membership-detail', kwargs={'pk': self.other_team_membership.id}), {'role': ROLE_ADMIN})
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
+    def test_user_names_can_be_updated_via_membership_update(self):
+        self.client.force_authenticate(user=self.team_admin)
+        response = self.client.put(reverse('teams:membership-detail', kwargs={'pk': self.team_membership_member1.id}), {'role': ROLE_MEMBER, 'first_name': 'John', 'last_name': 'Doe'})
+        print(response.data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.team_membership_member1.refresh_from_db()
+        self.assertEqual(self.team_membership_member1.user.first_name, 'John')
+        self.assertEqual(self.team_membership_member1.user.last_name, 'Doe')
+        self.assertEqual(response.data['first_name'], 'John')
+        self.assertEqual(response.data['last_name'], 'Doe')
+
     
 class InvitationViewSetTest(APITestCase):
     def setUp(self):

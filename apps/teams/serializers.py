@@ -11,10 +11,12 @@ from django.contrib.auth import get_user_model
 
 from apps.deliverables.serializers import BaseProjectSerializer
 from apps.utils.feature_flags import get_active_flags_for_team
+
+
 class MembershipSerializer(serializers.ModelSerializer):
     user_id = serializers.ReadOnlyField(source="user.id")
-    first_name = serializers.ReadOnlyField(source="user.first_name")
-    last_name = serializers.ReadOnlyField(source="user.last_name")
+    first_name = serializers.CharField(source="user.first_name", required=False)
+    last_name = serializers.CharField(source="user.last_name", required=False)
     display_name = serializers.ReadOnlyField(source="user.get_display_name")
     email = serializers.ReadOnlyField(source="user.email")
     is_active = serializers.ReadOnlyField(source="user.is_active")
@@ -22,6 +24,15 @@ class MembershipSerializer(serializers.ModelSerializer):
     class Meta:
         model = Membership
         fields = ("id", "user_id", "first_name", "last_name", "display_name", "role", "email", "is_active")
+
+    def update(self, instance, validated_data):
+        validated_user_data = validated_data.pop("user", {})
+        instance.user.first_name = validated_user_data.pop("first_name", instance.user.first_name)
+        instance.user.last_name = validated_user_data.pop("last_name", instance.user.last_name)
+        instance.user.save()
+        instance.role = validated_data.pop("role", instance.role)
+        instance.save()
+        return instance
 
 
 class InvitationSerializer(serializers.ModelSerializer):
