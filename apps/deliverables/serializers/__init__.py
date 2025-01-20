@@ -40,6 +40,19 @@ class ProjectMembershipSerializer(serializers.ModelSerializer):
         fields = ['user_id', 'first_name', 'last_name', 'display_name', 'role']
 
 
+class ProjectMembershipAddSerializer(serializers.Serializer):
+    user_ids = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(), many=True)
+
+    def validate(self, data):
+        project_id = self.context['view'].kwargs.get('pk')
+        project = Project.objects.get(id=project_id)
+        if data.get('user_ids'):
+            for user in data.get('user_ids'):
+                if not user.is_member_of_team(project.team):
+                    raise serializers.ValidationError("All members must be a member of the team.")
+        return data
+
+
 class BaseProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project

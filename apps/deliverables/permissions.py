@@ -1,6 +1,6 @@
 from rest_framework import permissions
 from rest_framework.request import Request
-
+from django.urls import reverse
 from .models import Project, SubmittalItem
 
 
@@ -11,12 +11,12 @@ class ProjectAccessPermissions(permissions.BasePermission):
     Members of the project still have read-only access.
     """
 
-    def has_permission(self, request, view):
+    def has_permission(self, request: Request, view):
         # Allow read operations for any authenticated user
         if request.method in permissions.SAFE_METHODS:
             return request.user.is_authenticated
         
-        if request.method == 'POST':
+        if request.method == 'POST' and request.path == reverse('deliverables:project-list'):
             team_id = request.data.get('team')
             if not team_id:
                 return False
@@ -31,6 +31,10 @@ class ProjectAccessPermissions(permissions.BasePermission):
         # so we'll always allow GET, HEAD or OPTIONS requests for members
         if request.method == 'DELETE':
             return request.user.is_admin_for_team(obj.team)
+        
+        # Allow members to add users to a project
+        if request.path == reverse('deliverables:project-members-add', kwargs={'pk': obj.id}):
+            return request.user.is_member_of_project(obj)
         return self._view_for_members_edit_for_admins(request, obj)
     
 

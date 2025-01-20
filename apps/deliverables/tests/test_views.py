@@ -469,16 +469,79 @@ class ProjectViewSetTests(APITestCase):
         self.assertEqual(response.data['non_field_errors'][0], "You are not authorized to create a project for this team.")
 
 
-    # def test_company_member_can_add_users_to_project_with_addition_endpoint(self):
-    #     """Test that a company member can add users to a project with the addition endpoint"""
-    #     self.client.force_authenticate(user=self.company_member)
-    #     response = self.client.post(reverse('deliverables:project-members-add', kwargs={'pk': self.existing_project.id}), {
-    #         'members': [
-    #             {'user_id': new_user.id, 'role': ROLE_PROJECT_MEMBER}
-    #         ]
-    #     })
-    #     self.assertEqual(response.status_code, status.HTTP_200_OK)
+    def test_project_member_can_add_users_to_project_with_addition_endpoint(self):
+        """Test that a company member can add users to a project with the addition endpoint"""
+        ProjectMembership.objects.create(
+            project=self.existing_project,
+            user=self.company_member,
+            role=ROLE_PROJECT_MEMBER
+        )
+        new_user = self.User.objects.create_user(
+            username='new_user',
+            password='password123'
+        )
+        TeamMembership.objects.create(
+            user=new_user,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.post(reverse('deliverables:project-members-add', kwargs={'pk': self.existing_project.id}), {
+            'user_ids': [
+                new_user.id
+            ]
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(ProjectMembership.objects.filter(project=self.existing_project, user=new_user).count(), 1)
+        self.assertEqual(ProjectMembership.objects.get(project=self.existing_project, user=new_user).role, ROLE_PROJECT_MEMBER)
 
+    def test_project_admin_can_add_users_to_project_with_addition_endpoint(self):
+        """Test that a company member can add users to a project with the addition endpoint"""
+        ProjectMembership.objects.create(
+            project=self.existing_project,
+            user=self.company_member,
+            role=ROLE_PROJECT_ADMIN
+        )
+        new_user = self.User.objects.create_user(
+            username='new_user',
+            password='password123'
+        )
+        TeamMembership.objects.create(
+            user=new_user,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.post(reverse('deliverables:project-members-add', kwargs={'pk': self.existing_project.id}), {
+            'user_ids': [
+                new_user.id
+            ]
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(ProjectMembership.objects.filter(project=self.existing_project, user=new_user).count(), 1)
+        self.assertEqual(ProjectMembership.objects.get(project=self.existing_project, user=new_user).role, ROLE_PROJECT_MEMBER)
+
+    def test_project_non_member_cannot_add_users_to_project_with_addition_endpoint(self):
+        """Test that a user that is not a member of the project cannot add users to a project with the addition endpoint"""
+        new_user = self.User.objects.create_user(
+            username='new_user',
+            password='password123'
+        )
+        TeamMembership.objects.create(
+            user=new_user,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.post(reverse('deliverables:project-members-add', kwargs={'pk': self.existing_project.id}), {
+            'user_ids': [
+                new_user.id
+            ]
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
 class UploadFileTests(APITestCase):
