@@ -22,7 +22,7 @@ from django.http import HttpResponse
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, Case, When, IntegerField
-from django.db import connection
+from django.db import connection, transaction, IntegrityError
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -50,6 +50,7 @@ from apps.teams.models import Team, Flag
 from apps.users.models import CustomUser
 from .serializers import (
     ProjectDetailsSerializer,
+    ProjectMembershipAddSerializer,
     ProjectListSerializer,
     ProjectWriteSerializer,
     FileUploadSerializer,
@@ -61,6 +62,7 @@ from .serializers import (
 )
 from .models import (
     Project,
+    ProjectMembership,
     UploadedFile,
     SubmittalItem,
     SubmittalItemList,
@@ -71,6 +73,7 @@ from .models import (
     NoticeMatch,
     ProcoreToken,
     ProcoreSubmittalTypeMapping,
+    ROLE_PROJECT_MEMBER,
 )
 from .permissions import (
     ProjectAccessPermissions,
@@ -232,6 +235,26 @@ class ProjectViewSet(viewsets.ModelViewSet):
         project.save()
         return Response( {"status": f"Project {status_message} successfully."},
         status=status.HTTP_200_OK )
+    
+    @action(detail=True, methods=['post'], url_path='members-add')
+    def members_add(self, request, pk=None):
+        project = self.get_object()
+        serializer = ProjectMembershipAddSerializer(data=request.data, context={'view': self})
+        serializer.is_valid(raise_exception=True)
+        users = serializer.validated_data.get('user_ids', [])
+        with transaction.atomic():
+            for user in users:
+                try:
+                    ProjectMembership.objects.create(
+                        project=project,
+                        user=user,
+                        role=ROLE_PROJECT_MEMBER
+                    )
+                except IntegrityError:
+                    # User is already in the project
+                    continue
+        return Response( {"status": f"Users added to project successfully."}, status=status.HTTP_200_OK)
+
 
 
     @extend_schema(

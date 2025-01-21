@@ -40,6 +40,19 @@ class ProjectMembershipSerializer(serializers.ModelSerializer):
         fields = ['user_id', 'first_name', 'last_name', 'display_name', 'role']
 
 
+class ProjectMembershipAddSerializer(serializers.Serializer):
+    user_ids = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(), many=True)
+
+    def validate(self, data):
+        project_id = self.context['view'].kwargs.get('pk')
+        project = Project.objects.get(id=project_id)
+        if data.get('user_ids'):
+            for user in data.get('user_ids'):
+                if not user.is_member_of_team(project.team):
+                    raise serializers.ValidationError("All members must be a member of the team.")
+        return data
+
+
 class BaseProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
@@ -67,7 +80,7 @@ class ProjectWriteSerializer(BaseProjectSerializer):
     team = serializers.PrimaryKeyRelatedField(queryset=Team.objects.all())
 
     def validate(self, data):
-        team = data.get('team')
+        team: Team = data.get('team')
         members = data.get('project_memberships')
 
         if self.instance:
@@ -75,7 +88,7 @@ class ProjectWriteSerializer(BaseProjectSerializer):
         else:
             if not team:
                 raise serializers.ValidationError("Team is required to create a project.")
-
+            
         if members:
             for member in members:
                 member_user = member.get('user').get('id')
@@ -84,11 +97,9 @@ class ProjectWriteSerializer(BaseProjectSerializer):
         return data
 
     def update(self, instance, validated_data):
-        print(validated_data)
         memberships_data = validated_data.pop('project_memberships', [])
         # Update project fields
         for attr, value in validated_data.items():
-            print(attr, value)
             setattr(instance, attr, value)
         instance.save()
 
@@ -109,14 +120,12 @@ class ProjectWriteSerializer(BaseProjectSerializer):
             else:
                 # Create new membership
                 new_members.append(ProjectMembership(user_id=user_id, project=instance, role=role))
-
         # Remove memberships not in the update data
         for membership in existing_members.values():
             membership.delete()
 
         # Add new memberships
         ProjectMembership.objects.bulk_create(new_members)
-
         return instance
 
     def create(self, validated_data):

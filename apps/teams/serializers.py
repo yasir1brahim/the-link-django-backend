@@ -74,12 +74,7 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
         )
 
     def get_members(self, obj) -> list[Membership]:
-        if is_admin(self.context["request"].user, obj):
-            return MembershipSerializer(obj.sorted_memberships, many=True).data
-        return MembershipSerializer(
-            [m for m in obj.sorted_memberships if m.user == self.context["request"].user],
-            many=True,
-        ).data
+        return MembershipSerializer(obj.sorted_memberships, many=True).data
 
     def get_project_count(self, obj) -> int:
         return obj.project_set.count()

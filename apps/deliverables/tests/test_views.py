@@ -297,7 +297,7 @@ class ProjectViewSetTests(APITestCase):
     def test_company_admin_can_update_project(self):
         """Test that a company admin can update a project"""
         self.client.force_authenticate(user=self.company_admin)
-        response = self.client.put(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}), {
+        response = self.client.patch(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}), {
             'name': 'Updated Project',
             'project_number': '111111',
             'project_type': 'Updated Type',
@@ -315,7 +315,7 @@ class ProjectViewSetTests(APITestCase):
     def test_superuser_can_update_project(self):
         """Test that a superuser can update a project"""
         self.client.force_authenticate(user=self.superuser)
-        response = self.client.put(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}), {
+        response = self.client.patch(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}), {
             'name': 'Updated Project',
             'project_number': '111111',
             'project_type': 'Updated Type',
@@ -333,11 +333,10 @@ class ProjectViewSetTests(APITestCase):
             role=ROLE_PROJECT_ADMIN
         )
         self.client.force_authenticate(user=self.company_member)
-        response = self.client.put(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}), {
+        response = self.client.patch(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}), {
             'name': 'Updated Project',
             'project_number': '111111',
             'project_type': 'Updated Type',
-            'team': self.team.id,
         })
         print(f"response.data: {response.data}")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -356,11 +355,10 @@ class ProjectViewSetTests(APITestCase):
             role=ROLE_PROJECT_MEMBER
         )
         self.client.force_authenticate(user=self.company_member)
-        response = self.client.put(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}), {
+        response = self.client.patch(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}), {
             'name': 'Updated Project',
             'project_number': '111111',
             'project_type': 'Updated Type',
-            'team': self.team.id,
         })
         print(f"response.data: {response.data}")
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
@@ -402,6 +400,165 @@ class ProjectViewSetTests(APITestCase):
         response = self.client.get(reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_company_admin_can_update_project_members(self):
+        """Test that a company admin can update project members"""
+        self.client.force_authenticate(user=self.company_admin)
+        new_user = self.User.objects.create_user(
+            username='new_user',
+            password='password123'
+        )
+        TeamMembership.objects.create(
+            user=new_user,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+        response = self.client.patch(
+            reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}),
+            data={
+                'members': [
+                    {
+                        'user_id': new_user.id,
+                        'role': ROLE_PROJECT_MEMBER
+                    }
+                ]
+            },
+            format='json'
+        )
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        members = ProjectMembership.objects.filter(project=self.existing_project)
+        self.assertEqual(members.count(), 1)
+        self.assertEqual(members[0].user, new_user)
+        self.assertEqual(members[0].role, ROLE_PROJECT_MEMBER)
+
+    def test_update_project_members_requires_members_to_be_in_project_team(self):
+        """Test that a company admin can update project members"""
+        self.client.force_authenticate(user=self.company_admin)
+        new_user = self.User.objects.create_user(
+            username='new_user',
+            password='password123'
+        )
+        response = self.client.patch(
+            reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}),
+            data={
+                'members': [
+                    {
+                        'user_id': new_user.id,
+                        'role': ROLE_PROJECT_MEMBER
+                    }
+                ]
+            },
+            format='json'
+        )
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['non_field_errors'][0], "All members must be a member of the team.")
+
+    def test_user_must_be_a_member_of_the_new_team(self):
+        """Test that a user must be a member of the new team"""
+        self.client.force_authenticate(user=self.company_admin)
+        other_team = Team.objects.create(name='Other Team', slug='other-team')
+        response = self.client.patch(
+            reverse('deliverables:project-detail', kwargs={'pk': self.existing_project.id}),
+            data={
+                'team': other_team.id,
+            },
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+    def test_project_member_can_add_users_to_project_with_addition_endpoint(self):
+        """Test that a company member can add users to a project with the addition endpoint"""
+        ProjectMembership.objects.create(
+            project=self.existing_project,
+            user=self.company_member,
+            role=ROLE_PROJECT_MEMBER
+        )
+        new_user = self.User.objects.create_user(
+            username='new_user',
+            password='password123'
+        )
+        TeamMembership.objects.create(
+            user=new_user,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.post(reverse('deliverables:project-members-add', kwargs={'pk': self.existing_project.id}), {
+            'user_ids': [
+                new_user.id
+            ]
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(ProjectMembership.objects.filter(project=self.existing_project, user=new_user).count(), 1)
+        self.assertEqual(ProjectMembership.objects.get(project=self.existing_project, user=new_user).role, ROLE_PROJECT_MEMBER)
+
+    def test_adding_user_that_is_already_in_project_is_a_no_op(self):
+        """Test that adding a user that is already in the project is a no-op"""
+        ProjectMembership.objects.create(
+            project=self.existing_project,
+            user=self.company_member,
+            role=ROLE_PROJECT_ADMIN
+        )
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.post(reverse('deliverables:project-members-add', kwargs={'pk': self.existing_project.id}), {
+            'user_ids': [
+                self.company_member.id
+            ]
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(ProjectMembership.objects.filter(project=self.existing_project).count(), 1)
+        self.assertEqual(ProjectMembership.objects.get(project=self.existing_project, user=self.company_member).role, ROLE_PROJECT_ADMIN)
+
+    def test_project_admin_can_add_users_to_project_with_addition_endpoint(self):
+        """Test that a company member can add users to a project with the addition endpoint"""
+        ProjectMembership.objects.create(
+            project=self.existing_project,
+            user=self.company_member,
+            role=ROLE_PROJECT_ADMIN
+        )
+        new_user = self.User.objects.create_user(
+            username='new_user',
+            password='password123'
+        )
+        TeamMembership.objects.create(
+            user=new_user,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.post(reverse('deliverables:project-members-add', kwargs={'pk': self.existing_project.id}), {
+            'user_ids': [
+                new_user.id
+            ]
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(ProjectMembership.objects.filter(project=self.existing_project, user=new_user).count(), 1)
+        self.assertEqual(ProjectMembership.objects.get(project=self.existing_project, user=new_user).role, ROLE_PROJECT_MEMBER)
+
+    def test_project_non_member_cannot_add_users_to_project_with_addition_endpoint(self):
+        """Test that a user that is not a member of the project cannot add users to a project with the addition endpoint"""
+        new_user = self.User.objects.create_user(
+            username='new_user',
+            password='password123'
+        )
+        TeamMembership.objects.create(
+            user=new_user,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+        self.client.force_authenticate(user=self.company_member)
+        response = self.client.post(reverse('deliverables:project-members-add', kwargs={'pk': self.existing_project.id}), {
+            'user_ids': [
+                new_user.id
+            ]
+        })
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
 class UploadFileTests(APITestCase):

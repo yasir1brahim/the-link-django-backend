@@ -102,13 +102,15 @@ class TeamViewSetTest(APITestCase):
         self.assertEqual(response.data['members'][0]['role'], ROLE_ADMIN)
         self.assertEqual(response.data['members'][1]['role'], ROLE_MEMBER)
 
-    def test_team_member_can_only_view_their_own_team_memberships(self):
+    def test_team_member_can_view_all_team_memberships(self):
         self.client.force_authenticate(user=self.team_member)
         response = self.client.get(reverse('teams:team-detail', kwargs={'pk': self.team.id}))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data['members']), 1)
-        self.assertEqual(response.data['members'][0]['user_id'], self.team_member.id)
-        self.assertEqual(response.data['members'][0]['role'], ROLE_MEMBER)
+        self.assertEqual(len(response.data['members']), 2)
+        self.assertEqual(response.data['members'][0]['user_id'], self.team_admin.id)
+        self.assertEqual(response.data['members'][0]['role'], ROLE_ADMIN)
+        self.assertEqual(response.data['members'][1]['user_id'], self.team_member.id)
+        self.assertEqual(response.data['members'][1]['role'], ROLE_MEMBER)
 
     def test_team_admin_cannot_delete_team(self):
         self.client.force_authenticate(user=self.team_admin)
