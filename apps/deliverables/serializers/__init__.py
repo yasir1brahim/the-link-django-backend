@@ -15,6 +15,7 @@ from ..models import (
     DocProcessingStatus,
     Project,
     ProjectMembership,
+    ProjectVersion,
     ExcelExportHeader,
 )
 from ..constants import masterformat_to_section_title_map
@@ -217,6 +218,7 @@ class ProjectDetailsSerializer(BaseProjectSerializer):
 class FileUploadSerializer(serializers.Serializer):
     files = serializers.ListField(child=serializers.FileField())
     project_id = serializers.IntegerField()
+    project_version_id = serializers.IntegerField(required=False)
     extract_notices = serializers.BooleanField(required=False)
 
 
@@ -283,6 +285,8 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
                                                   required=False)
     updated_by = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(),
                                                     required=False)
+    project_version = serializers.PrimaryKeyRelatedField(queryset=ProjectVersion.objects.all(),
+                                                    required=False)
 
     spec_section = serializers.CharField(required=False)
     item_desc = serializers.CharField(required=False)
@@ -326,6 +330,7 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             spec_section = None
         return SubmittalItem.objects.create(
             project_id=validated_data.get('project_id'),
+            project_version=validated_data.get('project_version'),
             updated_by=validated_data.get('updated_by'),
             submittal_description=validated_data.get('item_desc'),
             submittal_content=validated_data.get('para_context'),
@@ -363,6 +368,7 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             'spec_section',
             'item_desc',
             'para_context',
+            'project_version',
             'para_no',
             'type',
             'added_under_submittal_id',

@@ -155,11 +155,11 @@ class TestCreateDefaultProjectVersion(TestCase):
         project_version_2 = NewProjectVersion.objects.get(project=self.project_2)
         self.assertEqual(project_version_1.project, self.project_1)
         self.assertEqual(project_version_1.version_number, 1)
-        self.assertEqual(project_version_1.version_name, "Test Project 1 - Version 1")
+        self.assertEqual(project_version_1.version_name, "Version 1")
         self.assertEqual(project_version_1.created_by, None)
         self.assertEqual(project_version_2.project, self.project_2)
         self.assertEqual(project_version_2.version_number, 1)
-        self.assertEqual(project_version_2.version_name, "Test Project 2 - Version 1")
+        self.assertEqual(project_version_2.version_name, "Version 1")
         self.assertEqual(project_version_2.created_by, None)
 
 

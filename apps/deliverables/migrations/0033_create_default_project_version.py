@@ -19,7 +19,7 @@ def create_default_versions(apps, schema_editor):
         if not ProjectVersion.objects.filter(project=project).exists():
             project_version = ProjectVersion.objects.create(
                 project=project,
-                version_name=f"{project.name} - Version 1",
+                version_name=f"Version 1",
                 version_number=1,
                 created_by=None
             )

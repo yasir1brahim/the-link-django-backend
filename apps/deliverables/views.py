@@ -62,6 +62,7 @@ from .serializers import (
 )
 from .models import (
     Project,
+    ProjectVersion,
     ProjectMembership,
     UploadedFile,
     SubmittalItem,
@@ -80,7 +81,7 @@ from .permissions import (
     SubmittalItemAccessPermissions,
     SubmittalListAccessPermissions,
 )
-from apps.utils.feature_flags import is_notices_feature_flag_active
+from apps.utils.feature_flags import is_notices_feature_flag_active, is_versioning_feature_flag_active
 from .constants import masterformat_to_section_title_map
 from .serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
 from .serializers.procore import (ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer,
@@ -406,7 +407,17 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'))
+        project_id = self.kwargs.get('project_id')
+        project = get_object_or_404(Project, id=project_id)
+        project_version = serializer.validated_data.get('project_version')
+        print(f"project_version: {project_version}")
+        if is_versioning_feature_flag_active(self.request.user, project.team):
+            if not project_version:
+                raise DRFValidationError("project_version_id is required when versioning is active")
+            serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'), project_version=project_version)
+        else:
+            project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+            serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'), project_version=project_version)
 
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
@@ -1005,7 +1016,17 @@ def upload_file(request):
     not_parsed = []
 
     is_notices_flag_active = is_notices_feature_flag_active(request.user, project.team)
+    is_versioning_flag_active = is_versioning_feature_flag_active(request.user, project.team)
+
     print(f"is_notices_flag_active: {is_notices_flag_active}")
+    print(f"is_versioning_flag_active: {is_versioning_flag_active}")
+
+    if not is_versioning_flag_active:
+        project_version_id = ProjectVersion.objects.filter(project=project).order_by('-created_at').first().id
+    else:
+        project_version_id = serializer.validated_data.get('project_version_id')
+        if not project_version_id:
+            return Response({'detail': 'No files provided'}, status=status.HTTP_400_BAD_REQUEST)
     
     for file in files:
         try:
@@ -1020,8 +1041,10 @@ def upload_file(request):
                 already_existing_files.append(file.name)
                 continue
 
+
             uploaded_file = UploadedFile.objects.create(
                 project_id=project_id,
+                project_version_id=project_version_id,
                 uploaded_by=user,
                 name=file.name,
                 md5=file_md5,
@@ -1114,11 +1137,15 @@ def spec_status_webhook(request):
             document_id=int(request_data['document_id']),
             masterformat_section__masterformat_number=request_data['master_format_section_number']
         ).first()
+        project_version_id = request_data.get('project_version_id')
+        if not project_version_id:
+            project_version_id = ProjectVersion.objects.filter(project=request_data['project_id']).order_by('-created_at').first().id
         for submittal in request_data['submittals']:
             submittal_text = change_encode_value(submittal['submittal_text'])
             masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=request_data['master_format_section_number'])
             submittal_item = SubmittalItem.objects.create(
                 project_id=request_data['project_id'],
+                project_version_id=project_version_id,
                 masterformat_section=masterformat_section,
                 spec_section=spec_section,
                 submittal_type=submittal['submittal_type'],

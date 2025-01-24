@@ -9,7 +9,7 @@ from rest_framework import status
 
 from apps.teams.models import Team, Membership as TeamMembership
 from apps.teams.roles import ROLE_ADMIN
-from apps.deliverables.models import Project, UploadedFile, SubmittalItem
+from apps.deliverables.models import Project, UploadedFile, SubmittalItem, ProjectVersion
 from copy import deepcopy
 from apps.deliverables.tests.test_data.sample_webhook import (
     sample_processing_webhook,
@@ -30,6 +30,7 @@ class TestSpecStatusWebhook(APITestCase):
             project_number="123456",
             team=self.team,
         )
+        self.default_project_version = ProjectVersion.objects.get(project=self.project)
         TeamMembership.objects.create(
             user=self.user,
             team=self.team,
@@ -43,7 +44,7 @@ class TestSpecStatusWebhook(APITestCase):
         self.webhook_url = reverse('deliverables:spec_status_webhook')
 
     @patch('apps.deliverables.views.parse_spec')
-    def test_spec_status_webhook_end_to_end_success(self, mock_parse_spec):
+    def test_spec_status_webhook_end_to_end_success_with_null_project_version_id(self, mock_parse_spec):
         # Upload a file to the project
         upload_response = self.client.post(reverse('deliverables:upload_file'), {
             'project_id': self.project.id,
@@ -52,6 +53,7 @@ class TestSpecStatusWebhook(APITestCase):
         self.assertEqual(upload_response.status_code, status.HTTP_200_OK)
         uploaded_file = UploadedFile.objects.get(project=self.project)
         self.assertEqual(uploaded_file.processing_status, 'PENDING_PROCESSING')
+        self.assertEqual(uploaded_file.project_version, self.default_project_version)
 
         # Update test data to use correct IDs
         sample_processing_webhook['document_id'] = uploaded_file.id
@@ -97,6 +99,8 @@ class TestSpecStatusWebhook(APITestCase):
             submittal_item = submittal_items.filter(paragraph_number=expected_paragraph_number).first()
             self.assertEqual(int(submittal_item.submittal_number), expected_submittal_number)
             self.assertEqual(submittal_item.paragraph_number, expected_paragraph_number)
+            # check that the project version is the default project version
+            self.assertEqual(submittal_item.project_version, self.default_project_version)
 
         # check that get submittal items API returns the submittal items in the correct order
         url = reverse('submittal-item-list', kwargs={'project_id': self.project.id})
@@ -113,6 +117,86 @@ class TestSpecStatusWebhook(APITestCase):
             self.assertEqual(submittal_item['para_no'], expected_paragraph_numbers_in_order[index])
             self.assertEqual(int(displayed_submittal_number), index + 1)
 
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.parse_spec')
+    def test_spec_status_webhook_end_to_end_success_with_provided_project_version_id(self, mock_parse_spec, mock_is_versioning_feature_flag_active):
+        project_version_2 = ProjectVersion.objects.create(project=self.project, version_number=2, version_name="Version 2")
+        project_version_3 = ProjectVersion.objects.create(project=self.project, version_number=3, version_name="Version 3")
+        # Upload a file to the project
+        upload_response = self.client.post(reverse('deliverables:upload_file'), {
+            'project_id': self.project.id,
+            'files': [self.mock_file],
+            'project_version_id': project_version_2.id,
+        })
+        self.assertEqual(upload_response.status_code, status.HTTP_200_OK)
+        uploaded_file = UploadedFile.objects.get(project=self.project)
+        self.assertEqual(uploaded_file.processing_status, 'PENDING_PROCESSING')
+        self.assertEqual(uploaded_file.project_version, project_version_2)
+
+        # Update test data to use correct IDs
+        sample_processing_webhook['document_id'] = uploaded_file.id
+        sample_processing_webhook['project_id'] = self.project.id
+        sample_processing_webhook['user_id'] = self.user.id
+        sample_processing_webhook['project_version_id'] = project_version_2.id
+        sample_subsections_extracted_webhook['document_id'] = uploaded_file.id
+        sample_subsections_extracted_webhook['project_id'] = self.project.id
+        sample_subsections_extracted_webhook['user_id'] = self.user.id
+        sample_subsections_extracted_webhook['project_version_id'] = project_version_2.id
+        sample_processed_section_webhook['document_id'] = uploaded_file.id
+        sample_processed_section_webhook['project_id'] = self.project.id
+        sample_processed_section_webhook['user_id'] = self.user.id
+        sample_processed_section_webhook['project_version_id'] = project_version_2.id
+    
+
+        # Simulate receiving the processing webhook
+        response = self.client.post(self.webhook_url, data=json.dumps(sample_processing_webhook), content_type='application/json')
+        print(response.data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Simulate receiving the subsections extracted webhook
+        response = self.client.post(self.webhook_url, data=json.dumps(sample_subsections_extracted_webhook), content_type='application/json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        uploaded_file.refresh_from_db()
+        self.assertEqual(uploaded_file.processing_status, 'SUBSECTIONS_EXTRACTED')
+
+        # Simulate receiving the processed section webhook
+        response = self.client.post(self.webhook_url, data=json.dumps(sample_processed_section_webhook), content_type='application/json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        uploaded_file.refresh_from_db()
+        self.assertEqual(uploaded_file.processing_status, 'PROCESSED')
+
+        # check that the submittal items were created as expected
+        submittal_items = SubmittalItem.objects.filter(project=self.project).order_by('heirarchical_paragraph_number')
+        print([submittal_item.heirarchical_paragraph_number for submittal_item in submittal_items])
+
+        self.assertEqual(submittal_items.count(), 53)
+        self.assertEqual(submittal_items[0].submittal_type, 'Action/Information Submittals')
+        self.assertEqual(submittal_items[0].submittal_description, 'Product Data')
+        self.assertEqual(submittal_items[0].submittal_content, 'Product Data:  Submit preprinted data for each type of manufactured material')
+
+        # check that submittal numbers were assigned as expected
+        for index, expected_paragraph_number in enumerate(expected_paragraph_numbers_in_order):
+            expected_submittal_number = index + 1
+            submittal_item = submittal_items.filter(paragraph_number=expected_paragraph_number).first()
+            self.assertEqual(int(submittal_item.submittal_number), expected_submittal_number)
+            self.assertEqual(submittal_item.paragraph_number, expected_paragraph_number)
+            # check that the project version is the given project version
+            self.assertEqual(submittal_item.project_version, project_version_2)
+
+        # check that get submittal items API returns the submittal items in the correct order
+        url = reverse('submittal-item-list', kwargs={'project_id': self.project.id})
+        print(url)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        print([submittal_item['submittal_number'] for submittal_item in response.data['message']])
+        self.assertEqual(len(response.data['message']), 53)
+
+        for index, submittal_item in enumerate(response.data['message']):
+            displayed_submittal_number = submittal_item['submittal_number']
+            if displayed_submittal_number.endswith('.0'):
+                displayed_submittal_number = displayed_submittal_number[:-2]
+            self.assertEqual(submittal_item['para_no'], expected_paragraph_numbers_in_order[index])
+            self.assertEqual(int(displayed_submittal_number), index + 1)
 
 
     @patch('apps.deliverables.views.parse_spec')

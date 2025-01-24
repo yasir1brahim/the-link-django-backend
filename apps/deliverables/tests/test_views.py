@@ -9,7 +9,7 @@ from apps.teams.models import Team, Membership as TeamMembership
 from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
 from apps.deliverables.models import (Project, ProjectMembership, SubmittalItemList,
     SubmittalItem, MasterFormatSection, ROLE_PROJECT_ADMIN, ROLE_PROJECT_MEMBER,
-    SpecSection, DocProcessingStatus, UploadedFile)
+    SpecSection, DocProcessingStatus, UploadedFile, ProjectVersion)
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -689,6 +689,45 @@ class UploadFileTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=False)
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_versioning_feature_flag_inactive_uploads_to_default_version(self, mock_invoke_lambda, mock_is_versioning_feature_flag_active):
+        """Test that when versioning is inactive, uploads are associated with the default version of the project"""
+        self.client.force_authenticate(user=self.company_admin)
+        response = self.client.post(reverse('deliverables:upload_file'), {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(ProjectVersion.objects.count(), 1)
+        self.assertEqual(UploadedFile.objects.get(project=self.existing_project).project_version.version_number, 1)
+
+    
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_versioning_feature_flag_active_requires_project_version_id(self, mock_invoke_lambda, mock_is_versioning_feature_flag_active):
+        """Test that when versioning is active, uploads require a project version ID"""
+        self.client.force_authenticate(user=self.company_admin)
+        response = self.client.post(reverse('deliverables:upload_file'), {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_versioning_feature_flag_active_saves_to_given_project_version(self, mock_invoke_lambda, mock_is_versioning_feature_flag_active):
+        """Test that when versioning is active, uploads are saved to the given project version"""
+        self.client.force_authenticate(user=self.company_admin)
+        project_version_2 = ProjectVersion.objects.create(project=self.existing_project, version_number=2, version_name="Version 2")
+        response = self.client.post(reverse('deliverables:upload_file'), {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+            'project_version_id': project_version_2.id,
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(UploadedFile.objects.get(project=self.existing_project).project_version, project_version_2)
+
 
 
 class SubmittalItemViewSetTests(APITestCase):
@@ -716,6 +755,7 @@ class SubmittalItemViewSetTests(APITestCase):
             name='Project 1',
             team=self.team,
         )
+        self.project_version_1 = ProjectVersion.objects.get(project=self.project)
         ProjectMembership.objects.create(
             project=self.project,
             user=self.user,
@@ -727,9 +767,11 @@ class SubmittalItemViewSetTests(APITestCase):
             project=self.project,
             masterformat_section=self.masterformat_section,
             parsing_method='PLACEHOLDER',
+            project_version=self.project_version_1,
         )
         self.document = UploadedFile.objects.create(
             project=self.project,
+            project_version=self.project_version_1,
             uploaded_by=self.user,
             document_path='test_file.txt',
             md5='1234567890',
@@ -803,7 +845,8 @@ class SubmittalItemViewSetTests(APITestCase):
             spec_section=spec2,
             paragraph_number="2.1",
             submittal_number="2",
-            submittal_type="Shop Drawings"
+            submittal_type="Shop Drawings",
+            project_version=self.project_version_1,
         )
         SubmittalItem.objects.create(
             project=self.project,
@@ -812,7 +855,8 @@ class SubmittalItemViewSetTests(APITestCase):
             spec_section=spec1,
             paragraph_number="1.1",
             submittal_number="1",
-            submittal_type="Product Data"
+            submittal_type="Product Data",
+            project_version=self.project_version_1,
         )
         SubmittalItem.objects.create(
             project=self.project,
@@ -821,7 +865,8 @@ class SubmittalItemViewSetTests(APITestCase):
             spec_section=spec1,
             paragraph_number="1.2",
             submittal_number="3",
-            submittal_type="Samples"
+            submittal_type="Samples",
+            project_version=self.project_version_1,
         )
         SubmittalItem.objects.create(
             project=self.project,
@@ -830,7 +875,8 @@ class SubmittalItemViewSetTests(APITestCase):
             spec_section=spec3,
             paragraph_number="3.1",
             submittal_number="3",
-            submittal_type="Samples"
+            submittal_type="Samples",
+            project_version=self.project_version_1,
         )
         SubmittalItem.objects.create(
             project=self.project,
@@ -839,7 +885,8 @@ class SubmittalItemViewSetTests(APITestCase):
             spec_section=spec4,
             paragraph_number="4.1",
             submittal_number="4",
-            submittal_type="Samples"
+            submittal_type="Samples",
+            project_version=self.project_version_1,
         )
         SubmittalItem.objects.create(
             project=self.project,
@@ -848,7 +895,8 @@ class SubmittalItemViewSetTests(APITestCase):
             spec_section=spec4,
             paragraph_number="4.1",
             submittal_number="5",
-            submittal_type="Samples"
+            submittal_type="Samples",
+            project_version=self.project_version_1,
         )
 
     def test_default_ordering(self):
@@ -1001,26 +1049,31 @@ class SubmittalItemViewSetTests(APITestCase):
         """Test that the submittal item list returns filter values in lexical order"""
         SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version_1,
             masterformat_section=self.masterformat_section,
             paragraph_number='1.2',
         )
         SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version_1,
             masterformat_section=self.masterformat_section,
             paragraph_number='1.1',
         )
         SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version_1,
             masterformat_section=self.masterformat_section,
             paragraph_number='1.3-1',
         )
         SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version_1,
             masterformat_section=self.masterformat_section,
             paragraph_number='1.3',
         )
         SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version_1,
             masterformat_section=self.masterformat_section,
             paragraph_number='1.3-1',
             submittal_type='ZZZ',
@@ -1029,6 +1082,7 @@ class SubmittalItemViewSetTests(APITestCase):
 
         SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version_1,
             masterformat_section=MasterFormatSection.objects.create(masterformat_number='102000'),
             paragraph_number='1.3',
             submittal_type='Type 2',
@@ -1037,6 +1091,7 @@ class SubmittalItemViewSetTests(APITestCase):
         
         SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version_1,
             masterformat_section=MasterFormatSection.objects.create(masterformat_number='123456'),
             paragraph_number='1.3',
             submittal_type='Type 1',
@@ -1044,6 +1099,7 @@ class SubmittalItemViewSetTests(APITestCase):
         )
         SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version_1,
             masterformat_section=MasterFormatSection.objects.create(masterformat_number='033001'),
             paragraph_number='1.3',
             submittal_type='Type 1',
@@ -1071,6 +1127,58 @@ class SubmittalItemViewSetTests(APITestCase):
         response = self.client.post(reverse('submittal-item-list', kwargs={'project_id': self.project.id}), post_payload)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(1, len(SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111")))
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=False)
+    def test_create_submittal_with_versioning_inactive_uses_default_project_version(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.user)
+        post_payload = {
+            'document': self.document.id,
+            'spec_section': "111111",  # new spec section
+            'item_desc': "Test",
+            'para_context': "Test context",
+            'para_no': "1.1",
+            'type': "Test type",
+        }
+        self.assertEqual(0, len(SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111")))
+        response = self.client.post(reverse('submittal-item-list', kwargs={'project_id': self.project.id}), post_payload)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(1, len(SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111")))
+        default_project_version = ProjectVersion.objects.filter(project=self.project).order_by('-created_at').first()
+        self.assertEqual(default_project_version, SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111").first().project_version)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_create_submittal_with_versioning_active_uses_provided_project_version(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.user)
+        project_version_2 = ProjectVersion.objects.create(project=self.project, version_number=2, version_name="Version 2")
+        project_version_3 = ProjectVersion.objects.create(project=self.project, version_number=3, version_name="Version 3")
+        post_payload = {
+            'document': self.document.id,
+            'spec_section': "111111",  # new spec section
+            'item_desc': "Test",
+            'para_context': "Test context",
+            'para_no': "1.1",
+            'type': "Test type",
+            'project_version': project_version_2.id,
+        }
+        self.assertEqual(0, len(SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111")))
+        response = self.client.post(reverse('submittal-item-list', kwargs={'project_id': self.project.id}), post_payload)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(1, len(SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111")))
+        self.assertEqual(project_version_2, SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111").first().project_version)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_create_submittal_with_versioning_active_and_no_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.user)
+        post_payload = {
+            'document': self.document.id,
+            'spec_section': "111111",  # new spec section
+            'item_desc': "Test",
+            'para_context': "Test context",
+            'para_no': "1.1",
+            'type': "Test type",
+        }
+        response = self.client.post(reverse('submittal-item-list', kwargs={'project_id': self.project.id}), post_payload)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 
@@ -1214,6 +1322,7 @@ class SubmittalItemListViewSetTests(APITestCase):
         self.submittal_item_not_in_list = SubmittalItem.objects.create(
             project=self.project,
             masterformat_section=MasterFormatSection.objects.create(masterformat_number='033001'),
+            project_version=self.project_version_1,
         )
 
     def test_team_member_can_see_submittal_lists_for_their_project(self):
@@ -1299,6 +1408,7 @@ class TestCombineRows(APITestCase):
         for i in range(3):
             item = SubmittalItem.objects.create(
                 project=self.project,
+                project_version=self.project_version_1,
                 masterformat_section=self.masterformat_section,
                 submittal_description=f'Test Description {i}',
                 submittal_type=f'Type {i}',
