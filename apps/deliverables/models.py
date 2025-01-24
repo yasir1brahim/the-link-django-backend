@@ -32,6 +32,22 @@ class Project(BaseModel):
 
     def __str__(self):
         return self.name
+    
+
+class ProjectVersion(BaseModel):
+    project = models.ForeignKey("Project", on_delete=models.CASCADE, related_name="versions")
+    version_number = models.PositiveSmallIntegerField()
+    version_name = models.CharField(max_length=256, blank=True, null=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="created_project_versions", blank=True, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['project', 'version_number'], name='unique_project_version_number'),
+            models.UniqueConstraint(fields=['project', 'version_name'], name='unique_project_version_name'),
+        ]
+
+    def __str__(self):
+        return f"{self.project.name} - {self.version_number}: {self.version_name}"
 
 
 ROLE_PROJECT_ADMIN = "project_admin"
@@ -82,6 +98,7 @@ class UploadedFile(BaseModel):
     legacy_id = models.IntegerField(blank=True, null=True)
 
     project = models.ForeignKey("Project", on_delete=models.CASCADE)
+    project_version = models.ForeignKey("ProjectVersion", on_delete=models.CASCADE, blank=True, null=True)
     uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, blank=True, null=True)
 
     document_path = models.CharField(max_length=256)
@@ -129,6 +146,7 @@ class SubmittalItem(BaseModel):
     legacy_updated_at = models.DateTimeField(blank=True, null=True)
 
     project = models.ForeignKey("Project", on_delete=models.CASCADE)
+    project_version = models.ForeignKey("ProjectVersion", on_delete=models.CASCADE, blank=True, null=True)
     document = models.ForeignKey("UploadedFile", on_delete=models.CASCADE, blank=True, null=True)
     masterformat_section = models.ForeignKey("MasterFormatSection", on_delete=models.PROTECT)
     spec_section = models.ForeignKey("SpecSection", on_delete=models.PROTECT, blank=True, null=True)
@@ -192,6 +210,7 @@ class SubmittalItemList(BaseModel):
     name = models.CharField(max_length=256)
     description = models.TextField(blank=True)
     project = models.ForeignKey("Project", on_delete=models.CASCADE)
+    project_version = models.ForeignKey("ProjectVersion", on_delete=models.CASCADE, blank=True, null=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, blank=True, null=True)
     submittals = models.ManyToManyField("SubmittalItem", blank=True, related_name="submittal_lists")
 
@@ -228,6 +247,12 @@ class NoticeMatch(BaseModel):
         "Project",
         on_delete=models.CASCADE,
         related_name="notice_matches",
+    )
+    project_version = models.ForeignKey(
+        "ProjectVersion",
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
     )
     document = models.ForeignKey(
         "UploadedFile",
