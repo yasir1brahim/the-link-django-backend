@@ -1,5 +1,7 @@
 import time
 from unittest.mock import patch
+
+from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APITestCase, APIClient
@@ -621,6 +623,25 @@ class UploadFileTests(APITestCase):
             'files': [self.mock_file],
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        uploaded_file = UploadedFile.objects.get(project=self.existing_project)
+        default_project_version = ProjectVersion.objects.get(project=self.existing_project)
+        expected_payload = {
+            "object_key": uploaded_file.document_path,
+            "document_id": str(uploaded_file.id),
+            "filename": self.mock_file.name,
+            "user_id": str(self.company_member.id),
+            "project_id": str(self.existing_project.id),
+            "project_version_id": str(default_project_version.id),
+            "chunk_size": 1200,
+            "chunk_overlap": 100,
+            "callback_url": settings.BACKEND_CALLBACK_URL,
+            "ENVIRONMENT": settings.ENVIRONMENT,
+            "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
+        }
+        mock_invoke_lambda.assert_called_with(
+            payload=expected_payload,
+            lambda_url=settings.LAMBDA_FUNCTION_URL
+        )
 
     @patch('apps.deliverables.views.invoke_lambda')
     def test_project_member_can_upload_upto_250_files_at_once(self, mock_invoke_lambda):
@@ -700,7 +721,26 @@ class UploadFileTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(ProjectVersion.objects.count(), 1)
-        self.assertEqual(UploadedFile.objects.get(project=self.existing_project).project_version.version_number, 1)
+        uploaded_file = UploadedFile.objects.get(project=self.existing_project)
+        default_project_version = ProjectVersion.objects.get(project=self.existing_project)
+        self.assertEqual(uploaded_file.project_version, default_project_version)
+        expected_payload = {
+            "object_key": uploaded_file.document_path,
+            "document_id": str(uploaded_file.id),
+            "filename": self.mock_file.name,
+            "user_id": str(self.company_admin.id),
+            "project_id": str(self.existing_project.id),
+            "project_version_id": str(default_project_version.id),
+            "chunk_size": 1200,
+            "chunk_overlap": 100,
+            "callback_url": settings.BACKEND_CALLBACK_URL,
+            "ENVIRONMENT": settings.ENVIRONMENT,
+            "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
+        }
+        mock_invoke_lambda.assert_called_with(
+            payload=expected_payload,
+            lambda_url=settings.LAMBDA_FUNCTION_URL
+        )
 
     
     @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
@@ -726,7 +766,26 @@ class UploadFileTests(APITestCase):
             'project_version_id': project_version_2.id,
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(UploadedFile.objects.get(project=self.existing_project).project_version, project_version_2)
+        uploaded_file = UploadedFile.objects.get(project=self.existing_project)
+        self.assertEqual(uploaded_file.project_version, project_version_2)
+        expected_payload = {
+            "object_key": uploaded_file.document_path,
+            "document_id": str(uploaded_file.id),
+            "filename": self.mock_file.name,
+            "user_id": str(self.company_admin.id),
+            "project_id": str(self.existing_project.id),
+            "project_version_id": str(project_version_2.id),
+            "chunk_size": 1200,
+            "chunk_overlap": 100,
+            "callback_url": settings.BACKEND_CALLBACK_URL,
+            "ENVIRONMENT": settings.ENVIRONMENT,
+            "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
+        }
+        mock_invoke_lambda.assert_called_with(
+            payload=expected_payload,
+            lambda_url=settings.LAMBDA_FUNCTION_URL
+        )
+        
 
 
 
@@ -1297,6 +1356,7 @@ class SubmittalItemListViewSetTests(APITestCase):
             name='Project 1',
             team=self.team,
         )
+        self.project_version_1 = ProjectVersion.objects.get(project=self.project)
         ProjectMembership.objects.create(
             project=self.project,
             user=self.team_member,
@@ -1307,15 +1367,18 @@ class SubmittalItemListViewSetTests(APITestCase):
             name='Project 2',
             team=self.team,
         )
+        self.other_project_version_1 = ProjectVersion.objects.get(project=self.other_project)
 
         self.submittal_item_list = SubmittalItemList.objects.create(
             name='Submittal Item List 1',
             project=self.project,
+            project_version=self.project_version_1,
         )
 
         self.submittal_item_in_list = SubmittalItem.objects.create(
             project=self.project,
             masterformat_section=MasterFormatSection.objects.create(masterformat_number='033000'),
+            project_version=self.project_version_1,
         )
         self.submittal_item_in_list.submittal_lists.add(self.submittal_item_list)
 
@@ -1374,6 +1437,43 @@ class SubmittalItemListViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['created_by'], self.team_member.id)
 
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=False)
+    def test_if_versioning_is_not_active_project_version_is_set_to_default_version(self, mock_is_versioning_feature_flag_active):
+        """Test that if versioning is not active, the project version is set to the default version"""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.post(reverse(
+            'submittal-list-list',
+            kwargs={'project_id': self.project.id}), 
+            data={'name': 'New Submittal Item List', 'submittals': [self.submittal_item_in_list.id]}
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(SubmittalItemList.objects.get(id=response.data['id']).project_version, self.project_version_1)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_if_versioning_is_active_project_version_is_set_to_given_version(self, mock_is_versioning_feature_flag_active):
+        """Test that if versioning is not active, the project version is set to the default version"""
+        self.client.force_authenticate(user=self.team_member)
+        project_version_2 = ProjectVersion.objects.create(project=self.project, version_number=2, version_name="Version 2")
+        project_version_3 = ProjectVersion.objects.create(project=self.project, version_number=3, version_name="Version 3")
+        response = self.client.post(reverse(
+            'submittal-list-list',
+            kwargs={'project_id': self.project.id}), 
+            data={'name': 'New Submittal Item List', 'submittals': [self.submittal_item_in_list.id], 'project_version': project_version_2.id}
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(SubmittalItemList.objects.get(id=response.data['id']).project_version, project_version_2)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_if_versioning_is_active_project_version_is_required(self, mock_is_versioning_feature_flag_active):
+        """Test that if versioning is active, the project version is required"""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.post(reverse(
+            'submittal-list-list',
+            kwargs={'project_id': self.project.id}), 
+            data={'name': 'New Submittal Item List', 'submittals': [self.submittal_item_in_list.id]}
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
 
 class TestCombineRows(APITestCase):
     def setUp(self):
@@ -1396,6 +1496,7 @@ class TestCombineRows(APITestCase):
             name='Test Project',
             team=self.team,
         )
+        self.project_version_1 = ProjectVersion.objects.get(project=self.project)
         ProjectMembership.objects.create(
             project=self.project,
             user=self.user,

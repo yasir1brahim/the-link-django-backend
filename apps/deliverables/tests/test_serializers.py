@@ -4,7 +4,7 @@ from django.test import TestCase
 
 from django.utils import timezone
 from django.db.models import QuerySet
-from ..models import Project, UploadedFile, DocProcessingStatus, Entitlement, SubmittalItem, MasterFormatSection, SpecSection, ROLE_PROJECT_ADMIN
+from ..models import Project, ProjectVersion, UploadedFile, DocProcessingStatus, Entitlement, SubmittalItem, MasterFormatSection, SpecSection, ROLE_PROJECT_ADMIN
 from ..serializers import (ProjectDetailsSerializer, ProjectMembership, ProjectWriteSerializer,
                             SubmittalItemReadSerializer, SubmittalItemWriteSerializer)
 from apps.teams.models import Membership
@@ -27,6 +27,7 @@ class ProjectReadSerializerTest(TestCase):
             description="Test Description",
             team=self.team
         )
+        self.project_version_1 = ProjectVersion.objects.get(project=self.project)
 
         self.project_entitlement = Entitlement.objects.create(
             code_name="project_level_entitlement"
@@ -41,20 +42,23 @@ class ProjectReadSerializerTest(TestCase):
             name="Doc 1",
             processing_status=DocProcessingStatus.PROCESSED,  # status_order = 6
             created_at=timezone.now(),
+            project_version=self.project_version_1
         )
         
         self.doc2 = UploadedFile.objects.create(
             project=self.project,
             name="Doc 2", 
             processing_status=DocProcessingStatus.PENDING_PROCESSING,  # status_order = 1
-            created_at=timezone.now()
+            created_at=timezone.now(),
+            project_version=self.project_version_1
         )
         
         self.doc3 = UploadedFile.objects.create(
             project=self.project,
             name="Doc 3",
             processing_status=DocProcessingStatus.PROCESSING,  # status_order = 2
-            created_at=timezone.now()
+            created_at=timezone.now(),
+            project_version=self.project_version_1
         )
 
     @patch('apps.deliverables.serializers.s3.generate_presigned_url')
@@ -138,14 +142,16 @@ class ProjectReadSerializerTest(TestCase):
             project=self.project,
             name="Doc 4",
             processing_status=DocProcessingStatus.PENDING_PROCESSING,
-            created_at=older_time
+            created_at=older_time,
+            project_version=self.project_version_1
         )
         
         doc5 = UploadedFile.objects.create(
             project=self.project,
             name="Doc 5",
             processing_status=DocProcessingStatus.PENDING_PROCESSING,
-            created_at=newer_time
+            created_at=newer_time,
+            project_version=self.project_version_1
         )
         
         serializer = ProjectDetailsSerializer(self.project)
@@ -166,12 +172,14 @@ class ProjectReadSerializerTest(TestCase):
         UploadedFile.objects.create(
             project=self.project,
             name="test1.pdf",
-            processing_status=DocProcessingStatus.PROCESSED
+            processing_status=DocProcessingStatus.PROCESSED,
+            project_version=self.project_version_1
         )
         UploadedFile.objects.create(
             project=self.project,
             name="test2.pdf",
-            processing_status=DocProcessingStatus.PROCESSING
+            processing_status=DocProcessingStatus.PROCESSING,
+            project_version=self.project_version_1
         )
 
         # Act
@@ -386,11 +394,13 @@ class TestSubmittalItemReadSerializer(TestCase):
     def setUp(self):
         self.team = Team.objects.create(name="Test Team")
         self.project = Project.objects.create(name="Test Project", team=self.team)
+        self.project_version = ProjectVersion.objects.get(project=self.project)
 
         self.submittal_item = SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version,
             masterformat_section=MasterFormatSection.objects.create(masterformat_number="01000"),
-            document=UploadedFile.objects.create(name="Test Document", project=self.project, document_path="test/path"),
+            document=UploadedFile.objects.create(name="Test Document", project=self.project, project_version=self.project_version, document_path="test/path"),
         )
 
     def test_serializer_contains_expected_fields(self):
@@ -428,11 +438,13 @@ class TestSubmittalItemWriteSerializer(TestCase):
             name="Test Project",
             team=self.team
         )
+        self.project_version = ProjectVersion.objects.get(project=self.project)
         self.document = UploadedFile.objects.create(
             name="Test Document",
             project=self.project,
             document_path="test/path",
             md5="test.pdf",
+            project_version=self.project_version
         )
         self.mf_section = MasterFormatSection.objects.create(
             masterformat_number="01 33 00",
@@ -447,7 +459,8 @@ class TestSubmittalItemWriteSerializer(TestCase):
             "item_desc": "Test Description",
             "para_context": "Test Context",
             "para_no": "1.2.3",
-            "type": "Product Data"
+            "type": "Product Data",
+            "project_version": str(self.project_version.id)
         }
         
         serializer = SubmittalItemWriteSerializer(data=data)
@@ -466,6 +479,7 @@ class TestSubmittalItemWriteSerializer(TestCase):
         # Create a submittal item
         SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version,
             masterformat_section=self.mf_section,
             document=self.document,
             manually_added=False,
@@ -473,6 +487,7 @@ class TestSubmittalItemWriteSerializer(TestCase):
         )
         SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version,
             masterformat_section=self.mf_section,
             document=self.document,
             manually_added=False,
@@ -484,7 +499,8 @@ class TestSubmittalItemWriteSerializer(TestCase):
             "item_desc": "Test Description",
             "para_context": "Test Context",
             "para_no": "1.2.3",
-            "type": "Product Data"
+            "type": "Product Data",
+            "project_version": str(self.project_version.id)
         }
         serializer = SubmittalItemWriteSerializer(data=data)
         self.assertTrue(serializer.is_valid())
@@ -500,6 +516,7 @@ class TestSubmittalItemWriteSerializer(TestCase):
         )
         parent_submittal = SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version,
             masterformat_section=self.mf_section,
             submittal_description="Parent Submittal",
             document=None,
@@ -514,7 +531,8 @@ class TestSubmittalItemWriteSerializer(TestCase):
             "para_context": "Child Context",
             "para_no": "1.2.3",
             "type": "Product Data",
-            "added_under_submittal_id": parent_submittal.id
+            "added_under_submittal_id": parent_submittal.id,
+            "project_version": str(self.project_version.id)
         }
         
         serializer = SubmittalItemWriteSerializer(data=data)
@@ -538,7 +556,8 @@ class TestSubmittalItemWriteSerializer(TestCase):
             "para_context": "Test Context",
             "para_no": "1.2.3",
             "type": "Product Data",
-            "added_under_submittal_id": 99999  # Non-existent ID
+            "added_under_submittal_id": 99999,  # Non-existent ID
+            "project_version": str(self.project_version.id)
         }
         
         serializer = SubmittalItemWriteSerializer(data=data)
@@ -557,6 +576,7 @@ class TestSubmittalItemWriteSerializer(TestCase):
         )
         other_submittal = SubmittalItem.objects.create(
             project=other_project,
+            project_version=self.project_version,
             masterformat_section=self.mf_section,
             document=self.document,
             manually_added=False
@@ -568,7 +588,8 @@ class TestSubmittalItemWriteSerializer(TestCase):
             "para_context": "Test Context",
             "para_no": "1.2.3",
             "type": "Product Data",
-            "added_under_submittal_id": other_submittal.id
+            "added_under_submittal_id": other_submittal.id,
+            "project_version": str(self.project_version.id)
         }
         
         serializer = SubmittalItemWriteSerializer(data=data)

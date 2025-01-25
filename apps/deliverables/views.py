@@ -414,6 +414,8 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         if is_versioning_feature_flag_active(self.request.user, project.team):
             if not project_version:
                 raise DRFValidationError("project_version_id is required when versioning is active")
+            if not project_version.project == project:
+                raise DRFValidationError("project_version_id does not match project_id")
             serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'), project_version=project_version)
         else:
             project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
@@ -890,7 +892,7 @@ def invoke_lambda(payload, lambda_url):
         # if we timed out, it's a larger document and the lambda is processing it
         pass
 
-def parse_spec(callback_url, document_id, project_id, object_key, filename, user_id):
+def parse_spec(callback_url, document_id, project_id, project_version_id, object_key, filename, user_id):
     logging.debug(f"parse_spec: {object_key}")
 
     CHUNK_SIZE = 1200
@@ -902,6 +904,7 @@ def parse_spec(callback_url, document_id, project_id, object_key, filename, user
         "filename": filename,
         "user_id": user_id,
         "project_id": project_id,
+        "project_version_id": str(project_version_id),
         "chunk_size": CHUNK_SIZE,
         "chunk_overlap": CHUNK_OVERLAP,
         "callback_url": callback_url,
@@ -924,12 +927,13 @@ def parse_spec(callback_url, document_id, project_id, object_key, filename, user
 
 
 
-def call_extract_notices_lambda(callback_url, document_id, object_key):
+def call_extract_notices_lambda(callback_url, document_id, object_key, project_version_id):
     logging.debug(f"call_extract_notices_lambda: {object_key}")
 
     payload = {
         "source_file_s3_uri": f"s3://{settings.S3_BUCKET}/{object_key}",
         "document_id": str(document_id),
+        "project_version_id": str(project_version_id),
         "callback_url": callback_url,
         "ENVIRONMENT": settings.ENVIRONMENT,
     }
@@ -964,12 +968,14 @@ def upload_to_s3_and_process(file_data):
                 callback_url=settings.BACKEND_NOTICES_CALLBACK_URL,
                 document_id=str(file_data['uploaded_file_id']),
                 object_key=file_data['document_path'],
+                project_version_id=str(file_data['project_version_id']),
             )
         else:
             parse_spec(
                 callback_url=settings.BACKEND_CALLBACK_URL,
                 document_id=str(file_data['uploaded_file_id']),
                 project_id=str(file_data['project_id']),
+                project_version_id=str(file_data['project_version_id']),
                 object_key=file_data['document_path'],
                 filename=file_data['filename'],
                 user_id=str(file_data['user_id'])
@@ -1026,7 +1032,7 @@ def upload_file(request):
     else:
         project_version_id = serializer.validated_data.get('project_version_id')
         if not project_version_id:
-            return Response({'detail': 'No files provided'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': 'Versioning is active but no project_version_id was provided'}, status=status.HTTP_400_BAD_REQUEST)
     
     for file in files:
         try:
@@ -1036,7 +1042,7 @@ def upload_file(request):
             file_md5 = get_file_hash(file)
 
             # check if file already exists
-            matching_files = UploadedFile.objects.filter(md5=file_md5, name=file.name, project_id=project_id)
+            matching_files = UploadedFile.objects.filter(md5=file_md5, name=file.name, project_id=project_id, project_version_id=project_version_id)
             if matching_files.exists():
                 already_existing_files.append(file.name)
                 continue
@@ -1059,6 +1065,7 @@ def upload_file(request):
                 'document_path': document_path,
                 'uploaded_file_id': uploaded_file.id,
                 'project_id': project_id,
+                'project_version_id': project_version_id,
                 'user_id': request.user.id,
                 'is_notices_flag_active': is_notices_flag_active,
                 'extract_notices': extract_notices
@@ -1210,6 +1217,17 @@ class SubmittalItemListViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         project_id = self.kwargs.get('project_id')
         return self.queryset.filter(project_id=project_id)
+    
+    def perform_create(self, serializer):
+        project_id = self.kwargs.get('project_id')
+        project = get_object_or_404(Project, id=project_id)
+        if is_versioning_feature_flag_active(self.request.user, project.team):
+            if not serializer.validated_data.get('project_version'):
+                raise DRFValidationError("project_version is required when versioning is active")
+            serializer.save(project_version=serializer.validated_data.get('project_version'))
+        else:
+            project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+            serializer.save(project_version=project_version)
 
 
 class UpsertExcelExportHeaderView(generics.GenericAPIView):
