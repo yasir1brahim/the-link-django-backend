@@ -815,6 +815,15 @@ class SubmittalItemViewSetTests(APITestCase):
             team=self.team,
         )
         self.project_version_1 = ProjectVersion.objects.get(project=self.project)
+        self.project_version_2 = ProjectVersion.objects.create(project=self.project, version_number=2, version_name="Version 2")
+        self.document2 = UploadedFile.objects.create(
+            project=self.project,
+            project_version=self.project_version_2,
+            uploaded_by=self.user,
+            document_path='test_file.txt',
+            md5='1234567890',
+            processing_status=DocProcessingStatus.PROCESSED,
+        )
         ProjectMembership.objects.create(
             project=self.project,
             user=self.user,
@@ -892,7 +901,7 @@ class SubmittalItemViewSetTests(APITestCase):
         )
         spec4 = SpecSection.objects.create(
             masterformat_section=mf4,
-            document=self.document,
+            document=self.document2,
             processing_method=SpecSection.ProcessingMethod.REGEX_UNABLE_TO_DETECT
         )
 
@@ -939,23 +948,23 @@ class SubmittalItemViewSetTests(APITestCase):
         )
         SubmittalItem.objects.create(
             project=self.project,
-            document=self.document,
+            document=self.document2,
             masterformat_section=mf4,
             spec_section=spec4,
             paragraph_number="4.1",
             submittal_number="4",
             submittal_type="Samples",
-            project_version=self.project_version_1,
+            project_version=self.project_version_2,
         )
         SubmittalItem.objects.create(
             project=self.project,
-            document=self.document,
+            document=self.document2,
             masterformat_section=mf4,
             spec_section=spec4,
             paragraph_number="4.1",
             submittal_number="5",
             submittal_type="Samples",
-            project_version=self.project_version_1,
+            project_version=self.project_version_2,
         )
 
     def test_default_ordering(self):
@@ -1172,6 +1181,270 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(list(response.data['all_filter_vals']['spec_section']), ['033000', '033001', '102000', '123456'])
         self.assertEqual(list(response.data['all_filter_vals']['type']), ['Type 1', 'Type 2', 'ZZZ'])
 
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_default_ordering_with_versioning(self, mock_is_versioning_feature_flag_active):
+        self.set_up_test_data()
+
+        # Make API request
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_2.id))
+        
+        # Verify response status
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify ordering
+        results = response.data['message']
+        # Only 2 items should be returned for this project version
+        self.assertEqual(len(results), 2)
+        
+        # Items should be ordered by:
+        # 1. Processing method (REGEX_SUCCESS before AI_SUCCESS)
+        # 2. Masterformat number (051200 before 052100)
+        # 3. Hierarchical paragraph number (1.1 before 1.2)
+        # 4. Submittal number (1 before 2 before 3)
+
+        self.assertEqual(results[0]['spec_section'], "033004")
+        self.assertEqual(results[0]['para_no'], "4.1")
+        self.assertEqual(results[0]['submittal_number'], "4.0")
+
+        self.assertEqual(results[1]['spec_section'], "033004")
+        self.assertEqual(results[1]['para_no'], "4.1")
+        self.assertEqual(results[1]['submittal_number'], "5.0")
+
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_1.id))
+        # Verify response status
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Verify ordering
+        results = response.data['message']
+        self.assertEqual(len(results), 5)
+        self.assertEqual(results[0]['spec_section'], "033000")
+        self.assertEqual(results[0]['para_no'], '')
+        self.assertEqual(results[0]['submittal_number'], None)
+        
+        self.assertEqual(results[1]['spec_section'], "033002")
+        self.assertEqual(results[1]['para_no'], "2.1")
+        self.assertEqual(results[1]['submittal_number'], "2.0")
+        
+        self.assertEqual(results[2]['spec_section'], "033003")
+        self.assertEqual(results[2]['para_no'], "3.1")
+        self.assertEqual(results[2]['submittal_number'], "3.0")
+
+        self.assertEqual(results[3]['spec_section'], "033001")
+        self.assertEqual(results[3]['para_no'], "1.1")
+        self.assertEqual(results[3]['submittal_number'], "1.0")
+
+        self.assertEqual(results[4]['spec_section'], "033001")
+        self.assertEqual(results[4]['para_no'], "1.2")
+        self.assertEqual(results[4]['submittal_number'], "3.0")
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_if_versioning_is_active_then_project_version_id_is_required(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_1.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_ordering_by_masterformat_number_with_versioning(self, mock_is_versioning_feature_flag_active):
+        self.set_up_test_data()
+
+        # Make API request
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?order_col=spec_section&order=asc&project_version_id=' + str(self.project_version_2.id)
+        )
+        
+        # Verify response status
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify ordering
+        results = response.data['message']
+        self.assertEqual(len(results), 2)
+        # Items should be ordered by:
+        # 1. Processing method (REGEX_SUCCESS before AI_SUCCESS)
+        # 2. Masterformat number (051200 before 052100)
+        # 3. Hierarchical paragraph number (1.1 before 1.2)
+        # 4. Submittal number (1 before 2 before 3)
+
+        self.assertEqual(results[0]['spec_section'], "033004")
+        self.assertEqual(results[0]['para_no'], "4.1")
+        self.assertEqual(results[0]['submittal_number'], "4.0")
+
+        self.assertEqual(results[1]['spec_section'], "033004")
+        self.assertEqual(results[1]['para_no'], "4.1")
+        self.assertEqual(results[1]['submittal_number'], "5.0")
+
+
+        # make another call
+        response = self.client.get(
+            reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?order_col=spec_section&order=asc&project_version_id=' + str(self.project_version_1.id)
+        )
+        
+        # Verify response status
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify ordering
+        results = response.data['message']
+        self.assertEqual(len(results), 5)
+
+        self.assertEqual(results[0]['spec_section'], "033000")
+        self.assertEqual(results[0]['para_no'], '')
+        self.assertEqual(results[0]['submittal_number'], None)
+
+        self.assertEqual(results[1]['spec_section'], "033001")
+        self.assertEqual(results[1]['para_no'], "1.1")
+        self.assertEqual(results[1]['submittal_number'], "1.0")
+
+        self.assertEqual(results[2]['spec_section'], "033001")
+        self.assertEqual(results[2]['para_no'], "1.2")
+        self.assertEqual(results[2]['submittal_number'], "3.0")
+        
+        self.assertEqual(results[3]['spec_section'], "033002")
+        self.assertEqual(results[3]['para_no'], "2.1")
+        self.assertEqual(results[3]['submittal_number'], "2.0")
+        
+        self.assertEqual(results[4]['spec_section'], "033003")
+        self.assertEqual(results[4]['para_no'], "3.1")
+        self.assertEqual(results[4]['submittal_number'], "3.0")
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_ordering_by_masterformat_number_desc_with_versioning(self, mock_is_versioning_feature_flag_active):
+        self.set_up_test_data()
+
+        # Make API request
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?order_col=spec_section&order=desc&project_version_id=' + str(self.project_version_2.id)
+        )
+        
+        # Verify response status
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify ordering
+        results = response.data['message']
+        
+        # Items should be ordered by:
+        # 1. Processing method (REGEX_SUCCESS before AI_SUCCESS)
+        # 2. Masterformat number (051200 before 052100)
+        # 3. Hierarchical paragraph number (1.1 before 1.2)
+        # 4. Submittal number (1 before 2 before 3)
+
+        self.assertEqual(results[0]['spec_section'], "033004")
+        self.assertEqual(results[0]['para_no'], "4.1")
+        self.assertEqual(results[0]['submittal_number'], "4.0")
+
+        self.assertEqual(results[1]['spec_section'], "033004")
+        self.assertEqual(results[1]['para_no'], "4.1")
+        self.assertEqual(results[1]['submittal_number'], "5.0")
+
+        response = self.client.get(
+            reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?order_col=spec_section&order=desc&project_version_id=' + str(self.project_version_1.id)
+        )
+        
+        # Verify response status
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify ordering
+        results = response.data['message']
+        self.assertEqual(len(results), 5)
+
+        self.assertEqual(results[0]['spec_section'], "033003")
+        self.assertEqual(results[0]['para_no'], "3.1")
+        self.assertEqual(results[0]['submittal_number'], "3.0")
+
+        self.assertEqual(results[1]['spec_section'], "033002")
+        self.assertEqual(results[1]['para_no'], "2.1")
+        self.assertEqual(results[1]['submittal_number'], "2.0")
+
+        self.assertEqual(results[2]['spec_section'], "033001")
+        self.assertEqual(results[2]['para_no'], "1.1")
+        self.assertEqual(results[2]['submittal_number'], "1.0")
+
+        self.assertEqual(results[3]['spec_section'], "033001")
+        self.assertEqual(results[3]['para_no'], "1.2")
+        self.assertEqual(results[3]['submittal_number'], "3.0")
+
+        self.assertEqual(results[4]['spec_section'], "033000")
+        self.assertEqual(results[4]['para_no'], '')
+        self.assertEqual(results[4]['submittal_number'], None)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_submittal_item_list_returns_filter_values_in_correct_order_and_scoped_to_project_version(self, mock_is_versioning_feature_flag_active):
+        """Test that the submittal item list returns filter values in lexical order"""
+        SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.project_version_2,
+            masterformat_section=self.masterformat_section,
+            paragraph_number='1.2',
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.project_version_2,
+            masterformat_section=self.masterformat_section,
+            paragraph_number='1.1',
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.project_version_1,
+            masterformat_section=self.masterformat_section,
+            paragraph_number='1.3-1',
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.project_version_1,
+            masterformat_section=self.masterformat_section,
+            paragraph_number='1.3',
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.project_version_1,
+            masterformat_section=self.masterformat_section,
+            paragraph_number='1.3-1',
+            submittal_type='ZZZ',
+            submittal_description='ZZZ',
+        )
+
+        SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.project_version_1,
+            masterformat_section=MasterFormatSection.objects.create(masterformat_number='102000'),
+            paragraph_number='1.3',
+            submittal_type='Type 2',
+            submittal_description='Description B',
+        )
+        
+        SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.project_version_1,
+            masterformat_section=MasterFormatSection.objects.create(masterformat_number='123456'),
+            paragraph_number='1.3',
+            submittal_type='Type 1',
+            submittal_description='Description A',
+        )
+        SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.project_version_2,
+            masterformat_section=MasterFormatSection.objects.create(masterformat_number='033001'),
+            paragraph_number='1.3',
+            submittal_type='Type Version 2',
+            submittal_description='Description A',
+        )
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_2.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(list(response.data['all_filter_vals']['item_desc']), ['Description A'])
+        self.assertEqual(list(response.data['all_filter_vals']['para_no']), ['1.1', '1.2', '1.3'])
+        self.assertEqual(list(response.data['all_filter_vals']['spec_section']), ['033000', '033001'])
+        self.assertEqual(list(response.data['all_filter_vals']['type']), ['Type Version 2'])
+
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_1.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(list(response.data['all_filter_vals']['item_desc']), ['Description A', 'Description B', 'ZZZ'])
+        self.assertEqual(list(response.data['all_filter_vals']['para_no']), ['1.3', '1.3-1'])
+        self.assertEqual(list(response.data['all_filter_vals']['spec_section']), ['033000', '102000', '123456'])
+        self.assertEqual(list(response.data['all_filter_vals']['type']), ['Type 1', 'Type 2', 'ZZZ'])
+
     def test_create_submittal_with_new_masterformat_section_number(self):
         self.client.force_authenticate(user=self.user)
         post_payload = {
@@ -1208,7 +1481,6 @@ class SubmittalItemViewSetTests(APITestCase):
     @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
     def test_create_submittal_with_versioning_active_uses_provided_project_version(self, mock_is_versioning_feature_flag_active):
         self.client.force_authenticate(user=self.user)
-        project_version_2 = ProjectVersion.objects.create(project=self.project, version_number=2, version_name="Version 2")
         project_version_3 = ProjectVersion.objects.create(project=self.project, version_number=3, version_name="Version 3")
         post_payload = {
             'document': self.document.id,
@@ -1217,13 +1489,13 @@ class SubmittalItemViewSetTests(APITestCase):
             'para_context': "Test context",
             'para_no': "1.1",
             'type': "Test type",
-            'project_version': project_version_2.id,
+            'project_version': self.project_version_2.id,
         }
         self.assertEqual(0, len(SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111")))
         response = self.client.post(reverse('submittal-item-list', kwargs={'project_id': self.project.id}), post_payload)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(1, len(SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111")))
-        self.assertEqual(project_version_2, SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111").first().project_version)
+        self.assertEqual(self.project_version_2, SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111").first().project_version)
 
     @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
     def test_create_submittal_with_versioning_active_and_no_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
@@ -1464,7 +1736,7 @@ class SubmittalItemListViewSetTests(APITestCase):
         self.assertEqual(SubmittalItemList.objects.get(id=response.data['id']).project_version, project_version_2)
 
     @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
-    def test_if_versioning_is_active_project_version_is_required(self, mock_is_versioning_feature_flag_active):
+    def test_if_versioning_is_active_project_version_is_required_for_create(self, mock_is_versioning_feature_flag_active):
         """Test that if versioning is active, the project version is required"""
         self.client.force_authenticate(user=self.team_member)
         response = self.client.post(reverse(
@@ -1474,6 +1746,41 @@ class SubmittalItemListViewSetTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_if_versioning_is_active_project_version_query_param_is_required_for_list(self, mock_is_versioning_feature_flag_active):
+        """Test that if versioning is active, the project version is required"""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(reverse(
+            'submittal-list-list',
+            kwargs={'project_id': self.project.id}
+        ))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_if_versioning_is_active_project_version_query_param_filters_to_lists_in_project_version(self, mock_is_versioning_feature_flag_active):
+        """Test that if versioning is active, the project version is required"""
+        self.client.force_authenticate(user=self.team_member)
+        project_version_2 = ProjectVersion.objects.create(project=self.project, version_number=2, version_name="Version 2")
+        submittal_item_list_2 = SubmittalItemList.objects.create(
+            name='Submittal Item List 2',
+            project=self.project,
+            project_version=project_version_2,
+        )
+        response = self.client.get(reverse(
+            'submittal-list-list',
+            kwargs={'project_id': self.project.id}
+        ) + f'?project_version_id={project_version_2.id}')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['id'], submittal_item_list_2.id)
+
+        response = self.client.get(reverse(
+            'submittal-list-list',
+            kwargs={'project_id': self.project.id}
+        ) + f'?project_version_id={self.project_version_1.id}')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['id'], self.submittal_item_list.id)
 
 class TestCombineRows(APITestCase):
     def setUp(self):

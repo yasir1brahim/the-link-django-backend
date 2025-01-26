@@ -54,17 +54,23 @@ class ProjectMembershipAddSerializer(serializers.Serializer):
         return data
 
 
+class ProjectVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProjectVersion
+        fields = ['id', 'version_number', 'version_name']
+
+
 class BaseProjectSerializer(serializers.ModelSerializer):
+    project_versions = ProjectVersionSerializer(source="versions", many=True, required=False, read_only=True)
+    members = ProjectMembershipSerializer(source="project_memberships", many=True, required=False)
+    team = serializers.ReadOnlyField(source="team.id")
+    user_limit = serializers.ReadOnlyField()
+
     class Meta:
         model = Project
         fields = ['id', 'name', 'description', 'team', 'members',
                    'user_limit', 'start_date', 'end_date', 'is_archived', 
-                   'project_number', 'project_type']
-
-    members = ProjectMembershipSerializer(source="project_memberships", many=True, required=False)
-    team = serializers.ReadOnlyField(source="team.id")
-    # entitlements = serializers.SerializerMethodField(read_only=True)
-    user_limit = serializers.ReadOnlyField()
+                   'project_number', 'project_type', 'project_versions']
 
     def get_entitlements(self, obj) -> list[str]:
         # Handle case when obj is a dictionary (during validation)

@@ -71,7 +71,7 @@ class ProjectReadSerializerTest(TestCase):
             'members', 'user_limit',
             'start_date', 'end_date', 'is_archived',
             'doc_parsed', 'document_details', 'project_number',
-            'project_type'
+            'project_type', 'project_versions'
         }
         self.assertEqual(set(serializer.data.keys()), expected_fields)
 
@@ -96,6 +96,25 @@ class ProjectReadSerializerTest(TestCase):
         self.assertEqual(len(serializer.data['members']), 1)
         self.assertEqual(serializer.data['members'][0]['user_id'], self.user.id)
         self.assertEqual(serializer.data['members'][0]['role'], "MEMBER")
+
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_project_versions(self, mock_generate_presigned_url):
+        """Test that members field properly serializes project memberships"""
+        mock_generate_presigned_url.return_value = "https://test.com"
+        project_version_2 = ProjectVersion.objects.create(
+            project = self.project,
+            version_name = "Version 2"
+        )
+        project_version_3 = ProjectVersion.objects.create(
+            project = self.project,
+            version_name = "Version 3"
+        )
+        
+        serializer = ProjectDetailsSerializer(instance=self.project)
+        self.assertEqual(len(serializer.data['project_versions']), 3)
+        self.assertEqual(serializer.data['project_versions'][0]['version_name'], self.project_version_1.version_name)
+        self.assertEqual(serializer.data['project_versions'][1]['version_name'], project_version_2.version_name)
+        self.assertEqual(serializer.data['project_versions'][2]['version_name'], project_version_3.version_name)
 
     @unittest.skip("Entitlements aren't used yet, so not calculated to improve performance")
     def test_get_entitlements_project_level(self):
