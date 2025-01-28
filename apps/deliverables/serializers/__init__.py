@@ -55,6 +55,10 @@ class ProjectMembershipAddSerializer(serializers.Serializer):
 
 
 class ProjectVersionSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(read_only=True)
+    version_number = serializers.IntegerField(read_only=True)
+    version_name = serializers.CharField(required=True)
+
     class Meta:
         model = ProjectVersion
         fields = ['id', 'version_number', 'version_name']

@@ -29,6 +29,12 @@ single_project_router.register(
     views.NoticeViewSet,
     basename='notice-list',
 )
+# project versions
+single_project_router.register(
+    'project-versions',
+    views.ProjectVersionViewSet,
+    basename='project-version',
+)
 
 
 urlpatterns = [

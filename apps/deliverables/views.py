@@ -50,6 +50,7 @@ from apps.teams.models import Team, Flag
 from apps.users.models import CustomUser
 from .serializers import (
     ProjectDetailsSerializer,
+    ProjectVersionSerializer,
     ProjectMembershipAddSerializer,
     ProjectListSerializer,
     ProjectWriteSerializer,
@@ -80,6 +81,7 @@ from .permissions import (
     ProjectAccessPermissions,
     SubmittalItemAccessPermissions,
     SubmittalListAccessPermissions,
+    ProjectVersionAccessPermissions,
 )
 from apps.utils.feature_flags import is_notices_feature_flag_active, is_versioning_feature_flag_active
 from .constants import masterformat_to_section_title_map
@@ -285,6 +287,13 @@ class ProjectViewSet(viewsets.ModelViewSet):
             return Response({"project_id": project_id}, status=status.HTTP_200_OK)
         except ValueError:
             return Response({"error": "Invalid submittal_id. Must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ProjectVersionViewSet(viewsets.ModelViewSet):
+    queryset = ProjectVersion.objects.all()
+    permission_classes = [IsAuthenticated, ProjectAccessPermissions, ProjectVersionAccessPermissions]
+    serializer_class = ProjectVersionSerializer
+
 
 class SubmittalItemPagination(PageNumberPagination):
     page_query_param = 'page_number'
