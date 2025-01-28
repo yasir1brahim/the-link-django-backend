@@ -177,11 +177,13 @@ class EmbedDocumentSerializer(serializers.ModelSerializer):
 class DocumentSerializer(EmbedDocumentSerializer):
     document_status = serializers.CharField(source="processing_status")
     document_subsections = DocumentSubsectionSerializer(source="specsection_set", many=True)
+    project_version = ProjectVersionSerializer(many=False)
 
     class Meta(EmbedDocumentSerializer.Meta):
         fields = [
             *EmbedDocumentSerializer.Meta.fields,
             'document_status',
+            'project_version',
             'document_subsections',
             'created_at',
             'updated_at',

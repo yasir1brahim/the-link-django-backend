@@ -1238,12 +1238,15 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(results[4]['submittal_number'], "3.0")
 
     @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
-    def test_if_versioning_is_active_then_project_version_id_is_required(self, mock_is_versioning_feature_flag_active):
+    def test_if_versioning_is_active_and_project_version_id_not_provided_then_latest_version_is_used(self, mock_is_versioning_feature_flag_active):
+        self.set_up_test_data()
         self.client.force_authenticate(user=self.user)
         response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_1.id))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['project_version_id'], self.project_version_2.id)
+        results = response.data['message']
+        self.assertEqual(len(results), 2)
+
 
     @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
     def test_ordering_by_masterformat_number_with_versioning(self, mock_is_versioning_feature_flag_active):
@@ -1747,14 +1750,23 @@ class SubmittalItemListViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
-    def test_if_versioning_is_active_project_version_query_param_is_required_for_list(self, mock_is_versioning_feature_flag_active):
+    def test_if_versioning_is_active_and_project_version_query_param_is_omitted_then_latest_version_is_used(self, mock_is_versioning_feature_flag_active):
         """Test that if versioning is active, the project version is required"""
         self.client.force_authenticate(user=self.team_member)
+        project_version_2 = ProjectVersion.objects.create(project=self.project, version_number=2, version_name="Version 2")
+        list_in_version_2 = SubmittalItemList.objects.create(
+            name='Submittal Item List 2',
+            project=self.project,
+            project_version=project_version_2,
+        )
         response = self.client.get(reverse(
             'submittal-list-list',
             kwargs={'project_id': self.project.id}
         ))
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['id'], list_in_version_2.id)
+
 
     @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
     def test_if_versioning_is_active_project_version_query_param_filters_to_lists_in_project_version(self, mock_is_versioning_feature_flag_active):

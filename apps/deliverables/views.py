@@ -212,7 +212,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             else:
                 queryset = self.queryset.filter(members=self.request.user)
 
-        return queryset.select_related('team').prefetch_related('members').prefetch_related('project_versions').order_by('name')
+        return queryset.select_related('team').prefetch_related('members').prefetch_related('versions').order_by('name')
 
     def perform_create(self, serializer):
         print(f"serializer.validated_data: {serializer.validated_data}")
@@ -334,7 +334,6 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         project_id = self.kwargs.get('project_id')
-        project_version_id = self.request.query_params.get('project_version_id')
         search = self.request.query_params.get('search')
         order_col = self.request.query_params.get('order_col')
         order = self.request.query_params.get('order') or 'asc'
@@ -355,8 +354,8 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             raise DRFValidationError(f"Invalid filters: {e}")
 
         queryset = self.queryset.filter(project_id=project_id)
-        if project_version_id:
-            queryset = queryset.filter(project_version_id=project_version_id)
+        if self.project_version:
+            queryset = queryset.filter(project_version_id=self.project_version.id)
         queryset = queryset.select_related('masterformat_section').select_related('document').select_related('project')
         queryset = queryset.exclude(submittal_type='Unclassified', masterformat_section__masterformat_number__regex='^0[012]\\d+')
 
@@ -457,7 +456,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         parameters=[
             OpenApiParameter(
                 name='project_version_id',
-                description='ID of the project version to filter submittal items, required when versioning is active',
+                description='ID of the project version to filter submittal items, if not provided then latest version is used when versioning is active',
                 required=False,
                 type=OpenApiTypes.INT
             ),
@@ -512,12 +511,14 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         project_version_id = request.query_params.get('project_version_id')
         project = Project.objects.get(id=kwargs.get('project_id'))
         team = project.team
-        is_versioning_active = is_versioning_feature_flag_active(request.user, team)
-        if is_versioning_active:
+        self.is_versioning_active = is_versioning_feature_flag_active(request.user, team)
+        self.project_version = None
+        if self.is_versioning_active:
             if not project_version_id:
-                raise DRFValidationError("project_version_id is required when versioning is active")
-            project_version = ProjectVersion.objects.get(id=project_version_id)
-            if project_version.project != project:
+                self.project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+            else:
+                self.project_version = ProjectVersion.objects.get(id=project_version_id)
+            if self.project_version.project != project:
                 raise DRFValidationError("Not a valid project version for this project")
             
         queryset = self.filter_queryset(self.get_queryset())
@@ -532,9 +533,10 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
 
         response_data = {
             'sel_filter_vals': self._get_sel_filter_vals(queryset),
-            'all_filter_vals': self._get_all_filter_vals(project_version_id, is_versioning_active),
+            'all_filter_vals': self._get_all_filter_vals(project_version_id, self.is_versioning_active),
             'log_id_list': [log.id for log in queryset],
             'message': data['results'],
+            'project_version_id': self.project_version.id if self.project_version else None,
             'total_count': data['count'],
             'submittal_heading_lov': self._get_submittal_heading_lov(queryset),
             'submittal_type_lov': self._get_submittal_type_lov(queryset),
@@ -560,12 +562,14 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         project_version_id = request.query_params.get('project_version_id')
         project = Project.objects.get(id=kwargs.get('project_id'))
         team = project.team
-        is_versioning_active = is_versioning_feature_flag_active(request.user, team)
-        if is_versioning_active:
+        self.is_versioning_active = is_versioning_feature_flag_active(request.user, team)
+        self.project_version = None
+        if self.is_versioning_active:
             if not project_version_id:
-                raise DRFValidationError("project_version_id is required when versioning is active")
-            project_version = ProjectVersion.objects.get(id=project_version_id)
-            if project_version.project != project:
+                self.project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+            else:
+                self.project_version = ProjectVersion.objects.get(id=project_version_id)
+            if self.project_version.project != project:
                 raise DRFValidationError("Not a valid project version for this project")
             
         queryset = self.filter_queryset(self.get_queryset())
@@ -722,8 +726,9 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         is_versioning_active = is_versioning_feature_flag_active(request.user, team)
         if is_versioning_active:
             if not project_version_id:
-                raise DRFValidationError("project_version_id is required when versioning is active")
-            project_version = ProjectVersion.objects.get(id=project_version_id)
+                project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+            else:
+                project_version = ProjectVersion.objects.get(id=project_version_id)
             if project_version.project != project:
                 raise DRFValidationError("Not a valid project version for this project")
         
@@ -1265,7 +1270,7 @@ class SubmittalItemListViewSet(viewsets.ModelViewSet):
         is_versioning_active = is_versioning_feature_flag_active(self.request.user, team)
         if is_versioning_active:
             if not project_version_id:
-                raise DRFValidationError("project_version_id is required when versioning is active")
+                project_version_id = ProjectVersion.objects.filter(project=project).order_by('-created_at').first().id
         queryset = self.queryset.filter(project_id=project_id)
         if is_versioning_active and project_version_id:
             queryset = queryset.filter(project_version_id=project_version_id)
