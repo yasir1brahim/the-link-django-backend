@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from ..models import ProcoreToken
 from apps.teams.models import Team, Membership
 from apps.deliverables.integrations.procore import ProcoreException
-from apps.deliverables.models import Project, MasterFormatSection, SubmittalItem, ProcoreSubmittalTypeMapping
+from apps.deliverables.models import Project, ProjectVersion, MasterFormatSection, SubmittalItem, ProcoreSubmittalTypeMapping
 from apps.users.models import CustomUser
 from apps.teams.roles import ROLE_ADMIN
 
@@ -472,6 +472,7 @@ class TestCreateProcoreSubmittalsView(APITestCase):
             procore_submittal_manager_id='789'
         )
         self.project.members.add(self.user)
+        self.project_version_1 = ProjectVersion.objects.get(project=self.project)
         
         # Create test masterformat section
         self.masterformat_section = MasterFormatSection.objects.create(
@@ -481,6 +482,7 @@ class TestCreateProcoreSubmittalsView(APITestCase):
         # Create test submittal item
         self.submittal_item = SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version_1,
             masterformat_section=self.masterformat_section,
             submittal_type='Test Type',
             submittal_description='Test Description',
@@ -1173,7 +1175,8 @@ class TestGetProcoreSubmittalMappingsView(APITestCase):
             procore_submittal_manager_name='Test Manager'
         )
         self.project.members.add(self.user)
-        
+        self.project_version_1 = ProjectVersion.objects.get(project=self.project)
+
         # Create some test data
         self.submittal_type_mapping = ProcoreSubmittalTypeMapping.objects.create(
             company=self.company,
@@ -1189,6 +1192,7 @@ class TestGetProcoreSubmittalMappingsView(APITestCase):
         self.submittal_item = SubmittalItem.objects.create(
             submittal_type='Shop Drawing',
             project_id=self.project.id,
+            project_version=self.project_version_1,
             masterformat_section=masterformat_section,
             submittal_description='Test Description',
             submittal_content='Test Content',
@@ -1198,6 +1202,7 @@ class TestGetProcoreSubmittalMappingsView(APITestCase):
         self.submittal_item_2 = SubmittalItem.objects.create(
             submittal_type='Action/Information Submittal',
             project_id=self.project.id,
+            project_version=self.project_version_1,
             masterformat_section=masterformat_section,
             submittal_description='Test Description',
             submittal_content='Test Content',

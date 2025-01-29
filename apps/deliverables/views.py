@@ -50,6 +50,7 @@ from apps.teams.models import Team, Flag
 from apps.users.models import CustomUser
 from .serializers import (
     ProjectDetailsSerializer,
+    ProjectVersionSerializer,
     ProjectMembershipAddSerializer,
     ProjectListSerializer,
     ProjectWriteSerializer,
@@ -62,6 +63,7 @@ from .serializers import (
 )
 from .models import (
     Project,
+    ProjectVersion,
     ProjectMembership,
     UploadedFile,
     SubmittalItem,
@@ -79,8 +81,9 @@ from .permissions import (
     ProjectAccessPermissions,
     SubmittalItemAccessPermissions,
     SubmittalListAccessPermissions,
+    ProjectVersionAccessPermissions,
 )
-from apps.utils.feature_flags import is_notices_feature_flag_active
+from apps.utils.feature_flags import is_notices_feature_flag_active, is_versioning_feature_flag_active
 from .constants import masterformat_to_section_title_map
 from .serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
 from .serializers.procore import (ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer,
@@ -211,7 +214,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             else:
                 queryset = self.queryset.filter(members=self.request.user)
 
-        return queryset.select_related('team').prefetch_related('members').order_by('name')
+        return queryset.select_related('team').prefetch_related('members').prefetch_related('versions').order_by('name')
 
     def perform_create(self, serializer):
         print(f"serializer.validated_data: {serializer.validated_data}")
@@ -285,6 +288,22 @@ class ProjectViewSet(viewsets.ModelViewSet):
         except ValueError:
             return Response({"error": "Invalid submittal_id. Must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
 
+
+class ProjectVersionViewSet(viewsets.ModelViewSet):
+    queryset = ProjectVersion.objects.all()
+    permission_classes = [IsAuthenticated, ProjectVersionAccessPermissions]
+    serializer_class = ProjectVersionSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'))
+
+    def perform_update(self, serializer):
+        serializer.save(last_updated_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        raise DRFValidationError("Cannot delete project version yet")
+
+
 class SubmittalItemPagination(PageNumberPagination):
     page_query_param = 'page_number'
     page_size_query_param = 'limit'
@@ -333,7 +352,6 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         project_id = self.kwargs.get('project_id')
-
         search = self.request.query_params.get('search')
         order_col = self.request.query_params.get('order_col')
         order = self.request.query_params.get('order') or 'asc'
@@ -354,6 +372,8 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             raise DRFValidationError(f"Invalid filters: {e}")
 
         queryset = self.queryset.filter(project_id=project_id)
+        if self.project_version:
+            queryset = queryset.filter(project_version_id=self.project_version.id)
         queryset = queryset.select_related('masterformat_section').select_related('document').select_related('project')
         queryset = queryset.exclude(submittal_type='Unclassified', masterformat_section__masterformat_number__regex='^0[012]\\d+')
 
@@ -406,7 +426,19 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'))
+        project_id = self.kwargs.get('project_id')
+        project = get_object_or_404(Project, id=project_id)
+        project_version = serializer.validated_data.get('project_version')
+        print(f"project_version: {project_version}")
+        if is_versioning_feature_flag_active(self.request.user, project.team):
+            if not project_version:
+                raise DRFValidationError("project_version_id is required when versioning is active")
+            if not project_version.project == project:
+                raise DRFValidationError("project_version_id does not match project_id")
+            serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'), project_version=project_version)
+        else:
+            project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+            serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'), project_version=project_version)
 
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
@@ -419,9 +451,11 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             'type': result_queryset.values_list('submittal_type', flat=True).distinct().order_by(),
         }
     
-    def _get_all_filter_vals(self):
+    def _get_all_filter_vals(self, project_version_id, is_versioning_active):
         project_id = self.kwargs.get('project_id')
         queryset = self.queryset.filter(project_id=project_id)
+        if is_versioning_active:
+            queryset = queryset.filter(project_version_id=project_version_id)
         queryset = queryset.exclude(submittal_type='Unclassified', masterformat_section__masterformat_number__regex='^0[012]\\d+')
         return {
             'item_desc': queryset.exclude(submittal_description='').values_list('submittal_description', flat=True).distinct().order_by('submittal_description'),
@@ -438,6 +472,12 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
 
     @extend_schema(
         parameters=[
+            OpenApiParameter(
+                name='project_version_id',
+                description='ID of the project version to filter submittal items, if not provided then latest version is used when versioning is active',
+                required=False,
+                type=OpenApiTypes.INT
+            ),
             OpenApiParameter(
                 name='search',
                 description='Search for submittal items. Search across spec_section, type, item_desc, and para_context',
@@ -486,6 +526,19 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         ]
     )
     def list(self, request, *args, **kwargs):
+        project_version_id = request.query_params.get('project_version_id')
+        project = Project.objects.get(id=kwargs.get('project_id'))
+        team = project.team
+        self.is_versioning_active = is_versioning_feature_flag_active(request.user, team)
+        self.project_version = None
+        if self.is_versioning_active:
+            if not project_version_id:
+                self.project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+            else:
+                self.project_version = ProjectVersion.objects.get(id=project_version_id)
+            if self.project_version.project != project:
+                raise DRFValidationError("Not a valid project version for this project")
+            
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         
@@ -498,9 +551,10 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
 
         response_data = {
             'sel_filter_vals': self._get_sel_filter_vals(queryset),
-            'all_filter_vals': self._get_all_filter_vals(),
+            'all_filter_vals': self._get_all_filter_vals(project_version_id, self.is_versioning_active),
             'log_id_list': [log.id for log in queryset],
             'message': data['results'],
+            'project_version_id': self.project_version.id if self.project_version else None,
             'total_count': data['count'],
             'submittal_heading_lov': self._get_submittal_heading_lov(queryset),
             'submittal_type_lov': self._get_submittal_type_lov(queryset),
@@ -523,6 +577,19 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
     def export_to_xlsx(self, request, *args, **kwargs):
+        project_version_id = request.query_params.get('project_version_id')
+        project = Project.objects.get(id=kwargs.get('project_id'))
+        team = project.team
+        self.is_versioning_active = is_versioning_feature_flag_active(request.user, team)
+        self.project_version = None
+        if self.is_versioning_active:
+            if not project_version_id:
+                self.project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+            else:
+                self.project_version = ProjectVersion.objects.get(id=project_version_id)
+            if self.project_version.project != project:
+                raise DRFValidationError("Not a valid project version for this project")
+            
         queryset = self.filter_queryset(self.get_queryset())
         header_options = []
         try:
@@ -671,6 +738,18 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         return self.export_to_xlsx(request, *args, **kwargs)
 
     def export_to_jet_build(self, request, *args, **kwargs):
+        project_version_id = request.query_params.get('project_version_id')
+        project = Project.objects.get(id=kwargs.get('project_id'))
+        team = project.team
+        is_versioning_active = is_versioning_feature_flag_active(request.user, team)
+        if is_versioning_active:
+            if not project_version_id:
+                project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+            else:
+                project_version = ProjectVersion.objects.get(id=project_version_id)
+            if project_version.project != project:
+                raise DRFValidationError("Not a valid project version for this project")
+        
         queryset = self.filter_queryset(self.get_queryset())
         header_options = []
 
@@ -879,7 +958,7 @@ def invoke_lambda(payload, lambda_url):
         # if we timed out, it's a larger document and the lambda is processing it
         pass
 
-def parse_spec(callback_url, document_id, project_id, object_key, filename, user_id):
+def parse_spec(callback_url, document_id, project_id, project_version_id, object_key, filename, user_id):
     logging.debug(f"parse_spec: {object_key}")
 
     CHUNK_SIZE = 1200
@@ -891,6 +970,7 @@ def parse_spec(callback_url, document_id, project_id, object_key, filename, user
         "filename": filename,
         "user_id": user_id,
         "project_id": project_id,
+        "project_version_id": str(project_version_id),
         "chunk_size": CHUNK_SIZE,
         "chunk_overlap": CHUNK_OVERLAP,
         "callback_url": callback_url,
@@ -913,12 +993,13 @@ def parse_spec(callback_url, document_id, project_id, object_key, filename, user
 
 
 
-def call_extract_notices_lambda(callback_url, document_id, object_key):
+def call_extract_notices_lambda(callback_url, document_id, object_key, project_version_id):
     logging.debug(f"call_extract_notices_lambda: {object_key}")
 
     payload = {
         "source_file_s3_uri": f"s3://{settings.S3_BUCKET}/{object_key}",
         "document_id": str(document_id),
+        "project_version_id": str(project_version_id),
         "callback_url": callback_url,
         "ENVIRONMENT": settings.ENVIRONMENT,
     }
@@ -953,12 +1034,14 @@ def upload_to_s3_and_process(file_data):
                 callback_url=settings.BACKEND_NOTICES_CALLBACK_URL,
                 document_id=str(file_data['uploaded_file_id']),
                 object_key=file_data['document_path'],
+                project_version_id=str(file_data['project_version_id']),
             )
         else:
             parse_spec(
                 callback_url=settings.BACKEND_CALLBACK_URL,
                 document_id=str(file_data['uploaded_file_id']),
                 project_id=str(file_data['project_id']),
+                project_version_id=str(file_data['project_version_id']),
                 object_key=file_data['document_path'],
                 filename=file_data['filename'],
                 user_id=str(file_data['user_id'])
@@ -1005,7 +1088,17 @@ def upload_file(request):
     not_parsed = []
 
     is_notices_flag_active = is_notices_feature_flag_active(request.user, project.team)
+    is_versioning_flag_active = is_versioning_feature_flag_active(request.user, project.team)
+
     print(f"is_notices_flag_active: {is_notices_flag_active}")
+    print(f"is_versioning_flag_active: {is_versioning_flag_active}")
+
+    if not is_versioning_flag_active:
+        project_version_id = ProjectVersion.objects.filter(project=project).order_by('-created_at').first().id
+    else:
+        project_version_id = serializer.validated_data.get('project_version_id')
+        if not project_version_id:
+            return Response({'detail': 'Versioning is active but no project_version_id was provided'}, status=status.HTTP_400_BAD_REQUEST)
     
     for file in files:
         try:
@@ -1015,13 +1108,15 @@ def upload_file(request):
             file_md5 = get_file_hash(file)
 
             # check if file already exists
-            matching_files = UploadedFile.objects.filter(md5=file_md5, name=file.name, project_id=project_id)
+            matching_files = UploadedFile.objects.filter(md5=file_md5, name=file.name, project_id=project_id, project_version_id=project_version_id)
             if matching_files.exists():
                 already_existing_files.append(file.name)
                 continue
 
+
             uploaded_file = UploadedFile.objects.create(
                 project_id=project_id,
+                project_version_id=project_version_id,
                 uploaded_by=user,
                 name=file.name,
                 md5=file_md5,
@@ -1036,6 +1131,7 @@ def upload_file(request):
                 'document_path': document_path,
                 'uploaded_file_id': uploaded_file.id,
                 'project_id': project_id,
+                'project_version_id': project_version_id,
                 'user_id': request.user.id,
                 'is_notices_flag_active': is_notices_flag_active,
                 'extract_notices': extract_notices
@@ -1114,11 +1210,15 @@ def spec_status_webhook(request):
             document_id=int(request_data['document_id']),
             masterformat_section__masterformat_number=request_data['master_format_section_number']
         ).first()
+        project_version_id = request_data.get('project_version_id')
+        if not project_version_id:
+            project_version_id = ProjectVersion.objects.filter(project=request_data['project_id']).order_by('-created_at').first().id
         for submittal in request_data['submittals']:
             submittal_text = change_encode_value(submittal['submittal_text'])
             masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=request_data['master_format_section_number'])
             submittal_item = SubmittalItem.objects.create(
                 project_id=request_data['project_id'],
+                project_version_id=project_version_id,
                 masterformat_section=masterformat_section,
                 spec_section=spec_section,
                 submittal_type=submittal['submittal_type'],
@@ -1181,8 +1281,42 @@ class SubmittalItemListViewSet(viewsets.ModelViewSet):
     serializer_class = SubmittalItemListSerializer
 
     def get_queryset(self):
+        project_version_id = self.request.query_params.get('project_version_id')
         project_id = self.kwargs.get('project_id')
-        return self.queryset.filter(project_id=project_id)
+        project = Project.objects.get(id=project_id)
+        team = project.team
+        is_versioning_active = is_versioning_feature_flag_active(self.request.user, team)
+        if is_versioning_active:
+            if not project_version_id:
+                project_version_id = ProjectVersion.objects.filter(project=project).order_by('-created_at').first().id
+        queryset = self.queryset.filter(project_id=project_id)
+        if is_versioning_active and project_version_id:
+            queryset = queryset.filter(project_version_id=project_version_id)
+        return queryset
+    
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='project_version_id',
+                description='ID of the project version to filter submittal items, required when versioning is active',
+                required=False,
+                type=OpenApiTypes.INT
+            ),
+        ]
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+    
+    def perform_create(self, serializer):
+        project_id = self.kwargs.get('project_id')
+        project = get_object_or_404(Project, id=project_id)
+        if is_versioning_feature_flag_active(self.request.user, project.team):
+            if not serializer.validated_data.get('project_version'):
+                raise DRFValidationError("project_version is required when versioning is active")
+            serializer.save(project_version=serializer.validated_data.get('project_version'))
+        else:
+            project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+            serializer.save(project_version=project_version)
 
 
 class UpsertExcelExportHeaderView(generics.GenericAPIView):

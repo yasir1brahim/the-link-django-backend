@@ -1,6 +1,6 @@
 from django.test import TestCase
 from apps.teams.models import Team
-from ..models import Project, SubmittalItem, SpecSection, MasterFormatSection, UploadedFile
+from ..models import Project, ProjectVersion, SubmittalItem, SpecSection, MasterFormatSection, UploadedFile
 from ..services import SubmittalService
 
 
@@ -8,6 +8,7 @@ class TestSubmittalNumberAssignment(TestCase):
     def setUp(self):
         self.team = Team.objects.create(name="Test Team", slug="test-team")
         self.project = Project.objects.create(name="Test Project", team=self.team)
+        self.project_version = ProjectVersion.objects.get(project=self.project)
         self.masterformat1 = MasterFormatSection.objects.create(
             masterformat_number="033000"
         )
@@ -19,6 +20,7 @@ class TestSubmittalNumberAssignment(TestCase):
         )
         self.document = UploadedFile.objects.create(
             project=self.project,
+            project_version=self.project_version,
             document_path="test.pdf",
             name="test.pdf",
             md5="test.pdf",
@@ -47,6 +49,7 @@ class TestSubmittalNumberAssignment(TestCase):
         items = [
             SubmittalItem.objects.create(
                 project=self.project,
+                project_version=self.project_version,
                 spec_section=section,
                 masterformat_section=section.masterformat_section,
                 submittal_number=None,
@@ -92,6 +95,7 @@ class TestSubmittalNumberAssignment(TestCase):
         # Create one excluded item
         SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version,
             spec_section=excluded_section,
             masterformat_section=excluded_section.masterformat_section,
             submittal_number=None
@@ -100,6 +104,7 @@ class TestSubmittalNumberAssignment(TestCase):
         # Create one normal item
         SubmittalItem.objects.create(
             project=self.project,
+            project_version=self.project_version,
             spec_section=self.spec_section1,
             masterformat_section=self.spec_section1.masterformat_section,
             submittal_number=None

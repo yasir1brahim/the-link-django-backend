@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from unittest.mock import patch
 from apps.teams.models import Team, Membership as TeamMembership
 from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
-from apps.deliverables.models import Project, ProjectMembership, SubmittalItemList, SubmittalItem, MasterFormatSection, ROLE_PROJECT_ADMIN, ROLE_PROJECT_MEMBER
+from apps.deliverables.models import Project, ProjectVersion, ProjectMembership, SubmittalItemList, SubmittalItem, MasterFormatSection, ROLE_PROJECT_ADMIN, ROLE_PROJECT_MEMBER
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.conf import settings
@@ -43,6 +43,7 @@ class UploadFileForNoticeParsingTests(APITestCase):
             project_number='123456',
             team=self.team,
         )
+        self.project_version_1 = ProjectVersion.objects.get(project=self.existing_project)
         ProjectMembership.objects.create(
             project=self.existing_project,
             user=self.company_member,
@@ -123,6 +124,7 @@ class UploadFileForNoticeParsingTests(APITestCase):
         expected_payload = {
             "source_file_s3_uri": f"s3://{settings.S3_BUCKET}/{db_file.document_path}",
             "document_id": str(db_file.id),
+            "project_version_id": str(self.project_version_1.id),
             "callback_url": settings.BACKEND_NOTICES_CALLBACK_URL,
             "ENVIRONMENT": settings.ENVIRONMENT,
         }
@@ -130,6 +132,85 @@ class UploadFileForNoticeParsingTests(APITestCase):
             payload=expected_payload,
             lambda_url=settings.NOTICES_LAMBDA_FUNCTION_URL
         )
+    
+    @override_flag(settings.VERSIONING_FEATURE_FLAG_NAME, active=False)
+    @override_flag(settings.NOTICES_FEATURE_FLAG_NAME, active=True)
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_call_extract_notices_lambda_with_versioning_inactive_assigns_to_default_version(self, mock_invoke_lambda):
+        url = reverse('deliverables:upload_file')
+        data = {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+            'extract_notices': True,
+        }
+        self.client.force_authenticate(user=self.company_member)
+
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        db_file = UploadedFile.objects.get(project_id=self.existing_project.id, name=self.mock_file.name)
+        self.assertEqual(db_file.processing_status, 'PENDING_PROCESSING')
+
+        expected_payload = {
+            "source_file_s3_uri": f"s3://{settings.S3_BUCKET}/{db_file.document_path}",
+            "document_id": str(db_file.id),
+            "project_version_id": str(self.project_version_1.id),
+            "callback_url": settings.BACKEND_NOTICES_CALLBACK_URL,
+            "ENVIRONMENT": settings.ENVIRONMENT,
+        }
+        mock_invoke_lambda.assert_called_with(
+            payload=expected_payload,
+            lambda_url=settings.NOTICES_LAMBDA_FUNCTION_URL
+        )
+
+    @override_flag(settings.VERSIONING_FEATURE_FLAG_NAME, active=True)
+    @override_flag(settings.NOTICES_FEATURE_FLAG_NAME, active=True)
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_call_extract_notices_lambda_with_versioning_active_assigns_to_given_version(self, mock_invoke_lambda):
+        url = reverse('deliverables:upload_file')
+        project_version_2 = ProjectVersion.objects.create(project=self.existing_project, version_number=2, version_name="Version 2")
+        project_version_3 = ProjectVersion.objects.create(project=self.existing_project, version_number=3, version_name="Version 3")
+        data = {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+            'extract_notices': True,
+            'project_version_id': project_version_2.id
+        }
+        self.client.force_authenticate(user=self.company_member)
+
+        response = self.client.post(url, data)
+        print(response.data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        db_file = UploadedFile.objects.get(project_id=self.existing_project.id, name=self.mock_file.name)
+        self.assertEqual(db_file.processing_status, 'PENDING_PROCESSING')
+
+        expected_payload = {
+            "source_file_s3_uri": f"s3://{settings.S3_BUCKET}/{db_file.document_path}",
+            "document_id": str(db_file.id),
+            "project_version_id": str(project_version_2.id),
+            "callback_url": settings.BACKEND_NOTICES_CALLBACK_URL,
+            "ENVIRONMENT": settings.ENVIRONMENT,
+        }
+        mock_invoke_lambda.assert_called_with(
+            payload=expected_payload,
+            lambda_url=settings.NOTICES_LAMBDA_FUNCTION_URL
+        )
+
+    @override_flag(settings.VERSIONING_FEATURE_FLAG_NAME, active=True)
+    @override_flag(settings.NOTICES_FEATURE_FLAG_NAME, active=True)
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_call_extract_notices_lambda_with_versioning_active_requires_project_version(self, mock_invoke_lambda):
+        url = reverse('deliverables:upload_file')
+        data = {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+            'extract_notices': True,
+        }
+        self.client.force_authenticate(user=self.company_member)
+
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 class NoticeProcessingWebhookTests(APITestCase):
@@ -144,12 +225,14 @@ class NoticeProcessingWebhookTests(APITestCase):
             project_number='123456',
             team=self.team,
         )
+        self.project_version_1 = ProjectVersion.objects.get(project=self.project)
 
         self.document = UploadedFile.objects.create(
             project=self.project,
             name='Test Document',
             document_path='test/document/path',
             processing_status="PENDING_PROCESSING",
+            project_version=self.project_version_1
         )
 
         self.example_payload = {
@@ -172,6 +255,7 @@ class NoticeProcessingWebhookTests(APITestCase):
                 }
             ],
             'document': str(self.document.id),
+            'project_version_id': str(self.project_version_1.id),
         }
 
     def test_successful_callback_sets_document_as_processed(self):
@@ -181,6 +265,23 @@ class NoticeProcessingWebhookTests(APITestCase):
 
         self.document.refresh_from_db()
         self.assertEqual(self.document.processing_status, 'PROCESSED')
+        self.assertEqual(self.document.project_version, self.project_version_1)
+
+    def test_successful_callback_sets_project_version_correctly(self):
+        project_version_2 = ProjectVersion.objects.create(project=self.project, version_number=2, version_name="Version 2")
+        project_version_3 = ProjectVersion.objects.create(project=self.project, version_number=3, version_name="Version 3")
+        self.document.project_version = project_version_2
+        self.document.save()
+        url = reverse('deliverables:webhook-notice-processing')
+        self.example_payload['project_version_id'] = str(project_version_2.id)
+        response = self.client.post(url, self.example_payload, format='json')
+        print(response.data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        self.document.refresh_from_db()
+        self.assertEqual(self.document.processing_status, 'PROCESSED')
+        self.assertEqual(self.document.project_version, project_version_2)
+        
 
 
 class NoticeMatchViewSetTests(APITestCase):
@@ -190,8 +291,9 @@ class NoticeMatchViewSetTests(APITestCase):
 
         self.team = Team.objects.create(name='Team 1', slug='team-1')
         self.project = Project.objects.create(name='Test Project', project_number='123456', team=self.team)
+        self.project_version_1 = ProjectVersion.objects.get(project=self.project)
         self.project_without_notices = Project.objects.create(name='Test Project 2', project_number='123457', team=self.team)
-        self.document = UploadedFile.objects.create(project=self.project, name='Test Document', document_path='test/document/path', processing_status="PENDING_PROCESSING")
+        self.document = UploadedFile.objects.create(project=self.project, name='Test Document', document_path='test/document/path', processing_status="PENDING_PROCESSING", project_version=self.project_version_1)
         self.team_member = self.User.objects.create_user(username='team_member', password='password123')
         TeamMembership.objects.create(user=self.team_member, team=self.team, role=ROLE_MEMBER)
         ProjectMembership.objects.create(project=self.project, user=self.team_member, role=ROLE_PROJECT_MEMBER)

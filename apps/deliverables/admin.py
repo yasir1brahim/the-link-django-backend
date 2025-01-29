@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
     UploadedFile, SpecSection, MasterFormatSection,
-    SubmittalItemList, ExcelExportHeader
+    SubmittalItemList, ExcelExportHeader, ProjectVersion
 )
 
 
@@ -9,6 +9,9 @@ class ProjectMembershipInlineAdmin(admin.TabularInline):
     model = ProjectMembership
     list_display = ["user", "role"]
 
+class ProjectVersionInlineAdmin(admin.TabularInline):
+    model = ProjectVersion
+    list_display = ["project", "version_name"]
 
 class EntitlementInlineAdmin(admin.TabularInline):
     model = Entitlement
@@ -36,8 +39,15 @@ class ProjectAdmin(admin.ModelAdmin):
     list_display = ["id", "name", "team"]
     list_filter = ["name", "team"]
     search_fields = ["name", "team__name"]
-    inlines = (ProjectMembershipInlineAdmin,)
+    inlines = (ProjectMembershipInlineAdmin, ProjectVersionInlineAdmin)
     filter_horizontal = ("entitlements",)
+
+
+@admin.register(ProjectVersion)
+class ProjectVersionAdmin(admin.ModelAdmin):
+    list_display = ["id", "project", "version_name"]
+    list_filter = ["project", "version_name"]
+    search_fields = ["project__name", "version_name"]
 
 
 @admin.register(SubmittalItem)

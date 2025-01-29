@@ -11,3 +11,6 @@ def get_active_flags_for_user(user):
 
 def is_notices_feature_flag_active(user, team):
     return settings.NOTICES_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or settings.NOTICES_FEATURE_FLAG_NAME in get_active_flags_for_team(team)
+
+def is_versioning_feature_flag_active(user, team):
+    return settings.VERSIONING_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or settings.VERSIONING_FEATURE_FLAG_NAME in get_active_flags_for_team(team)

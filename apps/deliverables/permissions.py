@@ -1,7 +1,8 @@
 from rest_framework import permissions
 from rest_framework.request import Request
 from django.urls import reverse
-from .models import Project, SubmittalItem
+from .models import Project, ProjectVersion, SubmittalItem
+from apps.utils.feature_flags import is_versioning_feature_flag_active
 
 
 class ProjectAccessPermissions(permissions.BasePermission):
@@ -48,6 +49,16 @@ class ProjectAccessPermissions(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return request.user.is_member_of_project(project)
         return request.user.is_admin_for_project(project)
+
+
+class ProjectVersionAccessPermissions(permissions.BasePermission):
+    """
+    Permission to only allow admins of a project with versioning active to create, update, and delete project versions.
+    """
+
+    def has_permission(self, request: Request, view):
+        project = Project.objects.get(id=view.kwargs['project_id'])
+        return request.user.is_admin_for_project(project) and is_versioning_feature_flag_active(request.user, project.team)
 
 
 class SubmittalListAccessPermissions(permissions.BasePermission):

@@ -97,6 +97,7 @@ class NoticeProcessingCallbackSerializer(serializers.Serializer):
         queryset=UploadedFile.objects.select_related('project'),
         required=True,
     )
+    project_version_id = serializers.IntegerField(required=True)
     excerpts = NoticeExcerptProcessingSerializer(many=True, required=True)
     matches = NoticeMatchProcessingSerializer(many=True, required=True)
 
@@ -133,6 +134,10 @@ class NoticeProcessingCallbackSerializer(serializers.Serializer):
         document = self.validated_data['document']
         excerpts = self.validated_data['excerpts']
         matches = self.validated_data['matches']
+        project_version_id = self.validated_data['project_version_id']
+
+        if project_version_id != document.project_version.id:
+            raise serializers.ValidationError("Project version id does not match document's project version id")
 
         # First, prepare all the objects that'll be created
         anchor2excerpt_map = {}
@@ -155,6 +160,7 @@ class NoticeProcessingCallbackSerializer(serializers.Serializer):
             notice_match = NoticeMatch(
                 document=document,
                 project=document.project,
+                project_version_id=project_version_id,
                 **match_data,
             )
             notice_matches_to_create.append(notice_match)

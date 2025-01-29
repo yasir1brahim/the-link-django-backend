@@ -15,6 +15,7 @@ from ..models import (
     DocProcessingStatus,
     Project,
     ProjectMembership,
+    ProjectVersion,
     ExcelExportHeader,
 )
 from ..constants import masterformat_to_section_title_map
@@ -53,17 +54,27 @@ class ProjectMembershipAddSerializer(serializers.Serializer):
         return data
 
 
+class ProjectVersionSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(read_only=True)
+    version_number = serializers.IntegerField(read_only=True)
+    version_name = serializers.CharField(required=True)
+
+    class Meta:
+        model = ProjectVersion
+        fields = ['id', 'version_number', 'version_name']
+
+
 class BaseProjectSerializer(serializers.ModelSerializer):
+    project_versions = ProjectVersionSerializer(source="versions", many=True, required=False, read_only=True)
+    members = ProjectMembershipSerializer(source="project_memberships", many=True, required=False)
+    team = serializers.ReadOnlyField(source="team.id")
+    user_limit = serializers.ReadOnlyField()
+
     class Meta:
         model = Project
         fields = ['id', 'name', 'description', 'team', 'members',
                    'user_limit', 'start_date', 'end_date', 'is_archived', 
-                   'project_number', 'project_type']
-
-    members = ProjectMembershipSerializer(source="project_memberships", many=True, required=False)
-    team = serializers.ReadOnlyField(source="team.id")
-    # entitlements = serializers.SerializerMethodField(read_only=True)
-    user_limit = serializers.ReadOnlyField()
+                   'project_number', 'project_type', 'project_versions']
 
     def get_entitlements(self, obj) -> list[str]:
         # Handle case when obj is a dictionary (during validation)
@@ -170,11 +181,13 @@ class EmbedDocumentSerializer(serializers.ModelSerializer):
 class DocumentSerializer(EmbedDocumentSerializer):
     document_status = serializers.CharField(source="processing_status")
     document_subsections = DocumentSubsectionSerializer(source="specsection_set", many=True)
+    project_version = ProjectVersionSerializer(many=False)
 
     class Meta(EmbedDocumentSerializer.Meta):
         fields = [
             *EmbedDocumentSerializer.Meta.fields,
             'document_status',
+            'project_version',
             'document_subsections',
             'created_at',
             'updated_at',
@@ -217,6 +230,7 @@ class ProjectDetailsSerializer(BaseProjectSerializer):
 class FileUploadSerializer(serializers.Serializer):
     files = serializers.ListField(child=serializers.FileField())
     project_id = serializers.IntegerField()
+    project_version_id = serializers.IntegerField(required=False)
     extract_notices = serializers.BooleanField(required=False)
 
 
@@ -283,6 +297,8 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
                                                   required=False)
     updated_by = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(),
                                                     required=False)
+    project_version = serializers.PrimaryKeyRelatedField(queryset=ProjectVersion.objects.all(),
+                                                    required=False)
 
     spec_section = serializers.CharField(required=False)
     item_desc = serializers.CharField(required=False)
@@ -326,6 +342,7 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             spec_section = None
         return SubmittalItem.objects.create(
             project_id=validated_data.get('project_id'),
+            project_version=validated_data.get('project_version'),
             updated_by=validated_data.get('updated_by'),
             submittal_description=validated_data.get('item_desc'),
             submittal_content=validated_data.get('para_context'),
@@ -363,6 +380,7 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             'spec_section',
             'item_desc',
             'para_context',
+            'project_version',
             'para_no',
             'type',
             'added_under_submittal_id',
@@ -371,6 +389,8 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
 
 class SubmittalItemListSerializer(serializers.ModelSerializer):
     project_id = serializers.IntegerField(source='project.id', required=False)
+    project_version = serializers.PrimaryKeyRelatedField(queryset=ProjectVersion.objects.all(),
+                                                    required=False)
     name = serializers.CharField()
     created_by = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(),
                                                     required=False)
@@ -385,7 +405,7 @@ class SubmittalItemListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SubmittalItemList
-        fields = ['id', 'project_id', 'name', 'created_by', 'submittals']
+        fields = ['id', 'project_id', 'name', 'created_by', 'submittals', 'project_version']
 
 
 class ExcelExportHeaderSerializer(serializers.ModelSerializer):
