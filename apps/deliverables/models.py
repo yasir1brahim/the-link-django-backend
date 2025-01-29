@@ -49,7 +49,8 @@ class ProjectVersion(BaseModel):
     project = models.ForeignKey("Project", on_delete=models.CASCADE, related_name="versions")
     version_number = models.PositiveSmallIntegerField(blank=True, null=True)
     version_name = models.CharField(max_length=256, blank=True, null=True)
-    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="created_project_versions", blank=True, null=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="created_project_versions", blank=True, null=True)
+    last_updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="updated_project_versions", blank=True, null=True)
 
     class Meta:
         constraints = [

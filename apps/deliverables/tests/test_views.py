@@ -563,6 +563,108 @@ class ProjectViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
+class ProjectVersionViewSetTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.User = get_user_model()
+        self.company_admin = self.User.objects.create_user(
+            username='company_admin', 
+            password='password123'
+        )
+        self.team = Team.objects.create(name='Team 1', slug='team-1')
+        TeamMembership.objects.create(
+            user=self.company_admin,
+            team=self.team,
+            role=ROLE_ADMIN
+        )
+        self.project = Project.objects.create(
+            name='Project 1',
+            project_number='123456',
+            team=self.team,
+        )
+        self.project_member = self.User.objects.create_user(
+            username='project_member',
+            password='password123'
+        )
+        TeamMembership.objects.create(
+            user=self.project_member,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.project_member,
+            role=ROLE_PROJECT_MEMBER
+        )
+        self.project_admin = self.User.objects.create_user(
+            username='project_admin',
+            password='password123'
+        )
+        TeamMembership.objects.create(
+            user=self.project_admin,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.project_admin,
+            role=ROLE_PROJECT_ADMIN
+        )
+
+    @patch('apps.deliverables.permissions.is_versioning_feature_flag_active', return_value=True)
+    def test_company_admin_can_create_project_version(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.company_admin)
+        response = self.client.post(reverse('project-version-list', kwargs={'project_id': self.project.id}), {
+            'version_number': 2,
+            'version_name': 'Version 2',
+        })
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(ProjectVersion.objects.count(), 2)
+        self.assertEqual(ProjectVersion.objects.get(project=self.project, version_name='Version 2').version_name, 'Version 2')
+
+    @patch('apps.deliverables.permissions.is_versioning_feature_flag_active', return_value=True)
+    def test_project_admin_can_create_project_version(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.project_admin)
+        response = self.client.post(reverse('project-version-list', kwargs={'project_id': self.project.id}), {
+            'version_number': 2,
+            'version_name': 'Version 2',
+        })
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(ProjectVersion.objects.count(), 2)
+        self.assertEqual(ProjectVersion.objects.get(project=self.project, version_name='Version 2').version_name, 'Version 2')
+
+    @patch('apps.deliverables.permissions.is_versioning_feature_flag_active', return_value=True)
+    def test_project_member_cannot_create_project_version(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.project_member)
+        response = self.client.post(reverse('project-version-list', kwargs={'project_id': self.project.id}), {
+            'version_number': 2,
+            'version_name': 'Version 2',
+        })
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    @patch('apps.deliverables.permissions.is_versioning_feature_flag_active', return_value=True)
+    def test_project_version_stores_who_created_it(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.project_admin)
+        response = self.client.post(reverse('project-version-list', kwargs={'project_id': self.project.id}), {
+            'version_number': 2,
+            'version_name': 'Version 2',
+        })
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(ProjectVersion.objects.get(project=self.project, version_name='Version 2').created_by, self.project_admin)
+
+    @patch('apps.deliverables.permissions.is_versioning_feature_flag_active', return_value=True)
+    def test_project_version_update(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.project_admin)
+        existing_version = ProjectVersion.objects.get(project=self.project)
+        response = self.client.patch(reverse('project-version-detail', kwargs={'project_id': self.project.id, 'pk': existing_version.id}), {
+            'version_name': 'Updated Version Name',
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        existing_version.refresh_from_db()
+        self.assertEqual(existing_version.version_name, 'Updated Version Name')
+        self.assertEqual(existing_version.last_updated_by, self.project_admin)
+
+
 class UploadFileTests(APITestCase):
     def setUp(self):
         self.client = APIClient()

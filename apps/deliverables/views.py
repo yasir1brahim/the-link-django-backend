@@ -291,8 +291,17 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
 class ProjectVersionViewSet(viewsets.ModelViewSet):
     queryset = ProjectVersion.objects.all()
-    permission_classes = [IsAuthenticated, ProjectAccessPermissions, ProjectVersionAccessPermissions]
+    permission_classes = [IsAuthenticated, ProjectVersionAccessPermissions]
     serializer_class = ProjectVersionSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'))
+
+    def perform_update(self, serializer):
+        serializer.save(last_updated_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        raise DRFValidationError("Cannot delete project version yet")
 
 
 class SubmittalItemPagination(PageNumberPagination):
