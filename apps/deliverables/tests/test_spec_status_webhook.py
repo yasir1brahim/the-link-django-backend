@@ -184,7 +184,7 @@ class TestSpecStatusWebhook(APITestCase):
             self.assertEqual(submittal_item.project_version, project_version_2)
 
         # check that get submittal items API returns the submittal items in the correct order
-        url = reverse('submittal-item-list', kwargs={'project_id': self.project.id})
+        url = reverse('submittal-item-list', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(project_version_2.id)
         print(url)
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
