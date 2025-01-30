@@ -5,7 +5,8 @@ from django.db import transaction, models
 from .models import (
     Project,
     UploadedFile,
-    DocProcessingStatus, SubmittalItem, SpecSection
+    DocProcessingStatus, SubmittalItem, SpecSection,
+    ProjectVersion
 )
 from ..utils.database import apply_advisory_lock_submittal_number_assignment
 
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 class SubmittalService:
 
     @classmethod
-    def _get_pending_documents(cls, project: Project | int):
+    def _get_pending_documents(cls, project: Project | int, project_version_id: int):
         if isinstance(project, Project):
             project = project.pk
 
@@ -26,7 +27,7 @@ class SubmittalService:
 
         pending_documents_qs = (
             UploadedFile.objects
-            .filter(project=project)
+            .filter(project=project, project_version=project_version_id)
             .exclude(processing_status__in=final_document_states)
         )
 
@@ -39,10 +40,11 @@ class SubmittalService:
             cls,
             project: int,
             reassign: bool,
+            project_version_id: int,
     ):
         targets_qs = (
             SubmittalItem.objects
-            .filter(project=project)
+            .filter(project=project, project_version=project_version_id)
             .exclude(spec_section__processing_method=SpecSection.ProcessingMethod.REGEX_UNABLE_TO_DETECT)
             .order_by(
                 'masterformat_section__masterformat_number', 
@@ -68,7 +70,7 @@ class SubmittalService:
         else:
             current_max_number = (
                 SubmittalItem.objects
-                .filter(project=project)
+                .filter(project=project, project_version=project_version_id)
                 .aggregate(models.Max('submittal_number'))
             )['submittal_number__max']
 
@@ -98,6 +100,7 @@ class SubmittalService:
     def assign_submittal_numbers(
             cls,
             project: Project | int,
+            project_version_id: int,
             reassign: bool = False,
             only_if_all_documents_processed: bool = True,
     ) -> None:
@@ -105,7 +108,7 @@ class SubmittalService:
             project = project.pk
 
         if only_if_all_documents_processed:
-            pending_documents_qs = cls._get_pending_documents(project)
+            pending_documents_qs = cls._get_pending_documents(project, project_version_id)
 
             # If there are any documents that are not in a final state, we won't
             # be doing anything here, but it will be doable later when the last
@@ -133,6 +136,7 @@ class SubmittalService:
             cls._actually_assign_submittal_numbers(
                 project=project,
                 reassign=reassign,
+                project_version_id=project_version_id,
             )
 
     # endregion submittal number handling

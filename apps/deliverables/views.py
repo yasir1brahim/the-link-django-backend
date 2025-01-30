@@ -1211,8 +1211,12 @@ def spec_status_webhook(request):
             masterformat_section__masterformat_number=request_data['master_format_section_number']
         ).first()
         project_version_id = request_data.get('project_version_id')
+        version_from_spec_section = spec_section.document.project_version.id
+        if project_version_id and project_version_id != version_from_spec_section:
+            print(f"SPEC STATUS WEBHOOK: project_version_id {project_version_id} does not match version from spec section {version_from_spec_section}")
+            return Response(status=status.HTTP_400_BAD_REQUEST)
         if not project_version_id:
-            project_version_id = ProjectVersion.objects.filter(project=request_data['project_id']).order_by('-created_at').first().id
+            project_version_id = version_from_spec_section
         for submittal in request_data['submittals']:
             submittal_text = change_encode_value(submittal['submittal_text'])
             masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=request_data['master_format_section_number'])
@@ -1267,6 +1271,7 @@ def spec_status_webhook(request):
     SubmittalService.assign_submittal_numbers(
         # TODO: Replace `int` cast here with actually enforcing integer input
         project=int(request_data['project_id']),
+        project_version_id=int(document.project_version.id),
         only_if_all_documents_processed=True,
     )
 
