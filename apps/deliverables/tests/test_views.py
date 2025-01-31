@@ -714,6 +714,18 @@ class ProjectVersionViewSetTests(APITestCase):
         self.project_version_1.refresh_from_db()
         self.assertEqual(self.project_version_1.is_archived, False)
 
+    @patch('apps.deliverables.permissions.is_versioning_feature_flag_active', return_value=True)
+    def test_cannot_create_project_version_with_duplicate_name(self, mock_is_versioning_feature_flag_active):
+        """Test that creating a project version with a duplicate name is not allowed"""
+        self.client.force_authenticate(user=self.project_admin)
+        response = self.client.post(reverse('project-version-list', kwargs={'project_id': self.project.id}), {
+            'version_number': 2,
+            'version_name': 'Version 1',
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.data[0], "Version name must be different from all active and archived versions")
+
 
 class UploadFileTests(APITestCase):
     def setUp(self):

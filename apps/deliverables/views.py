@@ -302,10 +302,16 @@ class ProjectVersionViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'))
+        try:
+            serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'))
+        except IntegrityError:
+            raise DRFValidationError("Version name must be different from all active and archived versions")
 
     def perform_update(self, serializer):
-        serializer.save(last_updated_by=self.request.user)
+        try:
+            serializer.save(last_updated_by=self.request.user)
+        except IntegrityError:
+            raise DRFValidationError("Version name must be different from all active and archived versions")
 
     def destroy(self, request, *args, **kwargs):
         return Response(
