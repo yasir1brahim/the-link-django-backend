@@ -294,14 +294,48 @@ class ProjectVersionViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, ProjectVersionAccessPermissions]
     serializer_class = ProjectVersionSerializer
 
+    def get_queryset(self):
+        project_id = self.kwargs.get('project_id')
+        queryset = self.queryset.filter(project_id=project_id)
+        if self.action == 'list':
+            queryset = queryset.exclude(is_archived=True)
+        return queryset
+
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'))
 
     def perform_update(self, serializer):
         serializer.save(last_updated_by=self.request.user)
 
-    def perform_destroy(self, instance):
-        raise DRFValidationError("Cannot delete project version yet")
+    def destroy(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Cannot delete project versions, use archive instead"},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED
+        )
+    
+    @action(detail=True, methods=['post'], url_path='archive')
+    def archive(self, request, pk=None, project_id=None):
+        """Toggle the archive status of a project version."""
+        project_version = self.get_object()
+        action_type = request.data.get('action', 'archive').lower()
+        if action_type == 'restore':
+            project_version.is_archived = False
+            status_message = "unarchived"
+        else:
+            if project_version.project.versions.count() == 1:
+                return Response(
+                    {"detail": "Cannot archive the last remaining project version"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            project_version.is_archived = True
+            status_message = "archived"
+
+        project_version.save()
+
+        return Response(
+            {"status": f"Project version {status_message} successfully."},
+            status=status.HTTP_200_OK
+        )
 
 
 class SubmittalItemPagination(PageNumberPagination):
@@ -437,7 +471,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
                 raise DRFValidationError("project_version_id does not match project_id")
             serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'), project_version=project_version)
         else:
-            project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+            project_version = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first()
             serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'), project_version=project_version)
 
     def perform_update(self, serializer):
@@ -533,7 +567,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         self.project_version = None
         if self.is_versioning_active:
             if not project_version_id:
-                self.project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+                self.project_version = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first()
             else:
                 self.project_version = ProjectVersion.objects.get(id=project_version_id)
             if self.project_version.project != project:
@@ -584,7 +618,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         self.project_version = None
         if self.is_versioning_active:
             if not project_version_id:
-                self.project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+                self.project_version = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first()
             else:
                 self.project_version = ProjectVersion.objects.get(id=project_version_id)
             if self.project_version.project != project:
@@ -744,7 +778,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         is_versioning_active = is_versioning_feature_flag_active(request.user, team)
         if is_versioning_active:
             if not project_version_id:
-                project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+                project_version = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first()
             else:
                 project_version = ProjectVersion.objects.get(id=project_version_id)
             if project_version.project != project:
@@ -1094,7 +1128,7 @@ def upload_file(request):
     print(f"is_versioning_flag_active: {is_versioning_flag_active}")
 
     if not is_versioning_flag_active:
-        project_version_id = ProjectVersion.objects.filter(project=project).order_by('-created_at').first().id
+        project_version_id = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first().id
     else:
         project_version_id = serializer.validated_data.get('project_version_id')
         if not project_version_id:
@@ -1293,7 +1327,7 @@ class SubmittalItemListViewSet(viewsets.ModelViewSet):
         is_versioning_active = is_versioning_feature_flag_active(self.request.user, team)
         if is_versioning_active:
             if not project_version_id:
-                project_version_id = ProjectVersion.objects.filter(project=project).order_by('-created_at').first().id
+                project_version_id = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first().id
         queryset = self.queryset.filter(project_id=project_id)
         if is_versioning_active and project_version_id:
             queryset = queryset.filter(project_version_id=project_version_id)
@@ -1320,7 +1354,7 @@ class SubmittalItemListViewSet(viewsets.ModelViewSet):
                 raise DRFValidationError("project_version is required when versioning is active")
             serializer.save(project_version=serializer.validated_data.get('project_version'))
         else:
-            project_version = ProjectVersion.objects.filter(project=project).order_by('-created_at').first()
+            project_version = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first()
             serializer.save(project_version=project_version)
 
 

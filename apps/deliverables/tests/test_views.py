@@ -582,6 +582,7 @@ class ProjectVersionViewSetTests(APITestCase):
             project_number='123456',
             team=self.team,
         )
+        self.project_version_1 = ProjectVersion.objects.get(project=self.project)
         self.project_member = self.User.objects.create_user(
             username='project_member',
             password='password123'
@@ -663,6 +664,55 @@ class ProjectVersionViewSetTests(APITestCase):
         existing_version.refresh_from_db()
         self.assertEqual(existing_version.version_name, 'Updated Version Name')
         self.assertEqual(existing_version.last_updated_by, self.project_admin)
+
+    @patch('apps.deliverables.permissions.is_versioning_feature_flag_active', return_value=True)
+    def test_delete_project_version_not_allowed(self, mock_is_versioning_feature_flag_active):
+        """Test that deleting a project version is not allowed"""
+        self.client.force_authenticate(user=self.project_admin)
+        existing_version = ProjectVersion.objects.get(project=self.project)
+        response = self.client.delete(reverse('project-version-detail', kwargs={'project_id': self.project.id, 'pk': existing_version.id}))
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        self.assertEqual(ProjectVersion.objects.get(id=existing_version.id).is_archived, False)
+
+    @patch('apps.deliverables.permissions.is_versioning_feature_flag_active', return_value=True)
+    def test_project_version_archive(self, mock_is_versioning_feature_flag_active):
+        """Test that archiving a project version removes it from the project version list"""
+        self.client.force_authenticate(user=self.project_admin)
+        project_version_2 = ProjectVersion.objects.create(project=self.project, version_number=2, version_name="Version 2")
+        response = self.client.post(
+            reverse('project-version-archive', kwargs={'project_id': self.project.id, 'pk': project_version_2.id}),
+            data={'action': 'archive'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(ProjectVersion.objects.get(id=project_version_2.id).is_archived, True)
+
+    @patch('apps.deliverables.permissions.is_versioning_feature_flag_active', return_value=True)
+    def test_cannot_archive_last_remaining_project_version(self, mock_is_versioning_feature_flag_active):
+        """Test that archiving the last remaining project version is not allowed"""
+        self.client.force_authenticate(user=self.project_admin)
+        response = self.client.post(
+            reverse('project-version-archive', kwargs={'project_id': self.project.id, 'pk': self.project_version_1.id}),
+            data={'action': 'archive'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['detail'], "Cannot archive the last remaining project version")
+        self.assertEqual(ProjectVersion.objects.get(id=self.project_version_1.id).is_archived, False)
+
+    @patch('apps.deliverables.permissions.is_versioning_feature_flag_active', return_value=True)
+    def test_restore_project_version(self, mock_is_versioning_feature_flag_active):
+        """Test that restoring a project version unarchives it"""
+        self.client.force_authenticate(user=self.project_admin)
+        self.project_version_1.is_archived = True
+        self.project_version_1.save()
+        self.project_version_1.refresh_from_db()
+        self.assertEqual(self.project_version_1.is_archived, True)
+        response = self.client.post(
+            reverse('project-version-archive', kwargs={'project_id': self.project.id, 'pk': self.project_version_1.id}),
+            data={'action': 'restore'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.project_version_1.refresh_from_db()
+        self.assertEqual(self.project_version_1.is_archived, False)
 
 
 class UploadFileTests(APITestCase):

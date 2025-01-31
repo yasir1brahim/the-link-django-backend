@@ -65,7 +65,7 @@ class ProjectVersionSerializer(serializers.ModelSerializer):
 
 
 class BaseProjectSerializer(serializers.ModelSerializer):
-    project_versions = ProjectVersionSerializer(source="versions", many=True, required=False, read_only=True)
+    project_versions = serializers.SerializerMethodField()
     members = ProjectMembershipSerializer(source="project_memberships", many=True, required=False)
     team = serializers.ReadOnlyField(source="team.id")
     user_limit = serializers.ReadOnlyField()
@@ -75,6 +75,10 @@ class BaseProjectSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'description', 'team', 'members',
                    'user_limit', 'start_date', 'end_date', 'is_archived', 
                    'project_number', 'project_type', 'project_versions']
+        
+    def get_project_versions(self, obj):
+        versions = obj.versions.filter(is_archived=False)
+        return ProjectVersionSerializer(versions, many=True).data
 
     def get_entitlements(self, obj) -> list[str]:
         # Handle case when obj is a dictionary (during validation)

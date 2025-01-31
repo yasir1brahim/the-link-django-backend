@@ -47,6 +47,7 @@ class Project(BaseModel):
 
 class ProjectVersion(BaseModel):
     project = models.ForeignKey("Project", on_delete=models.CASCADE, related_name="versions")
+    is_archived = models.BooleanField(default=False)
     version_number = models.PositiveSmallIntegerField(blank=True, null=True)
     version_name = models.CharField(max_length=256, blank=True, null=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="created_project_versions", blank=True, null=True)
@@ -55,7 +56,6 @@ class ProjectVersion(BaseModel):
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=['project', 'version_number'], name='unique_project_version_number'),
-            models.UniqueConstraint(fields=['project', 'version_name'], name='unique_project_version_name'),
         ]
         ordering = ['created_at']
 
