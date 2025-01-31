@@ -116,6 +116,25 @@ class ProjectReadSerializerTest(TestCase):
         self.assertEqual(serializer.data['project_versions'][1]['version_name'], project_version_2.version_name)
         self.assertEqual(serializer.data['project_versions'][2]['version_name'], project_version_3.version_name)
 
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_project_versions_only_returns_unarchived_versions(self, mock_generate_presigned_url):
+        """Test that project versions only returns unarchived versions"""
+        mock_generate_presigned_url.return_value = "https://test.com"
+        project_version_2 = ProjectVersion.objects.create(
+            project = self.project,
+            version_name = "Version 2"
+        )
+        project_version_3 = ProjectVersion.objects.create(
+            project = self.project,
+            version_name = "Version 3"
+        )
+        project_version_2.is_archived = True
+        project_version_2.save()
+        serializer = ProjectDetailsSerializer(instance=self.project)
+        self.assertEqual(len(serializer.data['project_versions']), 2)
+        self.assertEqual(serializer.data['project_versions'][0]['version_name'], self.project_version_1.version_name)
+        self.assertEqual(serializer.data['project_versions'][1]['version_name'], project_version_3.version_name)
+
     @unittest.skip("Entitlements aren't used yet, so not calculated to improve performance")
     def test_get_entitlements_project_level(self):
         """Test entitlements method returns project-level entitlements when they exist"""
