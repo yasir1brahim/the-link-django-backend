@@ -56,7 +56,6 @@ class ProjectVersion(BaseModel):
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=['project', 'version_number'], name='unique_project_version_number'),
-            models.UniqueConstraint(fields=['project', 'version_name'], name='unique_project_version_name'),
         ]
         ordering = ['created_at']
 
