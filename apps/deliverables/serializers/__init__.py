@@ -373,6 +373,9 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             instance.paragraph_number = validated_data.get('para_no')
         if validated_data.get('type'):
             instance.submittal_type = validated_data.get('type')
+        if validated_data.get('project_version'):
+            instance.project_version = validated_data.get('project_version')
+        instance.updated_by = validated_data.get('updated_by')
         instance.save()
         return instance
 

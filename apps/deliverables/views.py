@@ -390,7 +390,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             order_items_list = [order_string, 'masterformat_section__masterformat_number', 'heirarchical_paragraph_number', 'submittal_number']
         return queryset.order_by(*order_items_list)
 
-    def get_queryset(self):
+    def get_queryset_for_list(self):
         project_id = self.kwargs.get('project_id')
         search = self.request.query_params.get('search')
         order_col = self.request.query_params.get('order_col')
@@ -481,7 +481,19 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             serializer.save(created_by=self.request.user, project_id=self.kwargs.get('project_id'), project_version=project_version)
 
     def perform_update(self, serializer):
-        serializer.save(updated_by=self.request.user)
+        project_id = self.kwargs.get('project_id')
+        project = get_object_or_404(Project, id=project_id)
+        project_version = serializer.validated_data.get('project_version')
+        print(f"project_version: {project_version}")
+        if is_versioning_feature_flag_active(self.request.user, project.team):
+            if not project_version:
+                raise DRFValidationError("project_version_id is required when versioning is active")
+            if not project_version.project == project:
+                raise DRFValidationError("project_version_id does not match project_id")
+            serializer.save(updated_by=self.request.user, project_id=self.kwargs.get('project_id'), project_version=project_version)
+        else:
+            project_version = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first()
+            serializer.save(updated_by=self.request.user, project_id=self.kwargs.get('project_id'), project_version=project_version)
 
     def _get_sel_filter_vals(self, result_queryset):
         return {
@@ -579,7 +591,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             if self.project_version.project != project:
                 raise DRFValidationError("Not a valid project version for this project")
             
-        queryset = self.filter_queryset(self.get_queryset())
+        queryset = self.filter_queryset(self.get_queryset_for_list())
         page = self.paginate_queryset(queryset)
         
         if page is not None:
