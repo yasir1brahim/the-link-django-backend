@@ -1678,6 +1678,55 @@ class SubmittalItemViewSetTests(APITestCase):
         response = self.client.post(reverse('submittal-item-list', kwargs={'project_id': self.project.id}), post_payload)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_update_submittal_with_versioning_active_and_no_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.user)
+        post_payload = {
+            'document': self.document.id,
+            'spec_section': "111111",  # new spec section
+            'item_desc': "Test",
+            'para_context': "Test context",
+            'para_no': "1.1",
+            'type': "Test type",
+        }
+        response = self.client.put(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': self.submittal_item.id}), post_payload)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_update_submittal_with_versioning_active_and_project_version_id_does_not_match_project_id_raises_400(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.user)
+        post_payload = {
+            'document': self.document.id,
+            'spec_section': "111111",  # new spec section
+            'item_desc': "Test",
+            'para_context': "Test context",
+            'para_no': "1.1",
+            'type': "Test type",
+            'project_version': 111111,
+        }
+        response = self.client.put(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': self.submittal_item.id}), post_payload)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_update_submittal_with_versioning_active_and_project_version_id_matches_project_id_updates_submittal(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.user)
+        post_payload = {
+            'document': self.document.id,
+            'spec_section': "111111",  # new spec section
+            'item_desc': "Updated item description",
+            'para_context': "Updated para context",
+            'para_no': "1.1",
+            'type': "Updated type",
+            'project_version': self.project_version_2.id,
+        }
+        response = self.client.put(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': self.submittal_item.id}), post_payload)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(SubmittalItem.objects.get(id=self.submittal_item.id).submittal_description, "Updated item description")
+        self.assertEqual(SubmittalItem.objects.get(id=self.submittal_item.id).submittal_content, "Updated para context")
+        self.assertEqual(SubmittalItem.objects.get(id=self.submittal_item.id).submittal_type, "Updated type")
+        self.assertEqual(self.project_version_2, SubmittalItem.objects.get(id=self.submittal_item.id).project_version)
+        self.assertEqual(self.user, SubmittalItem.objects.get(id=self.submittal_item.id).updated_by)
+        
 
 
 class ProjectArchiveTests(APITestCase):
