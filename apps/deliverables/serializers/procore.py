@@ -53,6 +53,7 @@ class CreateProcoreProjectMappingSerializer(serializers.Serializer):
 
 class ProcoreSubmittalSerializer(serializers.Serializer):
     project_id = serializers.IntegerField()
+    project_version_id = serializers.IntegerField(required=False, allow_null=True)
     records = serializers.ListField(child=serializers.IntegerField())
     export_all = serializers.BooleanField(required=False)
 
