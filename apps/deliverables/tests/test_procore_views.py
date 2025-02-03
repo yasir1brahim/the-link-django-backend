@@ -496,18 +496,20 @@ class TestCreateProcoreSubmittalsView(APITestCase):
         # URL for the view
         self.url = reverse('deliverables:procore-create-submittals')  # Update with your actual URL name
 
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=False)
     @patch('apps.deliverables.views.get_fresh_token_for_user')
     @patch('apps.deliverables.views.get_status')
     @patch('apps.deliverables.views.get_spec_divisions')
     @patch('apps.deliverables.views.get_spec_sections')
     @patch('apps.deliverables.views.create_submittal')
-    def test_successful_submittal_creation(
+    def test_successful_submittal_creation_with_versioning_inactive(
         self, 
         mock_create_submittal,
         mock_get_spec_sections,
         mock_get_spec_divisions,
         mock_get_status,
-        mock_get_fresh_token
+        mock_get_fresh_token,
+        mock_is_versioning_feature_flag_active
     ):
         # Mock responses
         mock_get_fresh_token.return_value = MagicMock(access_token='fake-token')
@@ -561,6 +563,162 @@ class TestCreateProcoreSubmittalsView(APITestCase):
         self.assertEqual(updated_submittal.procore_submittal_id, 'sub-123')
         self.assertIsNotNone(updated_submittal.procore_export_date)
 
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=False)
+    @patch('apps.deliverables.views.get_fresh_token_for_user')
+    @patch('apps.deliverables.views.get_status')
+    @patch('apps.deliverables.views.get_spec_divisions')
+    @patch('apps.deliverables.views.get_spec_sections')
+    @patch('apps.deliverables.views.create_submittal')
+    def test_successful_submittal_creation_with_versioning_inactive_exports_from_all_versions(
+        self, 
+        mock_create_submittal,
+        mock_get_spec_sections,
+        mock_get_spec_divisions,
+        mock_get_status,
+        mock_get_fresh_token,
+        mock_is_versioning_feature_flag_active
+    ):
+        # Mock responses
+        mock_get_fresh_token.return_value = MagicMock(access_token='fake-token')
+        mock_get_status.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [{"name": "Open", "id": "123"}]
+        )
+        mock_get_spec_divisions.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [{"number": "12", "id": "div-123"}]
+        )
+        mock_get_spec_sections.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [{"number": "123456", "id": "sec-123"}]
+        )
+        mock_create_submittal.return_value = MagicMock(
+            status_code=201,
+            json=lambda: {"id": "sub-123"}
+        )
+        project_version_2 = ProjectVersion.objects.create(
+            project=self.project,
+            version_name='Version 2',
+            is_archived=False,
+        )
+        submittal_item_2 = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=project_version_2,
+            masterformat_section=self.masterformat_section,
+            submittal_type='Test Type',
+            submittal_description='Test Description 2',
+            submittal_content='Test Content 2',
+            paragraph_number='1.2'
+        )
+
+        # Test data
+        data = {
+            'project_id': self.project.id,
+            'records': [],
+            'export_all': True
+        }
+
+        # Make request
+        response = self.client.post(self.url, data, format='json')
+
+        # Assertions
+        print(response.data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['message'], 'Submittal created')
+        self.assertIn(str(self.submittal_item.id), response.data['submittals'])
+        self.assertIn(str(submittal_item_2.id), response.data['submittals'])
+
+        # Verify submittal was updated
+        updated_submittal_1 = SubmittalItem.objects.get(id=self.submittal_item.id)
+        updated_submittal_2 = SubmittalItem.objects.get(id=submittal_item_2.id)
+        self.assertEqual(updated_submittal_1.procore_submittal_id, 'sub-123')
+        self.assertIsNotNone(updated_submittal_1.procore_export_date)
+        self.assertEqual(updated_submittal_2.procore_submittal_id, 'sub-123')
+        self.assertIsNotNone(updated_submittal_2.procore_export_date)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.get_fresh_token_for_user')
+    @patch('apps.deliverables.views.get_status')
+    @patch('apps.deliverables.views.get_spec_divisions')
+    @patch('apps.deliverables.views.get_spec_sections')
+    @patch('apps.deliverables.views.create_submittal')
+    def test_successful_submittal_creation_with_versioning_active_uses_specified_project_version(
+        self, 
+        mock_create_submittal,
+        mock_get_spec_sections,
+        mock_get_spec_divisions,
+        mock_get_status,
+        mock_get_fresh_token,
+        mock_is_versioning_feature_flag_active
+    ):
+        # Mock responses
+        mock_get_fresh_token.return_value = MagicMock(access_token='fake-token')
+        mock_get_status.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [{"name": "Open", "id": "123"}]
+        )
+        mock_get_spec_divisions.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [{"number": "12", "id": "div-123"}]
+        )
+        mock_get_spec_sections.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [{"number": "123456", "id": "sec-123"}]
+        )
+        mock_create_submittal.return_value = MagicMock(
+            status_code=201,
+            json=lambda: {"id": "sub-123"}
+        )
+        project_version_2 = ProjectVersion.objects.create(
+            project=self.project,
+            version_name='Version 2',
+            is_archived=False,
+        )
+        submittal_item_2 = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=project_version_2,
+            masterformat_section=self.masterformat_section,
+            submittal_type='Test Type',
+            submittal_description='Test Description 2',
+            submittal_content='Test Content 2',
+            paragraph_number='1.2'
+        )
+
+        # Test data
+        data = {
+            'project_id': self.project.id,
+            'project_version_id': self.project_version_1.id,
+            'records': [],
+            'export_all': True
+        }
+
+        # Make request
+        response = self.client.post(self.url, data, format='json')
+
+        # Assertions
+        print(response.data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['message'], 'Submittal created')
+        self.assertIn(str(self.submittal_item.id), response.data['submittals'])
+
+        mock_create_submittal.assert_called_once_with(
+            submittal_content='Test Content',
+            paragraph_number='1.1',
+            procore_spec_section_id='sec-123',
+            procore_status_id='123',
+            procore_submittal_manager_id='789',
+            submittal_title='Test Description',
+            submittal_type='Test Type',
+            project_id=456,
+            procore_token='fake-token'
+        )
+        
+        # Verify submittal was updated
+        updated_submittal = SubmittalItem.objects.get(id=self.submittal_item.id)
+        self.assertEqual(updated_submittal.procore_submittal_id, 'sub-123')
+        self.assertIsNotNone(updated_submittal.procore_export_date)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=False)
     @patch('apps.deliverables.views.get_fresh_token_for_user')
     @patch('apps.deliverables.views.get_status')
     @patch('apps.deliverables.views.get_spec_divisions')
@@ -572,7 +730,8 @@ class TestCreateProcoreSubmittalsView(APITestCase):
         mock_get_spec_sections,
         mock_get_spec_divisions,
         mock_get_status,
-        mock_get_fresh_token
+        mock_get_fresh_token,
+        mock_is_versioning_feature_flag_active
     ):
         # Mock responses
         mock_get_fresh_token.return_value = MagicMock(access_token='fake-token')

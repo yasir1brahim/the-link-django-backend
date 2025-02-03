@@ -1,5 +1,7 @@
 import time
 from unittest.mock import patch
+from io import BytesIO
+from openpyxl import load_workbook
 
 from django.conf import settings
 from django.test import TestCase
@@ -1611,6 +1613,84 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(list(response.data['all_filter_vals']['para_no']), ['1.3', '1.3-1'])
         self.assertEqual(list(response.data['all_filter_vals']['spec_section']), ['033000', '102000', '123456'])
         self.assertEqual(list(response.data['all_filter_vals']['type']), ['Type 1', 'Type 2', 'ZZZ'])
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_export_to_xlsx_with_versioning_active(self, mock_is_versioning_feature_flag_active):
+        self.set_up_test_data()
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-export', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_2.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        workbook = load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+        self.assertEqual(worksheet.dimensions, 'A1:G3') # 2 rows of data
+
+        response = self.client.get(reverse('submittal-item-export', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_1.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        workbook = load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+        self.assertEqual(worksheet.dimensions, 'A1:G6') # 5 rows of data plus header
+
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_export_to_xlsx_with_versioning_active_and_no_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-export', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_export_to_xlsx_with_versioning_active_and_mismatched_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-export', kwargs={'project_id': self.project.id}) + '?project_version_id=9999')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=False)
+    def test_export_to_xlsx_with_versioning_inactive(self, mock_is_versioning_feature_flag_active):
+        self.set_up_test_data()
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-export', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        workbook = load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+        self.assertEqual(worksheet.dimensions, 'A1:G8') # 7 rows of data plus header
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_export_to_jet_build_with_versioning_active(self, mock_is_versioning_feature_flag_active):
+        self.set_up_test_data()
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-export-jet-build', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_2.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        workbook = load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+        self.assertEqual(worksheet.dimensions, 'A1:C2') # 2 rows of data
+
+        response = self.client.get(reverse('submittal-item-export-jet-build', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_1.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        workbook = load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+        self.assertEqual(worksheet.dimensions, 'A1:C5') # 5 rows of data plus header
+
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_export_to_jet_build_with_versioning_active_and_no_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-export-jet-build', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_export_to_jet_build_with_versioning_active_and_mismatched_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-export-jet-build', kwargs={'project_id': self.project.id}) + '?project_version_id=9999')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=False)
+    def test_export_to_jet_build_with_versioning_inactive(self, mock_is_versioning_feature_flag_active):
+        self.set_up_test_data()
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-export-jet-build', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        workbook = load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+        self.assertEqual(worksheet.dimensions, 'A1:C7') # 7 rows of data no header, 3 columns
 
     def test_create_submittal_with_new_masterformat_section_number(self):
         self.client.force_authenticate(user=self.user)

@@ -636,13 +636,16 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         self.project_version = None
         if self.is_versioning_active:
             if not project_version_id:
-                self.project_version = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first()
+                raise DRFValidationError("project_version_id is required when versioning is active")
             else:
-                self.project_version = ProjectVersion.objects.get(id=project_version_id)
+                try:
+                    self.project_version = ProjectVersion.objects.get(id=project_version_id)
+                except ProjectVersion.DoesNotExist:
+                    raise DRFValidationError("Not a valid project version for this project")
             if self.project_version.project != project:
                 raise DRFValidationError("Not a valid project version for this project")
             
-        queryset = self.filter_queryset(self.get_queryset())
+        queryset = self.filter_queryset(self.get_queryset_for_list())
         header_options = []
         try:
             excel_header = ExcelExportHeader.objects.get(user=request.user)
@@ -793,16 +796,20 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         project_version_id = request.query_params.get('project_version_id')
         project = Project.objects.get(id=kwargs.get('project_id'))
         team = project.team
-        is_versioning_active = is_versioning_feature_flag_active(request.user, team)
-        if is_versioning_active:
+        self.is_versioning_active = is_versioning_feature_flag_active(request.user, team)
+        self.project_version = None
+        if self.is_versioning_active:
             if not project_version_id:
-                project_version = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first()
+                raise DRFValidationError("project_version_id is required when versioning is active")
             else:
-                project_version = ProjectVersion.objects.get(id=project_version_id)
-            if project_version.project != project:
+                try:
+                    self.project_version = ProjectVersion.objects.get(id=project_version_id)
+                except ProjectVersion.DoesNotExist:
+                    raise DRFValidationError("Not a valid project version for this project")
+            if self.project_version.project != project:
                 raise DRFValidationError("Not a valid project version for this project")
         
-        queryset = self.filter_queryset(self.get_queryset())
+        queryset = self.filter_queryset(self.get_queryset_for_list())
         header_options = []
 
         # Create a workbook and select the active worksheet
@@ -1609,9 +1616,11 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = ProcoreSubmittalSerializer
 
-    def get_submittals(self, project, submittal_ids_to_post_to_procore, export_all):
+    def get_submittals(self, project, project_version, submittal_ids_to_post_to_procore, export_all):
         if export_all:
             submittals = SubmittalItem.objects.filter(project_id=project.id)
+            if project_version:
+                submittals = submittals.filter(project_version=project_version)
         else:
             submittals = SubmittalItem.objects.filter(id__in=submittal_ids_to_post_to_procore)
         return submittals
@@ -1620,7 +1629,9 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        
         project_id = serializer.validated_data.get('project_id')
+        project_version_id = serializer.validated_data.get('project_version_id')
         submittal_ids_to_post_to_procore = serializer.validated_data.get('records')
         export_all = serializer.validated_data.get('export_all', False)
         project = get_object_or_404(Project, id=project_id)
@@ -1632,6 +1643,19 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
             print("Error getting fresh token for user: " + str(e))
             return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
         
+        is_versioning_active = is_versioning_feature_flag_active(request.user, project.team)
+        project_version = None
+        if is_versioning_active:
+            if not project_version_id:
+                raise DRFValidationError("project_version_id is required when versioning is active")
+            else:
+                try:
+                    project_version = ProjectVersion.objects.get(id=project_version_id)
+                except ProjectVersion.DoesNotExist:
+                    raise DRFValidationError("Not a valid project version for this project")
+            if project_version.project != project:
+                raise DRFValidationError("Not a valid project version for this project")
+        
         status_response = get_status(project.team.procore_id, procore_token.access_token)
         if status_response.status_code != 200:
             print("Error getting procore status")
@@ -1642,7 +1666,7 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
             print("Error getting procore status id")
             return Response(status=status.HTTP_400_BAD_REQUEST)
         
-        submittals: List[SubmittalItem] = self.get_submittals(project, submittal_ids_to_post_to_procore, export_all)
+        submittals: List[SubmittalItem] = self.get_submittals(project, project_version, submittal_ids_to_post_to_procore, export_all)
         spec_section_list = list(set([str(submittal.masterformat_section.masterformat_number) for submittal in submittals]))
 
         procore_spec_divisions_response = get_spec_divisions(project.procore_id, procore_token.access_token)
