@@ -636,13 +636,16 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         self.project_version = None
         if self.is_versioning_active:
             if not project_version_id:
-                self.project_version = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first()
+                raise DRFValidationError("project_version_id is required when versioning is active")
             else:
-                self.project_version = ProjectVersion.objects.get(id=project_version_id)
+                try:
+                    self.project_version = ProjectVersion.objects.get(id=project_version_id)
+                except ProjectVersion.DoesNotExist:
+                    raise DRFValidationError("Not a valid project version for this project")
             if self.project_version.project != project:
                 raise DRFValidationError("Not a valid project version for this project")
             
-        queryset = self.filter_queryset(self.get_queryset())
+        queryset = self.filter_queryset(self.get_queryset_for_list())
         header_options = []
         try:
             excel_header = ExcelExportHeader.objects.get(user=request.user)
@@ -793,16 +796,20 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         project_version_id = request.query_params.get('project_version_id')
         project = Project.objects.get(id=kwargs.get('project_id'))
         team = project.team
-        is_versioning_active = is_versioning_feature_flag_active(request.user, team)
-        if is_versioning_active:
+        self.is_versioning_active = is_versioning_feature_flag_active(request.user, team)
+        self.project_version = None
+        if self.is_versioning_active:
             if not project_version_id:
-                project_version = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first()
+                raise DRFValidationError("project_version_id is required when versioning is active")
             else:
-                project_version = ProjectVersion.objects.get(id=project_version_id)
-            if project_version.project != project:
+                try:
+                    self.project_version = ProjectVersion.objects.get(id=project_version_id)
+                except ProjectVersion.DoesNotExist:
+                    raise DRFValidationError("Not a valid project version for this project")
+            if self.project_version.project != project:
                 raise DRFValidationError("Not a valid project version for this project")
         
-        queryset = self.filter_queryset(self.get_queryset())
+        queryset = self.filter_queryset(self.get_queryset_for_list())
         header_options = []
 
         # Create a workbook and select the active worksheet
