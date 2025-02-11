@@ -53,8 +53,18 @@ def teams_list(flag):
     return [team.name for team in flag.teams.all()]
 
 
+
+@admin.display(description="Projects")
+def projects_list(flag):
+    """Return set of projects, for display in admin list. If there are more than
+    MAX_TEAMS_DISPLAY, show that many followed by ellipsis."""
+    if flag.projects.count() > MAX_TEAMS_DISPLAY:
+        return list([project.name for project in flag.projects.all()][:MAX_TEAMS_DISPLAY] + ["..."])
+    return [project.name for project in flag.projects.all()]
+
+
 @admin.register(Flag)
 class FlagAdmin(WaffleFlagAdmin):
-    list_display = tuple(list(WaffleFlagAdmin.list_display) + [teams_list])
-    list_filter = tuple(list(WaffleFlagAdmin.list_filter) + ["teams"])
-    raw_id_fields = tuple(list(WaffleFlagAdmin.raw_id_fields) + ["teams"])
+    list_display = tuple(list(WaffleFlagAdmin.list_display) + [teams_list, projects_list])
+    list_filter = tuple(list(WaffleFlagAdmin.list_filter) + ["teams", "projects"])
+    raw_id_fields = tuple(list(WaffleFlagAdmin.raw_id_fields) + ["teams", "projects"])

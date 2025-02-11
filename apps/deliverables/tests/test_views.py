@@ -951,9 +951,42 @@ class UploadFileTests(APITestCase):
             payload=expected_payload,
             lambda_url=settings.LAMBDA_FUNCTION_URL
         )
+
+    @patch('apps.deliverables.views.is_v2_process_deliverables_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_v2_process_deliverables_flag_active_stores_processing_version_and_calls_v2_lambda(self, mock_invoke_lambda, mock_is_versioning_feature_flag_active, mock_is_v2_process_deliverables_flag_active):
+        """Test that when v2 process deliverables is active, uploads are saved to the given project version"""
+        self.client.force_authenticate(user=self.company_admin)
+        project_version_2 = ProjectVersion.objects.create(project=self.existing_project, version_number=2, version_name="Version 2")
+        response = self.client.post(reverse('deliverables:upload_file'), {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+            'project_version_id': project_version_2.id,
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        uploaded_file = UploadedFile.objects.get(project=self.existing_project)
+        self.assertEqual(uploaded_file.project_version, project_version_2)
+        self.assertEqual(uploaded_file.processing_method, UploadedFile.ProcessingMethodChoices.V2)
+        expected_payload = {
+            "object_key": uploaded_file.document_path,
+            "document_id": str(uploaded_file.id),
+            "filename": self.mock_file.name,
+            "user_id": str(self.company_admin.id),
+            "project_id": str(self.existing_project.id),
+            "project_version_id": str(project_version_2.id),
+            "chunk_size": 1200,
+            "chunk_overlap": 100,
+            "callback_url": settings.BACKEND_CALLBACK_URL,
+            "ENVIRONMENT": settings.ENVIRONMENT,
+            "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
+            "masterformat_number": "123456",
+        }
+        mock_invoke_lambda.assert_called_with(
+            payload=expected_payload,
+            lambda_url=settings.V2_PROCESS_DELIVERABLES_LAMBDA_FUNCTION_URL
+        )
         
-
-
 
 class SubmittalItemViewSetTests(APITestCase):
     def setUp(self):

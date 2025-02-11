@@ -11,6 +11,7 @@ from waffle.utils import keyfmt, get_cache
 from apps.subscriptions.models import SubscriptionModelBase
 from apps.utils.models import BaseModel
 from apps.web.meta import absolute_url
+from apps.deliverables.models import Project
 
 from . import roles
 
@@ -128,6 +129,11 @@ class Flag(AbstractUserFlag):
         Team,
         blank=True,
         help_text=gettext("Activate this flag for these teams."),
+    )
+    projects = models.ManyToManyField(
+        Project,
+        blank=True,
+        help_text=gettext("Activate this flag for these projects."),
     )
 
     def get_flush_keys(self, flush_keys=None):

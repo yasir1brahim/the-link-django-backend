@@ -109,6 +109,10 @@ class DocProcessingStatus(str, Enum):
     
 
 class UploadedFile(BaseModel):
+    class ProcessingMethodChoices(models.TextChoices):
+        V1 = "V1", "V1"
+        V2 = "V2", "V2"
+
     legacy_id = models.IntegerField(blank=True, null=True)
 
     project = models.ForeignKey("Project", on_delete=models.CASCADE)
@@ -120,6 +124,7 @@ class UploadedFile(BaseModel):
     name = models.CharField(max_length=256)
     md5 = models.CharField(max_length=256)
     processing_status = models.CharField(max_length=256)
+    processing_method = models.CharField(max_length=256, choices=ProcessingMethodChoices.choices, default=ProcessingMethodChoices.V1)
 
     last_retry = models.DateTimeField(blank=True, null=True)
 
