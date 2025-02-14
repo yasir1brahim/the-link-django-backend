@@ -150,6 +150,7 @@ class SpecSubSection(TypedDict):
     subsection_type: SubsectionType
     master_format_section_number: str
     text_chunks: List[TextChunk]
+    file_s3_key: str
 
 
 class SpecStatusRequest(TypedDict):
@@ -1039,6 +1040,8 @@ def parse_spec(callback_url, document_id, project_id, project_version_id, object
     if is_v2_process_deliverables_flag_active:
         # TODO: this is a placeholder for the masterformat number, won't be needed once full spec processing is implemented
         payload['masterformat_number'] = '123456'
+        # TODO: This is a placeholder for the submittal keywords, won't be needed once full spec processing is implemented
+        payload['submittal_keywords'] = {}
 
     # update the document status to processing
     UploadedFile.objects.filter(id=document_id).update(last_retry=datetime.now())
@@ -1267,6 +1270,7 @@ def spec_status_webhook(request):
             section, created = SpecSection.objects.get_or_create(
                 document_id=request_data['document_id'],
                 masterformat_section=masterformat_section,
+                file_s3_key=subsection.get('file_s3_key')
             )
             section.processing_status = DocProcessingStatus.PENDING_PROCESSING
             section.save()

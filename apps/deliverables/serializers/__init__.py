@@ -269,6 +269,10 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
             obj.masterformat_section.masterformat_number, 'Custom Title')
 
     def get_doc_link(self, obj):
+        if obj.spec_section:
+            if obj.spec_section.file_s3_key:
+                return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.spec_section.file_s3_key}, ExpiresIn=3600)
+
         # TBL-76: Older documents using the legacy parsing approach have a full cloudfront URL stored in the doc_link column.
         # New documents just store the S3 object key in the doc_link column. To handle this, we return the Cloudfront URL if it exists,
         # and if not, we return a presigned URL generated from the S3 object key

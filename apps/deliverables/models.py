@@ -155,6 +155,7 @@ class SpecSection(BaseModel):
     document = models.ForeignKey("UploadedFile", on_delete=models.CASCADE)
     processing_status = models.CharField(max_length=256, blank=True, null=True)
     processing_method = models.CharField(max_length=256, blank=True, null=True, choices=ProcessingMethod.choices)
+    file_s3_key = models.CharField(max_length=1024, blank=True, null=True)
 
     def __str__(self):
         return f"{self.document.name} - {self.masterformat_section.masterformat_number}"

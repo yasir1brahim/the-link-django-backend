@@ -981,6 +981,7 @@ class UploadFileTests(APITestCase):
             "ENVIRONMENT": settings.ENVIRONMENT,
             "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
             "masterformat_number": "123456",
+            "submittal_keywords": {}
         }
         mock_invoke_lambda.assert_called_with(
             payload=expected_payload,
