@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 from django.test import TestCase
+from django.conf import settings
 
 from django.utils import timezone
 from django.db.models import QuerySet
@@ -71,7 +72,7 @@ class ProjectReadSerializerTest(TestCase):
             'members', 'user_limit',
             'start_date', 'end_date', 'is_archived',
             'doc_parsed', 'document_details', 'project_number',
-            'project_type', 'project_versions'
+            'project_type', 'project_versions', 'active_flags'
         }
         self.assertEqual(set(serializer.data.keys()), expected_fields)
 
@@ -433,12 +434,28 @@ class TestSubmittalItemReadSerializer(TestCase):
         self.team = Team.objects.create(name="Test Team")
         self.project = Project.objects.create(name="Test Project", team=self.team)
         self.project_version = ProjectVersion.objects.get(project=self.project)
+        self.masterformat_section = MasterFormatSection.objects.create(masterformat_number="01000")
+        self.document = UploadedFile.objects.create(name="Test Document", project=self.project, project_version=self.project_version, document_path="test/path")
+        self.spec_section = SpecSection.objects.create(
+            masterformat_section=self.masterformat_section,
+            document=self.document,
+            processing_status="PROCESSED",
+            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS,
+            file_s3_key="test_key"
+        )
 
         self.submittal_item = SubmittalItem.objects.create(
             project=self.project,
             project_version=self.project_version,
-            masterformat_section=MasterFormatSection.objects.create(masterformat_number="01000"),
-            document=UploadedFile.objects.create(name="Test Document", project=self.project, project_version=self.project_version, document_path="test/path"),
+            masterformat_section=self.masterformat_section,
+            document=self.document,
+        )
+        self.submittal_item_with_spec_section = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            masterformat_section=self.masterformat_section,
+            document=self.document,
+            spec_section=self.spec_section,
         )
 
     def test_serializer_contains_expected_fields(self):
@@ -461,6 +478,45 @@ class TestSubmittalItemReadSerializer(TestCase):
             'parsing_method',
         }
         self.assertEqual(set(serializer.data.keys()), expected_fields)
+    
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_doc_link_is_primarily_sourced_from_spec_section_if_available(self, mock_generate_presigned_url):
+        # Set up mock return value
+        mock_generate_presigned_url.return_value = "https://mocked-url.com"
+        
+        # Call serializer and access doc_link to trigger the URL generation
+        serializer = SubmittalItemReadSerializer(instance=self.submittal_item_with_spec_section)
+        doc_link = serializer.data['doc_link']
+        
+        # Verify mock was called correctly
+        mock_generate_presigned_url.assert_called_once_with(
+            'get_object', 
+            Params={'Bucket': settings.S3_BUCKET, 'Key': 'test_key'}, 
+            ExpiresIn=3600
+        )
+        
+        # Verify the returned URL
+        self.assertEqual(doc_link, "https://mocked-url.com")
+
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_doc_link_is_sourced_from_document_if_no_spec_section(self, mock_generate_presigned_url):
+        # Set up mock return value
+        mock_generate_presigned_url.return_value = "https://mocked-url.com"
+        
+        # Call serializer and access doc_link to trigger the URL generation
+        serializer = SubmittalItemReadSerializer(instance=self.submittal_item)
+        doc_link = serializer.data['doc_link']
+        
+        # Verify mock was called correctly
+        mock_generate_presigned_url.assert_called_once_with(
+            'get_object', 
+            Params={'Bucket': settings.S3_BUCKET, 'Key': 'test/path'}, 
+            ExpiresIn=3600
+        )
+        
+        # Verify the returned URL
+        self.assertEqual(doc_link, "https://mocked-url.com")
+
 
 
 class TestSubmittalItemWriteSerializer(TestCase):

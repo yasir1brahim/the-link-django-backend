@@ -83,7 +83,7 @@ from .permissions import (
     SubmittalListAccessPermissions,
     ProjectVersionAccessPermissions,
 )
-from apps.utils.feature_flags import is_notices_feature_flag_active, is_versioning_feature_flag_active
+from apps.utils.feature_flags import is_notices_feature_flag_active, is_versioning_feature_flag_active, is_v2_process_deliverables_feature_flag_active
 from .constants import masterformat_to_section_title_map
 from .serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
 from .serializers.procore import (ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer,
@@ -150,6 +150,7 @@ class SpecSubSection(TypedDict):
     subsection_type: SubsectionType
     master_format_section_number: str
     text_chunks: List[TextChunk]
+    file_s3_key: str
 
 
 class SpecStatusRequest(TypedDict):
@@ -1017,7 +1018,7 @@ def invoke_lambda(payload, lambda_url):
         # if we timed out, it's a larger document and the lambda is processing it
         pass
 
-def parse_spec(callback_url, document_id, project_id, project_version_id, object_key, filename, user_id):
+def parse_spec(callback_url, document_id, project_id, project_version_id, object_key, filename, user_id, is_v2_process_deliverables_flag_active):
     logging.debug(f"parse_spec: {object_key}")
 
     CHUNK_SIZE = 1200
@@ -1036,16 +1037,21 @@ def parse_spec(callback_url, document_id, project_id, project_version_id, object
         "ENVIRONMENT": settings.ENVIRONMENT,
         "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
     }
+    if is_v2_process_deliverables_flag_active:
+        # TODO: this is a placeholder for the masterformat number, won't be needed once full spec processing is implemented
+        payload['masterformat_number'] = '123456'
+        # TODO: This is a placeholder for the submittal keywords, won't be needed once full spec processing is implemented
+        payload['submittal_keywords'] = {}
 
     # update the document status to processing
     UploadedFile.objects.filter(id=document_id).update(last_retry=datetime.now())
 
-    print(f"Invoking lambda with URL: {settings.LAMBDA_FUNCTION_URL}")
+    print(f"Invoking lambda with URL: {settings.LAMBDA_FUNCTION_URL if not is_v2_process_deliverables_flag_active else settings.V2_PROCESS_DELIVERABLES_LAMBDA_FUNCTION_URL}")
     print(f"Invoking lambda with payload: {payload}")
 
     invoke_lambda(
         payload=payload,
-        lambda_url=settings.LAMBDA_FUNCTION_URL
+        lambda_url=settings.LAMBDA_FUNCTION_URL if not is_v2_process_deliverables_flag_active else settings.V2_PROCESS_DELIVERABLES_LAMBDA_FUNCTION_URL
     )
 
     return "Kicked off processing job"
@@ -1103,7 +1109,8 @@ def upload_to_s3_and_process(file_data):
                 project_version_id=str(file_data['project_version_id']),
                 object_key=file_data['document_path'],
                 filename=file_data['filename'],
-                user_id=str(file_data['user_id'])
+                user_id=str(file_data['user_id']),
+                is_v2_process_deliverables_flag_active=file_data['is_v2_process_deliverables_flag_active']
             )
         return {'status': 'success', 'document_path': file_data['document_path']}
     except Exception as e:
@@ -1148,6 +1155,7 @@ def upload_file(request):
 
     is_notices_flag_active = is_notices_feature_flag_active(request.user, project.team)
     is_versioning_flag_active = is_versioning_feature_flag_active(request.user, project.team)
+    is_v2_process_deliverables_flag_active = is_v2_process_deliverables_feature_flag_active(request.user, project.team, project)
 
     print(f"is_notices_flag_active: {is_notices_flag_active}")
     print(f"is_versioning_flag_active: {is_versioning_flag_active}")
@@ -1182,6 +1190,7 @@ def upload_file(request):
                 document_path=document_path,
                 parsed_document_path=parsed_document_path,
                 processing_status='PENDING_PROCESSING',
+                processing_method=UploadedFile.ProcessingMethodChoices.V1 if not is_v2_process_deliverables_flag_active else UploadedFile.ProcessingMethodChoices.V2
             )
 
             files_to_process.append({
@@ -1193,6 +1202,7 @@ def upload_file(request):
                 'project_version_id': project_version_id,
                 'user_id': request.user.id,
                 'is_notices_flag_active': is_notices_flag_active,
+                'is_v2_process_deliverables_flag_active': is_v2_process_deliverables_flag_active,
                 'extract_notices': extract_notices
             })
         except Exception as e:
@@ -1260,6 +1270,7 @@ def spec_status_webhook(request):
             section, created = SpecSection.objects.get_or_create(
                 document_id=request_data['document_id'],
                 masterformat_section=masterformat_section,
+                file_s3_key=subsection.get('file_s3_key')
             )
             section.processing_status = DocProcessingStatus.PENDING_PROCESSING
             section.save()
@@ -1271,7 +1282,7 @@ def spec_status_webhook(request):
         ).first()
         project_version_id = request_data.get('project_version_id')
         version_from_spec_section = spec_section.document.project_version.id
-        if project_version_id and project_version_id != version_from_spec_section:
+        if project_version_id and str(project_version_id) != str(version_from_spec_section):
             print(f"SPEC STATUS WEBHOOK: project_version_id {project_version_id} does not match version from spec section {version_from_spec_section}")
             return Response(status=status.HTTP_400_BAD_REQUEST)
         if not project_version_id:

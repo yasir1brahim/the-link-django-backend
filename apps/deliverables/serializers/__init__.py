@@ -2,7 +2,7 @@ import boto3
 from django.conf import settings
 from django.db.models import Case, When, IntegerField, Max
 from rest_framework import serializers
-
+from apps.utils.feature_flags import get_active_flags_for_project
 from apps.users.serializers import CustomUserSerializer
 from apps.users.models import CustomUser
 from apps.teams.models import Team
@@ -69,12 +69,13 @@ class BaseProjectSerializer(serializers.ModelSerializer):
     members = ProjectMembershipSerializer(source="project_memberships", many=True, required=False)
     team = serializers.ReadOnlyField(source="team.id")
     user_limit = serializers.ReadOnlyField()
+    active_flags = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Project
         fields = ['id', 'name', 'description', 'team', 'members',
                    'user_limit', 'start_date', 'end_date', 'is_archived', 
-                   'project_number', 'project_type', 'project_versions']
+                   'project_number', 'project_type', 'project_versions', 'active_flags']
         
     def get_project_versions(self, obj):
         versions = obj.versions.filter(is_archived=False)
@@ -89,6 +90,9 @@ class BaseProjectSerializer(serializers.ModelSerializer):
             return project_level_entitlements
         else:
             return obj.team.entitlements.values_list('code_name', flat=True)
+        
+    def get_active_flags(self, obj):
+        return get_active_flags_for_project(obj)
 
 
 class ProjectWriteSerializer(BaseProjectSerializer):
@@ -265,6 +269,10 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
             obj.masterformat_section.masterformat_number, 'Custom Title')
 
     def get_doc_link(self, obj):
+        if obj.spec_section:
+            if obj.spec_section.file_s3_key:
+                return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.spec_section.file_s3_key}, ExpiresIn=3600)
+
         # TBL-76: Older documents using the legacy parsing approach have a full cloudfront URL stored in the doc_link column.
         # New documents just store the S3 object key in the doc_link column. To handle this, we return the Cloudfront URL if it exists,
         # and if not, we return a presigned URL generated from the S3 object key

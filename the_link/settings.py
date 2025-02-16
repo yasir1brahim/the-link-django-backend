@@ -571,12 +571,14 @@ AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", default="")
 AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", default="")
 S3_BUCKET = os.environ.get("S3_BUCKET", default="")
 LAMBDA_FUNCTION_URL = os.environ.get("LAMBDA_FUNCTION_URL", default="")
+V2_PROCESS_DELIVERABLES_LAMBDA_FUNCTION_URL = os.environ.get("V2_PROCESS_DELIVERABLES_LAMBDA_FUNCTION_URL", default="")
 BACKEND_CALLBACK_URL = os.environ.get("BACKEND_CALLBACK_URL", default="")
 
 NOTICES_LAMBDA_FUNCTION_URL = os.environ.get("NOTICES_LAMBDA_FUNCTION_URL", default="")
 BACKEND_NOTICES_CALLBACK_URL = os.environ.get("BACKEND_NOTICES_CALLBACK_URL", default="")
 NOTICES_FEATURE_FLAG_NAME = 'notices'
 VERSIONING_FEATURE_FLAG_NAME = 'versioning'
+V2_PROCESS_DELIVERABLES_FEATURE_FLAG_NAME = 'v2_process_deliverables'
 
 PROCORE_CLIENT_ID = os.environ.get("PROCORE_CLIENT_ID", default="")
 PROCORE_CLIENT_SECRET = os.environ.get("PROCORE_CLIENT_SECRET", default="")
