@@ -1282,7 +1282,7 @@ def spec_status_webhook(request):
         ).first()
         project_version_id = request_data.get('project_version_id')
         version_from_spec_section = spec_section.document.project_version.id
-        if project_version_id and project_version_id != version_from_spec_section:
+        if project_version_id and str(project_version_id) != str(version_from_spec_section):
             print(f"SPEC STATUS WEBHOOK: project_version_id {project_version_id} does not match version from spec section {version_from_spec_section}")
             return Response(status=status.HTTP_400_BAD_REQUEST)
         if not project_version_id:
