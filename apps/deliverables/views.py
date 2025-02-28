@@ -60,6 +60,7 @@ from .serializers import (
     SubmittalItemListSerializer,
     ExcelExportHeaderSerializer,
     CombineSubmittalItemsSerializer,
+    VersionComparisonSerializer,
 )
 from .models import (
     Project,
@@ -91,7 +92,7 @@ from .serializers.procore import (ProcoreFetchAccessTokenSerializer, ProcoreAcce
                                    ProcoreProjectMappingSerializer, ProcoreSubmittalSerializer,
                                    ProcoreSubmittalCreationResponseSerializer, CreateProcoreProjectMappingSerializer,
                                    CreateProcoreCompanyMappingSerializer, UpdateProcoreSubmittalMappingsSerializer)
-from .services import SubmittalService
+from .services import SubmittalService, VersionComparisonService
 from .integrations.procore import (get_procore_access_token, get_companies, get_fresh_token_for_user, 
                                    ProcoreException, get_me, get_status, get_spec_divisions, get_spec_sections,
                                    create_spec_division, create_spec_section, create_submittal, get_projects,
@@ -1010,7 +1011,44 @@ def get_file_hash(uploaded_file):
     return md5_hash.hexdigest()
 
 
+@extend_schema(
+    summary="Get the differences between two versions of a project.",
+    request=VersionComparisonSerializer,
+    responses={
+        200: VersionComparisonSerializer, 
+        400: OpenApiResponse(description="Bad Request"),
+        401: OpenApiResponse(description="Unauthorized"),
+        403: OpenApiResponse(description="Forbidden"),
+        404: OpenApiResponse(description="Not Found"),
+    },
+    description="Get the differences between two versions of a project.",
+    methods=["GET"]
+)
+@api_view(['GET'])
+def get_version_comparison(request):
+    print(f"get_version_comparison: {request.data}")
+    serializer = VersionComparisonSerializer(data=request.data)
+
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    old_version = serializer.validated_data['old_version']
+    new_version = serializer.validated_data['new_version']
+    masterformat_number = serializer.validated_data['masterformat_number']
+    project = Project.objects.get(id=old_version.project_id)
+    if not request.user.is_member_of_project(project):
+        return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
+
+    if old_version.project_id != new_version.project_id:
+        return Response({'detail': 'Old and new versions must be from the same project'}, status=status.HTTP_400_BAD_REQUEST)
     
+    difference_summary = VersionComparisonService.compare_versions(old_version, new_version, masterformat_number)
+
+    output_serializer = VersionComparisonSerializer(difference_summary)
+
+    return Response(output_serializer.data, status=status.HTTP_200_OK)
+
+
 def invoke_lambda(payload, lambda_url):
     try:
         requests.post(lambda_url, json=payload, timeout=2)
