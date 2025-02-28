@@ -1026,8 +1026,7 @@ def get_file_hash(uploaded_file):
 )
 @api_view(['GET'])
 def get_version_comparison(request):
-    print(f"get_version_comparison: {request.data}")
-    serializer = VersionComparisonSerializer(data=request.data)
+    serializer = VersionComparisonSerializer(data=request.query_params)
 
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -1044,7 +1043,17 @@ def get_version_comparison(request):
     
     difference_summary = VersionComparisonService.compare_versions(old_version, new_version, masterformat_number)
 
-    output_serializer = VersionComparisonSerializer(difference_summary)
+    output_serializer = VersionComparisonSerializer(
+        data={
+            'old_version': old_version,
+            'new_version': new_version,
+            'masterformat_number': masterformat_number,
+            'additions': difference_summary['additions'],
+            'deletions': difference_summary['deletions'],
+            'modifications': difference_summary['modifications'],
+            'unchanged': difference_summary['unchanged']
+        }
+    ).is_valid(raise_exception=True)
 
     return Response(output_serializer.data, status=status.HTTP_200_OK)
 
