@@ -1042,9 +1042,10 @@ def get_version_comparison(request):
         return Response({'detail': 'Old and new versions must be from the same project'}, status=status.HTTP_400_BAD_REQUEST)
     
     difference_summary = VersionComparisonService.compare_versions(old_version, new_version, masterformat_number)
+    print(difference_summary)
 
     output_serializer = VersionComparisonSerializer(
-        data={
+        instance={
             'old_version': old_version,
             'new_version': new_version,
             'masterformat_number': masterformat_number,
@@ -1053,7 +1054,7 @@ def get_version_comparison(request):
             'modifications': difference_summary['modifications'],
             'unchanged': difference_summary['unchanged']
         }
-    ).is_valid(raise_exception=True)
+    )
 
     return Response(output_serializer.data, status=status.HTTP_200_OK)
 
