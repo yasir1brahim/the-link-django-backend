@@ -211,6 +211,24 @@ class VersionComparisonService:
         return len(text_differences) == 1 and text_differences[0]['type'] == 'equal'
     
     @classmethod
+    def get_similarity_score(cls, older_submittal_item: SubmittalItem, newer_submittal_item: SubmittalItem) -> float:
+        content_similarity_score = SequenceMatcher(None, older_submittal_item.submittal_content, newer_submittal_item.submittal_content).ratio()
+        paragraph_number_similarity_score = SequenceMatcher(None, older_submittal_item.paragraph_number, newer_submittal_item.paragraph_number).ratio()
+        return (content_similarity_score * 0.9 + paragraph_number_similarity_score * 0.1)
+    
+    @classmethod
+    def get_best_match(cls, older_submittal_item: SubmittalItem, equivalent_submittals: List[SubmittalItem]) -> SubmittalItem:
+        best_match = None
+        best_similarity_score = 0
+        for submittal in equivalent_submittals:
+            similarity_score = cls.get_similarity_score(older_submittal_item, submittal)
+            if similarity_score > best_similarity_score:
+                best_similarity_score = similarity_score
+                best_match = submittal
+        print(f"Best match for {older_submittal_item} is {best_match} with a similarity score of {best_similarity_score}")
+        return best_match
+    
+    @classmethod
     def _compare_submittal_sets(cls, older_submittal_items: List[SubmittalItem], newer_submittal_items: List[SubmittalItem]):
         # Track which items have been matched to avoid double-counting
         matched_newer_items = set()
@@ -220,31 +238,32 @@ class VersionComparisonService:
         unchanged_items = []
         # Find modified and deleted items
         for older_submittal_item in older_submittal_items:
-            found_match = False
-            print(f"Comparing {older_submittal_item} with {newer_submittal_items}")
+            equivalent_submittals = []
             for i, newer_submittal_item in enumerate(newer_submittal_items):
-                if i in matched_newer_items:
+                if newer_submittal_item.id in matched_newer_items:
                     continue
                 
                 if cls.are_submittals_equivalent(older_submittal_item, newer_submittal_item):
-                    print(f"Equivalent submittals found: {older_submittal_item} and {newer_submittal_item}")
-                    difference = cls.compare_equivalent_submittals(older_submittal_item, newer_submittal_item)
-                    print(f"Difference: {difference}")
-                    if cls._texts_are_equal(difference['content_differences']) and cls._texts_are_equal(difference['paragraph_number_differences']):
-                        unchanged_items.append(newer_submittal_item)
-                    else:
-                        differences.append(difference)
-                    matched_newer_items.add(i)
-                    found_match = True
-                    break
+                    equivalent_submittals.append(newer_submittal_item)
             
-            if not found_match:
-                print(f"No equivalent submittal found for {older_submittal_item}, marking as deleted")
+            if equivalent_submittals:
+                if len(equivalent_submittals) == 1:
+                    best_match = equivalent_submittals[0]
+                else:
+                    best_match = cls.get_best_match(older_submittal_item, equivalent_submittals)
+                difference = cls.compare_equivalent_submittals(older_submittal_item, best_match)
+                if cls._texts_are_equal(difference['content_differences']) and cls._texts_are_equal(difference['paragraph_number_differences']):
+                    unchanged_items.append(best_match)
+                else:
+                    differences.append(difference)
+                matched_newer_items.add(best_match.id)
+            
+            else:
                 deleted_items.append(older_submittal_item)
 
         # Find added items (any unmatched items in newer version)
         for i, newer_submittal_item in enumerate(newer_submittal_items):
-            if i not in matched_newer_items:
+            if newer_submittal_item.id not in matched_newer_items:
                 added_items.append(newer_submittal_item)
 
         return DifferenceSummary(

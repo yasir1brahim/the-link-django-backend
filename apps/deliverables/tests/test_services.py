@@ -45,8 +45,63 @@ class VersionComparisonServiceTests(TestCase):
         self.submittal_item_2.submittal_description = "Different Description"
         self.assertFalse(VersionComparisonService.are_submittals_equivalent(self.submittal_item_1, self.submittal_item_2))
 
-    def test_submittals_with_other_submittal_description_can_be_equivalent(self):
-        pass
+    def test_if_multiple_submittals_are_equivalent_then_match_uses_text_similarity(self):
+        submittal_item_3 = SubmittalItem(
+            project_version=self.project_version_1,
+            masterformat_section=self.master_format_section_1,
+            paragraph_number="1.1.1",
+            submittal_type = "Action/Information Submittals",
+            submittal_description = "Administrative Requirements",
+            submittal_content = "Test Content 3"
+        )
+        submittal_item_4 = SubmittalItem(
+            project_version=self.project_version_2,
+            masterformat_section=self.master_format_section_1,
+            paragraph_number="1.1.1",
+            submittal_type = "Action/Information Submittals",
+            submittal_description = "Administrative Requirements",
+            submittal_content = "Test Content 3"
+        )
+        response = VersionComparisonService._compare_submittal_sets([self.submittal_item_1, submittal_item_3], [self.submittal_item_2, submittal_item_4])
+
+        expected_response = DifferenceSummary(
+            additions=[],
+            deletions=[],
+            modifications=[SubmittalItemDifference(
+                    old_submittal=self.submittal_item_1,
+                    new_submittal=self.submittal_item_2,
+                    content_differences=[
+                        TextDiff(
+                            type='equal',
+                            value='Test Content'
+                        ),
+                        TextDiff(
+                            type='delete',
+                            value='1'
+                        ),
+                        TextDiff(
+                            type='insert',
+                            value='2'
+                        )
+                    ],
+                    paragraph_number_differences=[
+                        TextDiff(
+                            type='equal',
+                            value='1.1'
+                        ),
+                        TextDiff(
+                            type='delete',
+                            value='1'
+                        ),
+                        TextDiff(
+                            type='insert',
+                            value='2'
+                        )
+                    ]
+                )],
+            unchanged=[submittal_item_3]
+        )
+        self.assertEqual(response, expected_response)
 
     def test_compare_versions_detects_additions_and_deletions(self):
         self.submittal_item_2.submittal_description = "Different Description"
