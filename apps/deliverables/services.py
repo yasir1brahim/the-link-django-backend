@@ -207,6 +207,10 @@ class VersionComparisonService:
         return cls._compare_submittal_sets(older_submittal_items, newer_submittal_items)
     
     @classmethod
+    def _texts_are_equal(cls, text_differences: List[TextDiff]) -> bool:
+        return len(text_differences) == 1 and text_differences[0]['type'] == 'equal'
+    
+    @classmethod
     def _compare_submittal_sets(cls, older_submittal_items: List[SubmittalItem], newer_submittal_items: List[SubmittalItem]):
         # Track which items have been matched to avoid double-counting
         matched_newer_items = set()
@@ -226,7 +230,7 @@ class VersionComparisonService:
                     print(f"Equivalent submittals found: {older_submittal_item} and {newer_submittal_item}")
                     difference = cls.compare_equivalent_submittals(older_submittal_item, newer_submittal_item)
                     print(f"Difference: {difference}")
-                    if difference['content_differences'] == [] and difference['paragraph_number_differences'] == []:
+                    if cls._texts_are_equal(difference['content_differences']) and cls._texts_are_equal(difference['paragraph_number_differences']):
                         unchanged_items.append(newer_submittal_item)
                     else:
                         differences.append(difference)
@@ -284,11 +288,7 @@ class VersionComparisonService:
         new_submittal_paragraph_number = split_into_hierarchical_chunks(new_submittal.paragraph_number)
 
         content_diffs = generate_text_diff(old_submittal_content, new_submittal_content)
-        if len(content_diffs) == 1 and content_diffs[0]['type'] == 'equal':
-            content_diffs = []
         paragraph_number_diffs = generate_text_diff(old_submittal_paragraph_number, new_submittal_paragraph_number, rejoin_with='.')
-        if len(paragraph_number_diffs) == 1 and paragraph_number_diffs[0]['type'] == 'equal':
-            paragraph_number_diffs = []
 
         return SubmittalItemDifference(
             old_submittal=old_submittal,

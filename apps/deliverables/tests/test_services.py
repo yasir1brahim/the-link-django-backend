@@ -218,14 +218,21 @@ class VersionComparisonServiceTests(TestCase):
         )
         self.assertEqual(response, expected_response)
 
-    def test_compare_equivalent_submittals_with_identical_submittals_returns_no_differences(self):
+    def test_compare_equivalent_submittals_with_identical_submittals_returns_single_equal_text_diff(self):
         response = VersionComparisonService.compare_equivalent_submittals(self.submittal_item_1, self.submittal_item_1)
 
         expected_response = SubmittalItemDifference(
             old_submittal=self.submittal_item_1,
             new_submittal=self.submittal_item_1,
-            content_differences=[],
-            paragraph_number_differences=[]
+            content_differences=[
+                TextDiff(
+                    type='equal',
+                    value='Test Content 1'
+                )
+            ],
+            paragraph_number_differences=[
+                TextDiff(type='equal', value='1.1.1')
+            ]
         )
         self.assertEqual(response, expected_response)
 
