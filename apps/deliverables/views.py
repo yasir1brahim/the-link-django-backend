@@ -517,6 +517,12 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             'spec_section': queryset.values_list('masterformat_section__masterformat_number', flat=True).distinct().order_by('masterformat_section__masterformat_number'),
             'type': queryset.exclude(submittal_type='').values_list('submittal_type', flat=True).distinct().order_by('submittal_type'),
         }
+    
+    def _get_all_masterformat_numbers_for_project(self):
+        project_id = self.kwargs.get('project_id')
+        queryset = self.queryset.filter(project_id=project_id)
+        # Do not consider versioning here as we want all masterformat numbers across all versions
+        return queryset.values_list('masterformat_section__masterformat_number', flat=True).distinct().order_by('masterformat_section__masterformat_number')
 
     def _get_submittal_heading_lov(self, result_queryset):
         return result_queryset.values_list('submittal_type', flat=True).distinct().order_by()
@@ -606,6 +612,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         response_data = {
             'sel_filter_vals': self._get_sel_filter_vals(queryset),
             'all_filter_vals': self._get_all_filter_vals(project_version_id, self.is_versioning_active),
+            'all_masterformat_numbers_for_project': self._get_all_masterformat_numbers_for_project(),
             'log_id_list': [log.id for log in queryset],
             'message': data['results'],
             'project_version_id': self.project_version.id if self.project_version else None,

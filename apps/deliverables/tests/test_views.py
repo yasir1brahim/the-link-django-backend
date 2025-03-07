@@ -1577,6 +1577,14 @@ class SubmittalItemViewSetTests(APITestCase):
         results = response.data['message']
         self.assertEqual(len(results), 2)
 
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    def test_all_masterformat_numbers_for_project_returns_all_masterformat_numbers_for_project(self, mock_is_versioning_feature_flag_active):
+        self.set_up_test_data()
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(list(response.data['all_masterformat_numbers_for_project']), ['033000', '033001', '033002', '033003', '033004'])
+
 
     @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
     def test_ordering_by_masterformat_number_with_versioning(self, mock_is_versioning_feature_flag_active):
