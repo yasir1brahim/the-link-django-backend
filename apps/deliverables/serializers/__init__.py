@@ -428,20 +428,24 @@ class TextDiffSerializer(serializers.Serializer):
     value = serializers.CharField()
 
 class SubmittalItemDifferenceSerializer(serializers.Serializer):
-    old_submittal = SubmittalItemReadSerializer(read_only=True)
-    new_submittal = SubmittalItemReadSerializer(read_only=True)
-    content_differences = TextDiffSerializer(many=True, read_only=True)
-    paragraph_number_differences = TextDiffSerializer(many=True, read_only=True)
+    difference_type = serializers.ChoiceField(choices=[
+        ('addition', 'Addition'),
+        ('deletion', 'Deletion'),
+        ('modification', 'Modification'),
+        ('unchanged', 'Unchanged'),
+    ], read_only=True)
+    old_submittal = SubmittalItemReadSerializer(read_only=True, required=False)
+    new_submittal = SubmittalItemReadSerializer(read_only=True, required=False)
+    content_differences = TextDiffSerializer(many=True, read_only=True, required=False)
+    paragraph_number_differences = TextDiffSerializer(many=True, read_only=True, required=False)
 
 
 class VersionComparisonSerializer(serializers.Serializer):
     old_version = serializers.PrimaryKeyRelatedField(queryset=ProjectVersion.objects.all())
     new_version = serializers.PrimaryKeyRelatedField(queryset=ProjectVersion.objects.all())
     masterformat_number = serializers.CharField()
-    additions = SubmittalItemReadSerializer(many=True, read_only=True)
-    deletions = SubmittalItemReadSerializer(many=True, read_only=True)
-    modifications = SubmittalItemDifferenceSerializer(many=True, read_only=True)
-    unchanged = SubmittalItemReadSerializer(many=True, read_only=True)
+    differences = SubmittalItemDifferenceSerializer(many=True, read_only=True)
+
 
 
 

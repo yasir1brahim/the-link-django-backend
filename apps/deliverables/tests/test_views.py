@@ -1049,10 +1049,55 @@ class GetVersionComparisonViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('modifications', response.data)
-        self.assertIn('additions', response.data)
-        self.assertIn('deletions', response.data)
-        self.assertIn('unchanged', response.data)
+        self.assertIn('differences', response.data)
+        self.assertEqual(len(response.data['differences']), 1)
+        self.assertEqual(response.data['differences'][0]['difference_type'], 'modification')
+        self.assertEqual(response.data['differences'][0]['old_submittal']['id'], self.submittal_1.id)
+        self.assertEqual(response.data['differences'][0]['new_submittal']['id'], self.submittal_2.id)
+
+    def test_differences_are_properly_ordered(self):
+        submittal_3 = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.old_version,
+            masterformat_section=self.mf_section,
+            paragraph_number="1.1.3",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Deletion",
+            submittal_content="Test Content 1"
+        )
+        
+        submittal_4 = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.new_version,
+            masterformat_section=self.mf_section,
+            paragraph_number="1.0.1",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Addition",
+            submittal_content="Test Content 2"
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': self.old_version.id,
+                'new_version': self.new_version.id,
+                'masterformat_number': self.mf_section.masterformat_number
+            },
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('differences', response.data)
+        self.assertEqual(len(response.data['differences']), 3)
+        self.assertEqual(response.data['differences'][0]['difference_type'], 'addition')
+        self.assertEqual(response.data['differences'][0]['new_submittal']['id'], submittal_4.id)
+        self.assertEqual(response.data['differences'][1]['difference_type'], 'modification')
+        self.assertEqual(response.data['differences'][1]['old_submittal']['id'], self.submittal_1.id)
+        self.assertEqual(response.data['differences'][1]['new_submittal']['id'], self.submittal_2.id)
+        self.assertEqual(response.data['differences'][2]['difference_type'], 'deletion')
+        self.assertEqual(response.data['differences'][2]['old_submittal']['id'], submittal_3.id)
+
 
     def test_unauthorized_access(self):
         response = self.client.get(

@@ -1051,15 +1051,48 @@ def get_version_comparison(request):
     difference_summary = VersionComparisonService.compare_versions(old_version, new_version, masterformat_number)
     print(difference_summary)
 
+    all_differences = []
+    for addition in difference_summary['additions']:
+        all_differences.append({
+            'difference_type': 'addition',
+            'new_submittal': addition,
+        })
+    for deletion in difference_summary['deletions']:
+        all_differences.append({
+            'difference_type': 'deletion',
+            'old_submittal': deletion,
+        })
+    for modification in difference_summary['modifications']:
+        all_differences.append({
+            'difference_type': 'modification',
+            'old_submittal': modification['old_submittal'],
+            'new_submittal': modification['new_submittal'],
+            'content_differences': modification['content_differences'],
+            'paragraph_number_differences': modification['paragraph_number_differences'],
+        })
+    for unchanged in difference_summary['unchanged']:
+        all_differences.append({
+            'difference_type': 'unchanged',
+            'old_submittal': unchanged,
+            'new_submittal': unchanged,
+        })
+    def get_hierarchical_paragraph_number(difference):
+        if difference['difference_type'] == 'addition':
+            return difference['new_submittal'].heirarchical_paragraph_number
+        elif difference['difference_type'] == 'deletion':
+            return difference['old_submittal'].heirarchical_paragraph_number
+        else:
+            return difference['new_submittal'].heirarchical_paragraph_number
+
+    all_differences = sorted(all_differences, key=lambda x: get_hierarchical_paragraph_number(x))
+
+
     output_serializer = VersionComparisonSerializer(
         instance={
             'old_version': old_version,
             'new_version': new_version,
             'masterformat_number': masterformat_number,
-            'additions': difference_summary['additions'],
-            'deletions': difference_summary['deletions'],
-            'modifications': difference_summary['modifications'],
-            'unchanged': difference_summary['unchanged']
+            'differences': all_differences
         }
     )
 
