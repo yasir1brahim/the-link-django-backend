@@ -1,5 +1,5 @@
 from unittest import TestCase
-
+import json
 from apps.deliverables.services import VersionComparisonService, generate_text_diff
 from apps.deliverables.models import Project, ProjectVersion, SubmittalItem, MasterFormatSection
 from apps.deliverables.types import SubmittalItemDifference, TextDiff, DifferenceSummary
@@ -22,6 +22,7 @@ class VersionComparisonServiceTests(TestCase):
         self.master_format_section_2 = MasterFormatSection(masterformat_number="330002")
 
         self.submittal_item_1 = SubmittalItem(
+            id=1,
             project_version=self.project_version_1,
             masterformat_section=self.master_format_section_1,
             paragraph_number="1.1.1",
@@ -30,6 +31,7 @@ class VersionComparisonServiceTests(TestCase):
             submittal_content = "Test Content 1"
         )
         self.submittal_item_2 = SubmittalItem(
+            id=2,
             project_version=self.project_version_2,
             masterformat_section=self.master_format_section_1,
             paragraph_number="1.1.2",
@@ -47,20 +49,22 @@ class VersionComparisonServiceTests(TestCase):
 
     def test_if_multiple_submittals_are_equivalent_then_match_uses_text_similarity(self):
         submittal_item_3 = SubmittalItem(
+            id=3,
             project_version=self.project_version_1,
             masterformat_section=self.master_format_section_1,
             paragraph_number="1.1.1",
             submittal_type = "Action/Information Submittals",
             submittal_description = "Administrative Requirements",
-            submittal_content = "Test Content 3"
+            submittal_content = "This is some different content that will be the same for both new submittals"
         )
         submittal_item_4 = SubmittalItem(
+            id=4,
             project_version=self.project_version_2,
             masterformat_section=self.master_format_section_1,
             paragraph_number="1.1.1",
             submittal_type = "Action/Information Submittals",
             submittal_description = "Administrative Requirements",
-            submittal_content = "Test Content 3"
+            submittal_content = "This is some different content that will be the same for both new submittals"
         )
         response = VersionComparisonService._compare_submittal_sets([self.submittal_item_1, submittal_item_3], [self.submittal_item_2, submittal_item_4])
 
@@ -99,8 +103,9 @@ class VersionComparisonServiceTests(TestCase):
                         )
                     ]
                 )],
-            unchanged=[submittal_item_3]
+            unchanged=[submittal_item_4]
         )
+        print(response)
         self.assertEqual(response, expected_response)
 
     def test_compare_versions_detects_additions_and_deletions(self):
@@ -174,6 +179,7 @@ class VersionComparisonServiceTests(TestCase):
 
     def test_more_complex_situation(self):
         submittal_item_3 = SubmittalItem(
+            id=3,
             project_version=self.project_version_1,
             masterformat_section=self.master_format_section_1,
             paragraph_number="1.1.3",
@@ -182,6 +188,7 @@ class VersionComparisonServiceTests(TestCase):
             submittal_content = "Test Content 3"
         )
         submittal_item_4 = SubmittalItem(
+            id=4,
             project_version=self.project_version_1,
             masterformat_section=self.master_format_section_1,
             paragraph_number="1.1.4",
@@ -230,6 +237,8 @@ class VersionComparisonServiceTests(TestCase):
             ],
             unchanged=[]
         )
+
+        print(response)
         self.assertEqual(response, expected_response)
 
     def test_handling_when_multiple_submittals_are_equivalent(self):

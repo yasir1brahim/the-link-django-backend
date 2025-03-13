@@ -238,6 +238,8 @@ class VersionComparisonService:
         unchanged_items = []
         # Find modified and deleted items
         for older_submittal_item in older_submittal_items:
+            print(f"Comparing {older_submittal_item} to {newer_submittal_items}")
+            print("matched_newer_items", matched_newer_items)
             equivalent_submittals = []
             for i, newer_submittal_item in enumerate(newer_submittal_items):
                 if newer_submittal_item.id in matched_newer_items:
@@ -256,6 +258,8 @@ class VersionComparisonService:
                     unchanged_items.append(best_match)
                 else:
                     differences.append(difference)
+                print("best_match", best_match)
+                print("best_match id", best_match.pk)
                 matched_newer_items.add(best_match.id)
             
             else:
