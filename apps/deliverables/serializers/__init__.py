@@ -423,6 +423,32 @@ class SubmittalItemListSerializer(serializers.ModelSerializer):
         fields = ['id', 'project_id', 'name', 'created_by', 'submittals', 'project_version']
 
 
+class TextDiffSerializer(serializers.Serializer):
+    type = serializers.CharField()
+    value = serializers.CharField()
+
+class SubmittalItemDifferenceSerializer(serializers.Serializer):
+    difference_type = serializers.ChoiceField(choices=[
+        ('addition', 'Addition'),
+        ('deletion', 'Deletion'),
+        ('modification', 'Modification'),
+        ('unchanged', 'Unchanged'),
+    ], read_only=True)
+    old_submittal = SubmittalItemReadSerializer(read_only=True, required=False)
+    new_submittal = SubmittalItemReadSerializer(read_only=True, required=False)
+    content_differences = TextDiffSerializer(many=True, read_only=True, required=False)
+    paragraph_number_differences = TextDiffSerializer(many=True, read_only=True, required=False)
+
+
+class VersionComparisonSerializer(serializers.Serializer):
+    old_version = serializers.PrimaryKeyRelatedField(queryset=ProjectVersion.objects.all())
+    new_version = serializers.PrimaryKeyRelatedField(queryset=ProjectVersion.objects.all())
+    masterformat_number = serializers.CharField()
+    differences = SubmittalItemDifferenceSerializer(many=True, read_only=True)
+
+
+
+
 class ExcelExportHeaderSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExcelExportHeader

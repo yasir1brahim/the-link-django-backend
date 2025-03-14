@@ -60,6 +60,7 @@ from .serializers import (
     SubmittalItemListSerializer,
     ExcelExportHeaderSerializer,
     CombineSubmittalItemsSerializer,
+    VersionComparisonSerializer,
 )
 from .models import (
     Project,
@@ -91,7 +92,7 @@ from .serializers.procore import (ProcoreFetchAccessTokenSerializer, ProcoreAcce
                                    ProcoreProjectMappingSerializer, ProcoreSubmittalSerializer,
                                    ProcoreSubmittalCreationResponseSerializer, CreateProcoreProjectMappingSerializer,
                                    CreateProcoreCompanyMappingSerializer, UpdateProcoreSubmittalMappingsSerializer)
-from .services import SubmittalService
+from .services import SubmittalService, VersionComparisonService
 from .integrations.procore import (get_procore_access_token, get_companies, get_fresh_token_for_user, 
                                    ProcoreException, get_me, get_status, get_spec_divisions, get_spec_sections,
                                    create_spec_division, create_spec_section, create_submittal, get_projects,
@@ -516,6 +517,12 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
             'spec_section': queryset.values_list('masterformat_section__masterformat_number', flat=True).distinct().order_by('masterformat_section__masterformat_number'),
             'type': queryset.exclude(submittal_type='').values_list('submittal_type', flat=True).distinct().order_by('submittal_type'),
         }
+    
+    def _get_all_masterformat_numbers_for_project(self):
+        project_id = self.kwargs.get('project_id')
+        queryset = self.queryset.filter(project_id=project_id)
+        # Do not consider versioning here as we want all masterformat numbers across all versions
+        return queryset.values_list('masterformat_section__masterformat_number', flat=True).distinct().order_by('masterformat_section__masterformat_number')
 
     def _get_submittal_heading_lov(self, result_queryset):
         return result_queryset.values_list('submittal_type', flat=True).distinct().order_by()
@@ -605,6 +612,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         response_data = {
             'sel_filter_vals': self._get_sel_filter_vals(queryset),
             'all_filter_vals': self._get_all_filter_vals(project_version_id, self.is_versioning_active),
+            'all_masterformat_numbers_for_project': self._get_all_masterformat_numbers_for_project(),
             'log_id_list': [log.id for log in queryset],
             'message': data['results'],
             'project_version_id': self.project_version.id if self.project_version else None,
@@ -1010,7 +1018,87 @@ def get_file_hash(uploaded_file):
     return md5_hash.hexdigest()
 
 
+@extend_schema(
+    summary="Get the differences between two versions of a project.",
+    request=VersionComparisonSerializer,
+    responses={
+        200: VersionComparisonSerializer, 
+        400: OpenApiResponse(description="Bad Request"),
+        401: OpenApiResponse(description="Unauthorized"),
+        403: OpenApiResponse(description="Forbidden"),
+        404: OpenApiResponse(description="Not Found"),
+    },
+    description="Get the differences between two versions of a project.",
+    methods=["GET"]
+)
+@api_view(['GET'])
+def get_version_comparison(request):
+    serializer = VersionComparisonSerializer(data=request.query_params)
+
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    old_version = serializer.validated_data['old_version']
+    new_version = serializer.validated_data['new_version']
+    masterformat_number = serializer.validated_data['masterformat_number']
+    project = Project.objects.get(id=old_version.project_id)
+    if not request.user.is_member_of_project(project):
+        return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
+
+    if old_version.project_id != new_version.project_id:
+        return Response({'detail': 'Old and new versions must be from the same project'}, status=status.HTTP_400_BAD_REQUEST)
     
+    difference_summary = VersionComparisonService.compare_versions(old_version, new_version, masterformat_number)
+    print(difference_summary)
+
+    all_differences = []
+    for addition in difference_summary['additions']:
+        all_differences.append({
+            'difference_type': 'addition',
+            'new_submittal': addition,
+        })
+    for deletion in difference_summary['deletions']:
+        all_differences.append({
+            'difference_type': 'deletion',
+            'old_submittal': deletion,
+        })
+    for modification in difference_summary['modifications']:
+        all_differences.append({
+            'difference_type': 'modification',
+            'old_submittal': modification['old_submittal'],
+            'new_submittal': modification['new_submittal'],
+            'content_differences': modification['content_differences'],
+            'paragraph_number_differences': modification['paragraph_number_differences'],
+        })
+    for unchanged in difference_summary['unchanged']:
+        all_differences.append({
+            'difference_type': 'unchanged',
+            'old_submittal': unchanged,
+            'new_submittal': unchanged,
+        })
+    def get_hierarchical_paragraph_number(difference):
+        if difference['difference_type'] == 'addition':
+            return difference['new_submittal'].heirarchical_paragraph_number
+        elif difference['difference_type'] == 'deletion':
+            return difference['old_submittal'].heirarchical_paragraph_number
+        else:
+            return difference['new_submittal'].heirarchical_paragraph_number
+
+    all_differences = sorted(all_differences, key=lambda x: get_hierarchical_paragraph_number(x))
+
+
+    output_serializer = VersionComparisonSerializer(
+        instance={
+            'old_version': old_version,
+            'new_version': new_version,
+            'masterformat_number': masterformat_number,
+            'differences': all_differences
+        }
+    )
+
+    return Response(output_serializer.data, status=status.HTTP_200_OK)
+
+
 def invoke_lambda(payload, lambda_url):
     try:
         requests.post(lambda_url, json=payload, timeout=2)
