@@ -447,6 +447,14 @@ class VersionComparisonSerializer(serializers.Serializer):
     differences = SubmittalItemDifferenceSerializer(many=True, read_only=True)
 
 
+class FilteredVersionComparisonSerializer(serializers.Serializer):
+    keyword = serializers.CharField(allow_null=True, required=False)
+    only_differences = serializers.BooleanField(default=False)
+    old_version = serializers.PrimaryKeyRelatedField(queryset=ProjectVersion.objects.all())
+    new_version = serializers.PrimaryKeyRelatedField(queryset=ProjectVersion.objects.all())
+    masterformat_numbers_with_desired_differences = serializers.ListField(child=serializers.CharField(), read_only=True)
+    comparison = VersionComparisonSerializer(read_only=True, many=True)
+
 
 
 class ExcelExportHeaderSerializer(serializers.ModelSerializer):
