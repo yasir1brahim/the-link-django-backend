@@ -1019,6 +1019,9 @@ def get_file_hash(uploaded_file):
     return md5_hash.hexdigest()
 
 
+def has_differences(difference_summary):
+    return len(difference_summary['additions']) > 0 or len(difference_summary['deletions']) > 0 or len(difference_summary['modifications']) > 0
+
 def convert_difference_summary_to_api_format(difference_summary, only_include_differences=False):
     all_differences = []
     for addition in difference_summary['additions']:
@@ -1139,11 +1142,18 @@ def get_filtered_version_comparison(request):
     if old_version.project_id != new_version.project_id:
         return Response({'detail': 'Old and new versions must be from the same project'}, status=status.HTTP_400_BAD_REQUEST)
     
-    masterformat_numbers_with_desired_differences = SubmittalItem.objects.filter(
-        project=project,
-        project_version__in=[new_version, old_version],
-        submittal_description__icontains=keyword
-    ).values_list('masterformat_section__masterformat_number', flat=True).distinct()
+    if keyword:
+        masterformat_numbers_with_desired_differences = SubmittalItem.objects.filter(
+            project=project,
+            project_version__in=[new_version, old_version],
+            submittal_description__icontains=keyword
+        ).values_list('masterformat_section__masterformat_number', flat=True).distinct()
+    else:
+        masterformat_numbers_with_desired_differences = SubmittalItem.objects.filter(
+            project=project,
+            project_version__in=[new_version, old_version],
+        ).values_list('masterformat_section__masterformat_number', flat=True).distinct()
+    masterformat_numbers_with_desired_differences = list(masterformat_numbers_with_desired_differences)
     print(f"Masterformat numbers with desired differences: {masterformat_numbers_with_desired_differences}")
 
     comparison_data = []
@@ -1152,6 +1162,9 @@ def get_filtered_version_comparison(request):
         masterformat_number = str(masterformat_number)
         difference_summary = VersionComparisonService.compare_versions(old_version, new_version, masterformat_number)
         print(difference_summary)
+        if only_differences and not has_differences(difference_summary):
+            masterformat_numbers_with_desired_differences.remove(masterformat_number)
+            continue
         all_differences = convert_difference_summary_to_api_format(difference_summary, only_include_differences=only_differences)
         comparison_data.append({
             'old_version': old_version,

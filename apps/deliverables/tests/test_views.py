@@ -1260,7 +1260,42 @@ class GetFilteredVersionComparisonViewTests(TestCase):
         self.assertEqual(response.data['comparison'][0]['differences'][0]['difference_type'], 'modification')
 
     def test_version_comparison_filtered_to_only_differences_only_returns_mf_numbers_with_differences(self):
-        raise Exception("Not implemented")
+        other_mf_section = MasterFormatSection.objects.create(
+            masterformat_number="330002"
+        )
+        unchanged_submittal_old = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.old_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.1.3",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Same Description",
+            submittal_content="Same Content"
+        )
+        unchanged_submittal_new = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.new_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.1.3",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Same Description",
+            submittal_content="Same Content"
+        )
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': self.old_version.id,
+                'new_version': self.new_version.id,
+                'only_differences': True
+            },
+            format='json'
+        )
+        print(f"response.data: {response.data}")
+        self.assertEqual(len(response.data['masterformat_numbers_with_desired_differences']), 1)
+        self.assertEqual(response.data['masterformat_numbers_with_desired_differences'][0], self.mf_section.masterformat_number)
+        self.assertEqual(len(response.data['comparison']), 1)
+
 
 class SubmittalItemViewSetTests(APITestCase):
     def setUp(self):
