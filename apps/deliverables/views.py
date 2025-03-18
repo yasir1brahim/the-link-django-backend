@@ -1157,14 +1157,17 @@ def get_filtered_version_comparison(request):
     print(f"Masterformat numbers with desired differences: {masterformat_numbers_with_desired_differences}")
 
     comparison_data = []
+    masterformat_numbers_to_return = []
 
     for masterformat_number in masterformat_numbers_with_desired_differences:
         masterformat_number = str(masterformat_number)
+        print(f"Comparing {old_version} and {new_version} for masterformat number {masterformat_number}")
         difference_summary = VersionComparisonService.compare_versions(old_version, new_version, masterformat_number)
         print(difference_summary)
         if only_differences and not has_differences(difference_summary):
-            masterformat_numbers_with_desired_differences.remove(masterformat_number)
             continue
+
+        masterformat_numbers_to_return.append(masterformat_number)
         all_differences = convert_difference_summary_to_api_format(difference_summary, only_include_differences=only_differences)
         comparison_data.append({
             'old_version': old_version,
@@ -1173,15 +1176,13 @@ def get_filtered_version_comparison(request):
             'differences': all_differences
         })
 
-
-
     output_serializer = FilteredVersionComparisonSerializer(
         instance={
             'keyword': keyword,
             'only_differences': only_differences,
             'old_version': old_version,
             'new_version': new_version,
-            'masterformat_numbers_with_desired_differences': list(masterformat_numbers_with_desired_differences),
+            'masterformat_numbers_with_desired_differences': masterformat_numbers_to_return,
             'comparison': comparison_data
         }
     )
