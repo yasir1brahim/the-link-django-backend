@@ -1375,6 +1375,64 @@ class GetFilteredVersionComparisonViewTests(TestCase):
         self.assertEqual(response.data['comparison'][0]['differences'][0]['difference_type'], 'modification')
         self.assertEqual(response.data['comparison'][0]['differences'][1]['difference_type'], 'addition')
         self.assertEqual(response.data['comparison'][0]['differences'][1]['new_submittal']['id'], new_submittal.id)
+
+    def test_version_comparison_scenario_with_keyword_search(self):
+        self.submittal_1.submittal_content = "Different Content"
+        self.submittal_1.paragraph_number = "1.1.4"
+        self.submittal_1.save()
+        self.submittal_2.submittal_content = "Different Content"
+        self.submittal_2.paragraph_number = "1.1.4"
+        self.submittal_2.save()
+
+        other_mf_section = MasterFormatSection.objects.create(
+            masterformat_number="330002"
+        )
+        changed_submittal_old = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.old_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.04.A",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Administrative Requirements",
+            submittal_content="See Section 01 30 00 - Administrative Requirements, for submittal procedures."
+        )
+        unchanged_submittal_new = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.new_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.04.A",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Administrative Requirements",
+            submittal_content="See Section 01 30 11 - Administrative Requirements, for submittal procedures."
+        )
+        new_submittal = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.new_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.04.A-a",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Administrative Requirements",
+            submittal_content="See Section 01 30 11 - Administrative Requirements, for submittal procedures with keyword."
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': self.old_version.id,
+                'new_version': self.new_version.id,
+                'only_differences': True,
+                'keyword': 'keyword'
+            },
+            format='json'
+        )
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.data['masterformat_numbers_with_desired_differences'], [other_mf_section.masterformat_number])
+        self.assertEqual(len(response.data['comparison']), 1)
+        self.assertEqual(response.data['comparison'][0]['masterformat_number'], other_mf_section.masterformat_number)
+        self.assertEqual(len(response.data['comparison'][0]['differences']), 1)
+        self.assertEqual(response.data['comparison'][0]['differences'][0]['difference_type'], 'addition')
+        self.assertEqual(response.data['comparison'][0]['differences'][0]['new_submittal']['id'], new_submittal.id)
     
     def test_unauthorized_access(self):
         response = self.client.get(

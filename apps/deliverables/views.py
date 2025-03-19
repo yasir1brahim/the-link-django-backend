@@ -1022,34 +1022,69 @@ def get_file_hash(uploaded_file):
 def has_differences(difference_summary):
     return len(difference_summary['additions']) > 0 or len(difference_summary['deletions']) > 0 or len(difference_summary['modifications']) > 0
 
-def convert_difference_summary_to_api_format(difference_summary, only_include_differences=False):
+def convert_difference_summary_to_api_format(difference_summary, only_include_differences=False, keyword=None):
     all_differences = []
     for addition in difference_summary['additions']:
-        all_differences.append({
-            'difference_type': 'addition',
-            'new_submittal': addition,
-        })
+        if keyword:
+            if keyword.lower() in addition.submittal_description.lower() or keyword.lower() in addition.submittal_content.lower():
+                all_differences.append({
+                    'difference_type': 'addition',
+                    'new_submittal': addition,
+                })
+        else:
+            all_differences.append({
+                'difference_type': 'addition',
+                'new_submittal': addition,
+            })
     for deletion in difference_summary['deletions']:
-        all_differences.append({
-            'difference_type': 'deletion',
-            'old_submittal': deletion,
-        })
+        if keyword:
+            if keyword.lower() in deletion.submittal_description.lower() or keyword.lower() in deletion.submittal_content.lower():
+                all_differences.append({
+                    'difference_type': 'deletion',
+                    'old_submittal': deletion,
+                })
+        else:
+            all_differences.append({
+                'difference_type': 'deletion',
+                'old_submittal': deletion,
+            })
     for modification in difference_summary['modifications']:
-        all_differences.append({
-            'difference_type': 'modification',
-            'old_submittal': modification['old_submittal'],
-            'new_submittal': modification['new_submittal'],
-            'content_differences': modification['content_differences'],
-            'paragraph_number_differences': modification['paragraph_number_differences'],
-        })
+        if keyword:
+            if (keyword.lower() in modification['old_submittal'].submittal_description.lower()
+                 or keyword.lower() in modification['old_submittal'].submittal_content.lower()
+                 or keyword.lower() in modification['new_submittal'].submittal_description.lower()
+                 or keyword.lower() in modification['new_submittal'].submittal_content.lower()
+            ):
+                all_differences.append({
+                    'difference_type': 'modification',
+                    'old_submittal': modification['old_submittal'],
+                    'new_submittal': modification['new_submittal'],
+                    'content_differences': modification['content_differences'],
+                    'paragraph_number_differences': modification['paragraph_number_differences'],
+                })
+        else:
+            all_differences.append({
+                'difference_type': 'modification',
+                'old_submittal': modification['old_submittal'],
+                'new_submittal': modification['new_submittal'],
+                'content_differences': modification['content_differences'],
+                'paragraph_number_differences': modification['paragraph_number_differences'],
+            })
     if not only_include_differences:
         for unchanged in difference_summary['unchanged']:
-            all_differences.append({
-                'difference_type': 'unchanged',
-                'old_submittal': unchanged,
-                'new_submittal': unchanged,
-            })
-    
+            if keyword:
+                if keyword.lower() in unchanged.submittal_description.lower() or keyword.lower() in unchanged.submittal_content.lower():
+                    all_differences.append({
+                        'difference_type': 'unchanged',
+                        'old_submittal': unchanged,
+                        'new_submittal': unchanged,
+                    })
+            else:
+                all_differences.append({
+                    'difference_type': 'unchanged', 
+                    'old_submittal': unchanged,
+                    'new_submittal': unchanged,
+                })
     def get_hierarchical_paragraph_number(difference):
         if difference['difference_type'] == 'addition':
             return difference['new_submittal'].heirarchical_paragraph_number
@@ -1144,9 +1179,9 @@ def get_filtered_version_comparison(request):
     
     if keyword:
         masterformat_numbers_with_desired_differences = SubmittalItem.objects.filter(
+            Q(submittal_description__icontains=keyword) | Q(submittal_content__icontains=keyword),
             project=project,
             project_version__in=[new_version, old_version],
-            submittal_description__icontains=keyword
         ).values_list('masterformat_section__masterformat_number', flat=True).distinct()
     else:
         masterformat_numbers_with_desired_differences = SubmittalItem.objects.filter(
@@ -1167,8 +1202,15 @@ def get_filtered_version_comparison(request):
         if only_differences and not has_differences(difference_summary):
             continue
 
+        all_differences = convert_difference_summary_to_api_format(
+            difference_summary,
+            only_include_differences=only_differences,
+            keyword=keyword
+        )
+        if not all_differences:
+            continue
+
         masterformat_numbers_to_return.append(masterformat_number)
-        all_differences = convert_difference_summary_to_api_format(difference_summary, only_include_differences=only_differences)
         comparison_data.append({
             'old_version': old_version,
             'new_version': new_version,
