@@ -61,6 +61,7 @@ from .serializers import (
     ExcelExportHeaderSerializer,
     CombineSubmittalItemsSerializer,
     VersionComparisonSerializer,
+    FilteredVersionComparisonSerializer
 )
 from .models import (
     Project,
@@ -1018,6 +1019,84 @@ def get_file_hash(uploaded_file):
     return md5_hash.hexdigest()
 
 
+def has_differences(difference_summary):
+    return len(difference_summary['additions']) > 0 or len(difference_summary['deletions']) > 0 or len(difference_summary['modifications']) > 0
+
+def convert_difference_summary_to_api_format(difference_summary, only_include_differences=False, keyword=None):
+    all_differences = []
+    for addition in difference_summary['additions']:
+        if keyword:
+            if keyword.lower() in addition.submittal_description.lower() or keyword.lower() in addition.submittal_content.lower():
+                all_differences.append({
+                    'difference_type': 'addition',
+                    'new_submittal': addition,
+                })
+        else:
+            all_differences.append({
+                'difference_type': 'addition',
+                'new_submittal': addition,
+            })
+    for deletion in difference_summary['deletions']:
+        if keyword:
+            if keyword.lower() in deletion.submittal_description.lower() or keyword.lower() in deletion.submittal_content.lower():
+                all_differences.append({
+                    'difference_type': 'deletion',
+                    'old_submittal': deletion,
+                })
+        else:
+            all_differences.append({
+                'difference_type': 'deletion',
+                'old_submittal': deletion,
+            })
+    for modification in difference_summary['modifications']:
+        if keyword:
+            if (keyword.lower() in modification['old_submittal'].submittal_description.lower()
+                 or keyword.lower() in modification['old_submittal'].submittal_content.lower()
+                 or keyword.lower() in modification['new_submittal'].submittal_description.lower()
+                 or keyword.lower() in modification['new_submittal'].submittal_content.lower()
+            ):
+                all_differences.append({
+                    'difference_type': 'modification',
+                    'old_submittal': modification['old_submittal'],
+                    'new_submittal': modification['new_submittal'],
+                    'content_differences': modification['content_differences'],
+                    'paragraph_number_differences': modification['paragraph_number_differences'],
+                })
+        else:
+            all_differences.append({
+                'difference_type': 'modification',
+                'old_submittal': modification['old_submittal'],
+                'new_submittal': modification['new_submittal'],
+                'content_differences': modification['content_differences'],
+                'paragraph_number_differences': modification['paragraph_number_differences'],
+            })
+    if not only_include_differences:
+        for unchanged in difference_summary['unchanged']:
+            if keyword:
+                if keyword.lower() in unchanged.submittal_description.lower() or keyword.lower() in unchanged.submittal_content.lower():
+                    all_differences.append({
+                        'difference_type': 'unchanged',
+                        'old_submittal': unchanged,
+                        'new_submittal': unchanged,
+                    })
+            else:
+                all_differences.append({
+                    'difference_type': 'unchanged', 
+                    'old_submittal': unchanged,
+                    'new_submittal': unchanged,
+                })
+    def get_hierarchical_paragraph_number(difference):
+        if difference['difference_type'] == 'addition':
+            return difference['new_submittal'].heirarchical_paragraph_number
+        elif difference['difference_type'] == 'deletion':
+            return difference['old_submittal'].heirarchical_paragraph_number
+        else:
+            return difference['new_submittal'].heirarchical_paragraph_number
+
+    all_differences = sorted(all_differences, key=lambda x: get_hierarchical_paragraph_number(x))
+    return all_differences
+
+
 @extend_schema(
     summary="Get the differences between two versions of a project.",
     request=VersionComparisonSerializer,
@@ -1051,41 +1130,7 @@ def get_version_comparison(request):
     difference_summary = VersionComparisonService.compare_versions(old_version, new_version, masterformat_number)
     print(difference_summary)
 
-    all_differences = []
-    for addition in difference_summary['additions']:
-        all_differences.append({
-            'difference_type': 'addition',
-            'new_submittal': addition,
-        })
-    for deletion in difference_summary['deletions']:
-        all_differences.append({
-            'difference_type': 'deletion',
-            'old_submittal': deletion,
-        })
-    for modification in difference_summary['modifications']:
-        all_differences.append({
-            'difference_type': 'modification',
-            'old_submittal': modification['old_submittal'],
-            'new_submittal': modification['new_submittal'],
-            'content_differences': modification['content_differences'],
-            'paragraph_number_differences': modification['paragraph_number_differences'],
-        })
-    for unchanged in difference_summary['unchanged']:
-        all_differences.append({
-            'difference_type': 'unchanged',
-            'old_submittal': unchanged,
-            'new_submittal': unchanged,
-        })
-    def get_hierarchical_paragraph_number(difference):
-        if difference['difference_type'] == 'addition':
-            return difference['new_submittal'].heirarchical_paragraph_number
-        elif difference['difference_type'] == 'deletion':
-            return difference['old_submittal'].heirarchical_paragraph_number
-        else:
-            return difference['new_submittal'].heirarchical_paragraph_number
-
-    all_differences = sorted(all_differences, key=lambda x: get_hierarchical_paragraph_number(x))
-
+    all_differences = convert_difference_summary_to_api_format(difference_summary)
 
     output_serializer = VersionComparisonSerializer(
         instance={
@@ -1093,6 +1138,94 @@ def get_version_comparison(request):
             'new_version': new_version,
             'masterformat_number': masterformat_number,
             'differences': all_differences
+        }
+    )
+
+    return Response(output_serializer.data, status=status.HTTP_200_OK)
+
+
+
+@extend_schema(
+    summary="Get the differences between two versions of a project, filtered by a keyword.",
+    request=FilteredVersionComparisonSerializer,
+    responses={
+        200: FilteredVersionComparisonSerializer, 
+        400: OpenApiResponse(description="Bad Request"),
+        401: OpenApiResponse(description="Unauthorized"),
+        403: OpenApiResponse(description="Forbidden"),
+        404: OpenApiResponse(description="Not Found"),
+    },
+    description="Get the differences between two versions of a project, filtered by a keyword.",
+    methods=["GET"]
+)
+@api_view(['GET'])
+def get_filtered_version_comparison(request):
+    serializer = FilteredVersionComparisonSerializer(data=request.query_params)
+
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    old_version = serializer.validated_data['old_version']
+    new_version = serializer.validated_data['new_version']
+    keyword = serializer.validated_data.get('keyword', '')
+    only_differences = serializer.validated_data['only_differences']
+
+    project = Project.objects.get(id=old_version.project_id)
+    if not request.user.is_member_of_project(project):
+        return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
+
+    if old_version.project_id != new_version.project_id:
+        return Response({'detail': 'Old and new versions must be from the same project'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if keyword:
+        masterformat_numbers_with_desired_differences = SubmittalItem.objects.filter(
+            Q(submittal_description__icontains=keyword) | Q(submittal_content__icontains=keyword),
+            project=project,
+            project_version__in=[new_version, old_version],
+        ).values_list('masterformat_section__masterformat_number', flat=True).distinct()
+    else:
+        masterformat_numbers_with_desired_differences = SubmittalItem.objects.filter(
+            project=project,
+            project_version__in=[new_version, old_version],
+        ).values_list('masterformat_section__masterformat_number', flat=True).distinct()
+    masterformat_numbers_with_desired_differences = list(masterformat_numbers_with_desired_differences)
+    print(f"Masterformat numbers with desired differences: {masterformat_numbers_with_desired_differences}")
+
+    comparison_data = []
+    masterformat_numbers_to_return = []
+
+    for masterformat_number in masterformat_numbers_with_desired_differences:
+        masterformat_number = str(masterformat_number)
+        print(f"Comparing {old_version} and {new_version} for masterformat number {masterformat_number}")
+        difference_summary = VersionComparisonService.compare_versions(old_version, new_version, masterformat_number)
+        print(difference_summary)
+        if only_differences and not has_differences(difference_summary):
+            continue
+
+        all_differences = convert_difference_summary_to_api_format(
+            difference_summary,
+            only_include_differences=only_differences,
+            keyword=keyword
+        )
+        if not all_differences:
+            continue
+
+        masterformat_numbers_to_return.append(masterformat_number)
+        comparison_data.append({
+            'old_version': old_version,
+            'new_version': new_version,
+            'masterformat_number': masterformat_number,
+            'differences': all_differences
+        })
+
+    output_serializer = FilteredVersionComparisonSerializer(
+        instance={
+            'keyword': keyword,
+            'only_differences': only_differences,
+            'old_version': old_version,
+            'new_version': new_version,
+            'masterformat_numbers_with_desired_differences': masterformat_numbers_to_return,
+            'comparison': comparison_data
         }
     )
 

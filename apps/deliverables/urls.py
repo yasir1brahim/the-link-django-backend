@@ -45,6 +45,7 @@ urlpatterns = [
     path('excel-export-header/', views.GetExcelExportHeaderView.as_view(), name='get_excel_export_header'),
     path('combine-rows/', views.combine_rows, name='combine_rows'),
     path('version-comparison/', views.get_version_comparison, name='get_version_comparison'),
+    path('filtered-version-comparison/', views.get_filtered_version_comparison, name='get_filtered_version_comparison'),
 
     # Notices
     path(

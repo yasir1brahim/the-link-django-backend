@@ -1164,6 +1164,383 @@ class GetVersionComparisonViewTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
+class GetFilteredVersionComparisonViewTests(TestCase):
+    def setUp(self):
+        self.User = get_user_model()
+        self.team = Team.objects.create(name='Test Team', slug='test-team')
+
+        # Create test user
+        self.user = self.User.objects.create_user(username='testuser', password='testpass')
+        self.non_member_user = self.User.objects.create_user(username='nonmember', password='testpass')
+        
+        # Create test project and versions
+        self.project = Project.objects.create(name="Test Project", team=self.team)
+        self.project.members.add(self.user)
+        
+        self.old_version = ProjectVersion.objects.get(project=self.project)
+        self.new_version = ProjectVersion.objects.create(
+            project=self.project,
+            version_name="Version 2"
+        )
+
+        # Create MasterFormat section
+        self.mf_section = MasterFormatSection.objects.create(
+            masterformat_number="330001"
+        )
+
+        # Create submittal items
+        self.submittal_1 = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.old_version,
+            masterformat_section=self.mf_section,
+            paragraph_number="1.1.1",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Administrative Requirements",
+            submittal_content="Test Content 1"
+        )
+        
+        self.submittal_2 = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.new_version,
+            masterformat_section=self.mf_section,
+            paragraph_number="1.1.2",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Administrative Requirements",
+            submittal_content="Test Content 2"
+        )
+
+        self.client = APIClient()
+        self.url = reverse('deliverables:get_filtered_version_comparison')
+
+    def test_version_comparison_filtered_to_only_differences(self):
+        unchanged_submittal_old = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.old_version,
+            masterformat_section=self.mf_section,
+            paragraph_number="1.1.3",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Same Description",
+            submittal_content="Same Content"
+        )
+        unchanged_submittal_new = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.new_version,
+            masterformat_section=self.mf_section,
+            paragraph_number="1.1.3",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Same Description",
+            submittal_content="Same Content"
+        )
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': self.old_version.id,
+                'new_version': self.new_version.id,
+                'masterformat_number': self.mf_section.masterformat_number,
+                'only_differences': True
+            },
+            format='json'
+        )
+        print(f"response.data: {response.data}")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['only_differences'])
+        self.assertEqual(response.data['old_version'], self.old_version.id)
+        self.assertEqual(response.data['new_version'], self.new_version.id)
+
+        self.assertIn('comparison', response.data)
+        self.assertEqual(len(response.data['comparison']), 1)
+        self.assertEqual(response.data['comparison'][0]['old_version'], self.old_version.id)
+        self.assertEqual(response.data['comparison'][0]['new_version'], self.new_version.id)
+        self.assertEqual(response.data['comparison'][0]['masterformat_number'], self.mf_section.masterformat_number)
+        self.assertEqual(len(response.data['comparison'][0]['differences']), 1)
+        self.assertEqual(response.data['comparison'][0]['differences'][0]['old_submittal']['id'], self.submittal_1.id)
+        self.assertEqual(response.data['comparison'][0]['differences'][0]['new_submittal']['id'], self.submittal_2.id)
+        self.assertEqual(response.data['comparison'][0]['differences'][0]['difference_type'], 'modification')
+
+    def test_version_comparison_filtered_to_only_differences_only_returns_mf_numbers_with_differences(self):
+        other_mf_section = MasterFormatSection.objects.create(
+            masterformat_number="330002"
+        )
+        unchanged_submittal_old = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.old_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.1.3",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Same Description",
+            submittal_content="Same Content"
+        )
+        unchanged_submittal_new = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.new_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.1.3",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Same Description",
+            submittal_content="Same Content"
+        )
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': self.old_version.id,
+                'new_version': self.new_version.id,
+                'only_differences': True
+            },
+            format='json'
+        )
+        print(f"response.data: {response.data}")
+        self.assertEqual(len(response.data['masterformat_numbers_with_desired_differences']), 1)
+        self.assertEqual(response.data['masterformat_numbers_with_desired_differences'][0], self.mf_section.masterformat_number)
+        self.assertEqual(len(response.data['comparison']), 1)
+
+    def test_version_comparison_filtered_to_only_differences_returns_empty_list_if_no_differences(self):
+        self.client.force_authenticate(user=self.user)
+        self.submittal_1.submittal_content = "Different Content"
+        self.submittal_1.paragraph_number = "1.1.4"
+        self.submittal_1.save()
+        self.submittal_2.submittal_content = "Different Content"
+        self.submittal_2.paragraph_number = "1.1.4"
+        self.submittal_2.save()
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': self.old_version.id,
+                'new_version': self.new_version.id,
+                'only_differences': True
+            },
+            format='json'
+        )
+        print(f"response.data: {response.data}")
+        self.assertEqual(len(response.data['comparison']), 0)
+
+    def test_version_comparison_scenario(self):
+        self.submittal_1.submittal_content = "Different Content"
+        self.submittal_1.paragraph_number = "1.1.4"
+        self.submittal_1.save()
+        self.submittal_2.submittal_content = "Different Content"
+        self.submittal_2.paragraph_number = "1.1.4"
+        self.submittal_2.save()
+
+        other_mf_section = MasterFormatSection.objects.create(
+            masterformat_number="330002"
+        )
+        changed_submittal_old = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.old_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.04.A",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Administrative Requirements",
+            submittal_content="See Section 01 30 00 - Administrative Requirements, for submittal procedures."
+        )
+        unchanged_submittal_new = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.new_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.04.A",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Administrative Requirements",
+            submittal_content="See Section 01 30 11 - Administrative Requirements, for submittal procedures."
+        )
+        new_submittal = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.new_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.04.A-a",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Administrative Requirements",
+            submittal_content="See Section 01 30 11 - Administrative Requirements, for submittal procedures."
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': self.old_version.id,
+                'new_version': self.new_version.id,
+                'only_differences': True
+            },
+            format='json'
+        )
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.data['masterformat_numbers_with_desired_differences'], [other_mf_section.masterformat_number])
+        self.assertEqual(len(response.data['comparison']), 1)
+        self.assertEqual(response.data['comparison'][0]['masterformat_number'], other_mf_section.masterformat_number)
+        self.assertEqual(len(response.data['comparison'][0]['differences']), 2)
+        self.assertEqual(response.data['comparison'][0]['differences'][0]['old_submittal']['id'], changed_submittal_old.id)
+        self.assertEqual(response.data['comparison'][0]['differences'][0]['new_submittal']['id'], unchanged_submittal_new.id)
+        self.assertEqual(response.data['comparison'][0]['differences'][0]['difference_type'], 'modification')
+        self.assertEqual(response.data['comparison'][0]['differences'][1]['difference_type'], 'addition')
+        self.assertEqual(response.data['comparison'][0]['differences'][1]['new_submittal']['id'], new_submittal.id)
+
+    def test_version_comparison_scenario_with_keyword_search(self):
+        self.submittal_1.submittal_content = "Different Content"
+        self.submittal_1.paragraph_number = "1.1.4"
+        self.submittal_1.save()
+        self.submittal_2.submittal_content = "Different Content"
+        self.submittal_2.paragraph_number = "1.1.4"
+        self.submittal_2.save()
+
+        other_mf_section = MasterFormatSection.objects.create(
+            masterformat_number="330002"
+        )
+        changed_submittal_old = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.old_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.04.A",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Administrative Requirements",
+            submittal_content="See Section 01 30 00 - Administrative Requirements, for submittal procedures."
+        )
+        unchanged_submittal_new = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.new_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.04.A",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Administrative Requirements",
+            submittal_content="See Section 01 30 11 - Administrative Requirements, for submittal procedures."
+        )
+        new_submittal = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.new_version,
+            masterformat_section=other_mf_section,
+            paragraph_number="1.04.A-a",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Administrative Requirements",
+            submittal_content="See Section 01 30 11 - Administrative Requirements, for submittal procedures with keyword."
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': self.old_version.id,
+                'new_version': self.new_version.id,
+                'only_differences': True,
+                'keyword': 'keyword'
+            },
+            format='json'
+        )
+        print(f"response.data: {response.data}")
+        self.assertEqual(response.data['masterformat_numbers_with_desired_differences'], [other_mf_section.masterformat_number])
+        self.assertEqual(len(response.data['comparison']), 1)
+        self.assertEqual(response.data['comparison'][0]['masterformat_number'], other_mf_section.masterformat_number)
+        self.assertEqual(len(response.data['comparison'][0]['differences']), 1)
+        self.assertEqual(response.data['comparison'][0]['differences'][0]['difference_type'], 'addition')
+        self.assertEqual(response.data['comparison'][0]['differences'][0]['new_submittal']['id'], new_submittal.id)
+    
+    def test_unauthorized_access(self):
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': self.old_version.id,
+                'new_version': self.new_version.id,
+            },
+            format='json'
+        )
+        
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_non_member_access(self):
+        self.client.force_authenticate(user=self.non_member_user)
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': self.old_version.id,
+                'new_version': self.new_version.id,
+            },
+            format='json'
+        )
+        
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data['detail'], 'User is not a member of the project')
+
+    def test_different_project_versions(self):
+        other_project = Project.objects.create(name="Other Project", team=self.team)
+        other_version = ProjectVersion.objects.create(
+            project=other_project,
+            version_name="Other Version"
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': self.old_version.id,
+                'new_version': other_version.id,
+            },
+            format='json'
+        )
+        print(f"response.data: {response.data}")
+        
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['detail'], 'Old and new versions must be from the same project')
+
+    def test_invalid_version_ids(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': 99999,
+                'new_version': self.new_version.id,
+            },
+            format='json'
+        )
+        
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_differences_are_properly_ordered(self):
+        submittal_3 = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.old_version,
+            masterformat_section=self.mf_section,
+            paragraph_number="1.1.3",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Deletion",
+            submittal_content="Test Content 1"
+        )
+        
+        submittal_4 = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.new_version,
+            masterformat_section=self.mf_section,
+            paragraph_number="1.0.1",
+            submittal_type="Action/Information Submittals",
+            submittal_description="Addition",
+            submittal_content="Test Content 2"
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            self.url,
+            {
+                'old_version': self.old_version.id,
+                'new_version': self.new_version.id,
+                'only_differences': True
+            },
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('comparison', response.data)
+        self.assertEqual(len(response.data['comparison']), 1)
+        differences = response.data['comparison'][0]['differences']
+        self.assertEqual(len(differences), 3)
+        self.assertEqual(differences[0]['difference_type'], 'addition')
+        self.assertEqual(differences[0]['new_submittal']['id'], submittal_4.id)
+        self.assertEqual(differences[1]['difference_type'], 'modification')
+        self.assertEqual(differences[1]['old_submittal']['id'], self.submittal_1.id)
+        self.assertEqual(differences[1]['new_submittal']['id'], self.submittal_2.id)
+        self.assertEqual(differences[2]['difference_type'], 'deletion')
+        self.assertEqual(differences[2]['old_submittal']['id'], submittal_3.id)
+
+
+
 class SubmittalItemViewSetTests(APITestCase):
     def setUp(self):
         self.client = APIClient()
