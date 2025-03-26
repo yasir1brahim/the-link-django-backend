@@ -24,7 +24,7 @@ def is_v2_process_deliverables_feature_flag_active(user, team, project):
             settings.V2_PROCESS_DELIVERABLES_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
             settings.V2_PROCESS_DELIVERABLES_FEATURE_FLAG_NAME in get_active_flags_for_project(project))
 
-def is_v2_process_deliverables_feature_flag_active(user, team, project):
+def is_versioning_submittal_comparison_feature_flag_active(user, team, project):
     return (settings.VERSIONING_SUBMITTAL_COMPARISON_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
             settings.VERSIONING_SUBMITTAL_COMPARISON_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
             settings.VERSIONING_SUBMITTAL_COMPARISON_FEATURE_FLAG_NAME in get_active_flags_for_project(project))
