@@ -804,6 +804,7 @@ class UploadFileTests(APITestCase):
             "ENVIRONMENT": settings.ENVIRONMENT,
             "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
         }
+        assert f"version_{default_project_version.id}" in expected_payload['object_key']
         mock_invoke_lambda.assert_called_with(
             payload=expected_payload,
             lambda_url=settings.LAMBDA_FUNCTION_URL
@@ -903,6 +904,7 @@ class UploadFileTests(APITestCase):
             "ENVIRONMENT": settings.ENVIRONMENT,
             "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
         }
+        assert f"version_{default_project_version.id}" in expected_payload['object_key']
         mock_invoke_lambda.assert_called_with(
             payload=expected_payload,
             lambda_url=settings.LAMBDA_FUNCTION_URL
@@ -947,6 +949,7 @@ class UploadFileTests(APITestCase):
             "ENVIRONMENT": settings.ENVIRONMENT,
             "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
         }
+        assert f"version_{project_version_2.id}" in expected_payload['object_key']
         mock_invoke_lambda.assert_called_with(
             payload=expected_payload,
             lambda_url=settings.LAMBDA_FUNCTION_URL
@@ -983,6 +986,7 @@ class UploadFileTests(APITestCase):
             "masterformat_number": "123456",
             "submittal_keywords": {}
         }
+        assert f"version_{project_version_2.id}" in expected_payload['object_key']
         mock_invoke_lambda.assert_called_with(
             payload=expected_payload,
             lambda_url=settings.V2_PROCESS_DELIVERABLES_LAMBDA_FUNCTION_URL

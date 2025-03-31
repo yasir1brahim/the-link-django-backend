@@ -1390,7 +1390,7 @@ def upload_file(request):
     
     for file in files:
         try:
-            filename = f'project_{project_id}__{int(time.time())}_{file.name}'
+            filename = f'project_{project_id}__version_{project_version_id}__{int(time.time())}_{file.name}'
             document_path = f'original/{filename}'
             parsed_document_path = f'parsed/{filename}'
             file_md5 = get_file_hash(file)
