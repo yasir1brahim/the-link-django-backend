@@ -181,8 +181,8 @@ class SubmittalItem(BaseModel):
     text_location = models.JSONField(blank=True, null=True)
     additional_text_locations = models.JSONField(blank=True, null=True)
 
-    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="created_submittal_items", blank=True, null=True)
-    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="updated_submittal_items", blank=True, null=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="created_submittal_items", blank=True, null=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="updated_submittal_items", blank=True, null=True)
 
     procore_submittal_id = models.CharField(max_length=256, blank=True, null=True)
     procore_export_date = models.DateTimeField(blank=True, null=True)
@@ -190,7 +190,7 @@ class SubmittalItem(BaseModel):
     parsing_method = models.CharField(max_length=256)
     parsing_version = models.CharField(max_length=256)
 
-    added_under_submittal = models.ForeignKey("SubmittalItem", on_delete=models.CASCADE, blank=True, null=True)
+    added_under_submittal = models.ForeignKey("SubmittalItem", on_delete=models.SET_NULL, blank=True, null=True)
     manually_added = models.BooleanField(default=False)
 
     class Meta:
