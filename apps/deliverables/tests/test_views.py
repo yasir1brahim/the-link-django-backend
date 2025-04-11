@@ -2404,6 +2404,23 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(SubmittalItem.objects.get(id=self.submittal_item.id).submittal_type, "Updated type")
         self.assertEqual(self.project_version_2, SubmittalItem.objects.get(id=self.submittal_item.id).project_version)
         self.assertEqual(self.user, SubmittalItem.objects.get(id=self.submittal_item.id).updated_by)
+
+    def test_delete_submittal_item(self):
+        self.client.force_authenticate(user=self.user)
+        child_item = SubmittalItem.objects.create(
+            project=self.project,
+            document=self.document,
+            masterformat_section=self.masterformat_section,
+            paragraph_number="2.1",
+            submittal_number="2",
+            submittal_type="Shop Drawings",
+            project_version=self.project_version_1,
+            added_under_submittal=self.submittal_item,
+        )
+        response = self.client.delete(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': self.submittal_item.id}))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(SubmittalItem.objects.count(), 1)
+        self.assertEqual(SubmittalItem.objects.get(id=child_item.id).added_under_submittal, None)
         
 
 
