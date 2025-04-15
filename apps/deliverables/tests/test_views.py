@@ -983,13 +983,48 @@ class UploadFileTests(APITestCase):
             "callback_url": settings.BACKEND_CALLBACK_URL,
             "ENVIRONMENT": settings.ENVIRONMENT,
             "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
-            "masterformat_number": "123456",
-            "submittal_keywords": {}
         }
         assert f"version_{project_version_2.id}" in expected_payload['object_key']
         mock_invoke_lambda.assert_called_with(
             payload=expected_payload,
             lambda_url=settings.V2_PROCESS_DELIVERABLES_LAMBDA_FUNCTION_URL
+        )
+
+    @patch('apps.deliverables.views.is_full_spec_processing_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.invoke_lambda')
+    def test_full_spec_processing_flag_invokes_full_spec_processing_lambda(self, mock_invoke_lambda, mock_is_versioning_feature_flag_active, mock_is_full_spec_processing_feature_flag_active):
+        """Test that when full spec processing is active, uploads invoke the full spec processing lambda"""
+        self.client.force_authenticate(user=self.company_admin)
+        project_version_2 = ProjectVersion.objects.create(project=self.existing_project, version_number=2, version_name="Version 2")
+        response = self.client.post(reverse('deliverables:upload_file'), {
+            'project_id': self.existing_project.id,
+            'files': [self.mock_file],
+            'project_version_id': project_version_2.id,
+            'full_spec_processing': True
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        uploaded_file = UploadedFile.objects.get(project=self.existing_project)
+        self.assertEqual(uploaded_file.project_version, project_version_2)
+        self.assertEqual(uploaded_file.processing_method, UploadedFile.ProcessingMethodChoices.FULL_SPEC_PROCESSING)
+        expected_payload = {
+            "object_key": uploaded_file.document_path,
+            "document_id": str(uploaded_file.id),
+            "filename": self.mock_file.name,
+            "user_id": str(self.company_admin.id),
+            "project_id": str(self.existing_project.id),
+            "project_version_id": str(project_version_2.id),
+            "chunk_size": 1200,
+            "chunk_overlap": 100,
+            "callback_url": settings.BACKEND_FULL_SPEC_PROCESSING_CALLBACK_URL,
+            "ENVIRONMENT": settings.ENVIRONMENT,
+            "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
+            "full_spec_processing": True
+        }
+        assert f"version_{project_version_2.id}" in expected_payload['object_key']
+        mock_invoke_lambda.assert_called_with(
+            payload=expected_payload,
+            lambda_url=settings.FULL_SPEC_PROCESSING_LAMBDA_FUNCTION_URL
         )
         
 class GetVersionComparisonViewTests(TestCase):

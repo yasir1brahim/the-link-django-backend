@@ -28,3 +28,8 @@ def is_versioning_submittal_comparison_feature_flag_active(user, team, project):
     return (settings.VERSIONING_SUBMITTAL_COMPARISON_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
             settings.VERSIONING_SUBMITTAL_COMPARISON_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
             settings.VERSIONING_SUBMITTAL_COMPARISON_FEATURE_FLAG_NAME in get_active_flags_for_project(project))
+
+def is_full_spec_processing_feature_flag_active(user, team, project):
+    return (settings.FULL_SPEC_PROCESSING_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
+            settings.FULL_SPEC_PROCESSING_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
+            settings.FULL_SPEC_PROCESSING_FEATURE_FLAG_NAME in get_active_flags_for_project(project))

@@ -85,7 +85,10 @@ from .permissions import (
     SubmittalListAccessPermissions,
     ProjectVersionAccessPermissions,
 )
-from apps.utils.feature_flags import is_notices_feature_flag_active, is_versioning_feature_flag_active, is_v2_process_deliverables_feature_flag_active
+from apps.utils.feature_flags import (
+    is_notices_feature_flag_active, is_versioning_feature_flag_active, is_v2_process_deliverables_feature_flag_active,
+    is_full_spec_processing_feature_flag_active
+)
 from .constants import masterformat_to_section_title_map
 from .serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
 from .serializers.procore import (ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer,
@@ -1258,11 +1261,6 @@ def parse_spec(callback_url, document_id, project_id, project_version_id, object
         "ENVIRONMENT": settings.ENVIRONMENT,
         "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
     }
-    if is_v2_process_deliverables_flag_active:
-        # TODO: this is a placeholder for the masterformat number, won't be needed once full spec processing is implemented
-        payload['masterformat_number'] = '123456'
-        # TODO: This is a placeholder for the submittal keywords, won't be needed once full spec processing is implemented
-        payload['submittal_keywords'] = {}
 
     # update the document status to processing
     UploadedFile.objects.filter(id=document_id).update(last_retry=datetime.now())
@@ -1277,6 +1275,49 @@ def parse_spec(callback_url, document_id, project_id, project_version_id, object
 
     return "Kicked off processing job"
 
+
+
+def call_full_spec_processing_lambda(
+    callback_url, 
+    document_id, 
+    project_id, 
+    project_version_id, 
+    object_key, 
+    filename, 
+    user_id
+):
+    logging.debug(f"call_full_spec_processing_lambda: {object_key}")
+
+    CHUNK_SIZE = 1200
+    CHUNK_OVERLAP = 100
+
+    payload = {
+        "object_key": object_key,
+        "document_id": str(document_id),
+        "filename": filename,
+        "user_id": user_id,
+        "project_id": project_id,
+        "project_version_id": str(project_version_id),
+        "chunk_size": CHUNK_SIZE,
+        "chunk_overlap": CHUNK_OVERLAP,
+        "callback_url": callback_url,
+        "ENVIRONMENT": settings.ENVIRONMENT,
+        "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
+        "full_spec_processing": True
+    }
+
+    # update the document status to processing
+    UploadedFile.objects.filter(id=document_id).update(last_retry=datetime.now())
+
+    print(f"Invoking lambda with URL: {settings.FULL_SPEC_PROCESSING_LAMBDA_FUNCTION_URL}")
+    print(f"Invoking lambda with payload: {payload}")
+
+    invoke_lambda(
+        payload=payload,
+        lambda_url=settings.FULL_SPEC_PROCESSING_LAMBDA_FUNCTION_URL
+    )
+
+    return "Kicked off processing job"
 
 
 def call_extract_notices_lambda(callback_url, document_id, object_key, project_version_id):
@@ -1322,6 +1363,16 @@ def upload_to_s3_and_process(file_data):
                 object_key=file_data['document_path'],
                 project_version_id=str(file_data['project_version_id']),
             )
+        elif file_data['is_full_spec_processing_flag_active'] and file_data['full_spec_processing']:
+            call_full_spec_processing_lambda(
+                callback_url=settings.BACKEND_FULL_SPEC_PROCESSING_CALLBACK_URL,
+                document_id=str(file_data['uploaded_file_id']),
+                project_id=str(file_data['project_id']),
+                project_version_id=str(file_data['project_version_id']),
+                object_key=file_data['document_path'],
+                filename=file_data['filename'],
+                user_id=str(file_data['user_id']),
+            )
         else:
             parse_spec(
                 callback_url=settings.BACKEND_CALLBACK_URL,
@@ -1359,6 +1410,7 @@ def upload_file(request):
     project_id = serializer.validated_data['project_id']
     print(serializer.validated_data)
     extract_notices = serializer.validated_data.get('extract_notices', False)
+    full_spec_processing = serializer.validated_data.get('full_spec_processing', False)
     project = Project.objects.get(id=project_id)
     if not request.user.is_member_of_project(project):
         return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
@@ -1377,6 +1429,7 @@ def upload_file(request):
     is_notices_flag_active = is_notices_feature_flag_active(request.user, project.team)
     is_versioning_flag_active = is_versioning_feature_flag_active(request.user, project.team)
     is_v2_process_deliverables_flag_active = is_v2_process_deliverables_feature_flag_active(request.user, project.team, project)
+    is_full_spec_processing_flag_active = is_full_spec_processing_feature_flag_active(request.user, project.team, project)
 
     print(f"is_notices_flag_active: {is_notices_flag_active}")
     print(f"is_versioning_flag_active: {is_versioning_flag_active}")
@@ -1401,6 +1454,9 @@ def upload_file(request):
                 already_existing_files.append(file.name)
                 continue
 
+            processing_method = UploadedFile.ProcessingMethodChoices.V1 if not is_v2_process_deliverables_flag_active else UploadedFile.ProcessingMethodChoices.V2
+            if is_full_spec_processing_flag_active:
+                processing_method = UploadedFile.ProcessingMethodChoices.FULL_SPEC_PROCESSING
 
             uploaded_file = UploadedFile.objects.create(
                 project_id=project_id,
@@ -1411,7 +1467,7 @@ def upload_file(request):
                 document_path=document_path,
                 parsed_document_path=parsed_document_path,
                 processing_status='PENDING_PROCESSING',
-                processing_method=UploadedFile.ProcessingMethodChoices.V1 if not is_v2_process_deliverables_flag_active else UploadedFile.ProcessingMethodChoices.V2
+                processing_method=processing_method
             )
 
             files_to_process.append({
@@ -1424,7 +1480,9 @@ def upload_file(request):
                 'user_id': request.user.id,
                 'is_notices_flag_active': is_notices_flag_active,
                 'is_v2_process_deliverables_flag_active': is_v2_process_deliverables_flag_active,
-                'extract_notices': extract_notices
+                'is_full_spec_processing_flag_active': is_full_spec_processing_flag_active,
+                'extract_notices': extract_notices,
+                'full_spec_processing': full_spec_processing
             })
         except Exception as e:
             logging.error(f"Error uploading file: {e}")

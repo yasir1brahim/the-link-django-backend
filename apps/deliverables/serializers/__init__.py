@@ -240,6 +240,7 @@ class FileUploadSerializer(serializers.Serializer):
     project_id = serializers.IntegerField()
     project_version_id = serializers.IntegerField(required=False)
     extract_notices = serializers.BooleanField(required=False)
+    full_spec_processing = serializers.BooleanField(required=False)
 
 
 class CombineSubmittalItemsSerializer(serializers.Serializer):

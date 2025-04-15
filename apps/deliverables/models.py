@@ -112,7 +112,8 @@ class UploadedFile(BaseModel):
     class ProcessingMethodChoices(models.TextChoices):
         V1 = "V1", "V1"
         V2 = "V2", "V2"
-
+        FULL_SPEC_PROCESSING = "FULL_SPEC_PROCESSING", "Full Spec Processing"
+        
     legacy_id = models.IntegerField(blank=True, null=True)
 
     project = models.ForeignKey("Project", on_delete=models.CASCADE)
