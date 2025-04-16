@@ -17,6 +17,7 @@ from ..models import (
     ProjectMembership,
     ProjectVersion,
     ExcelExportHeader,
+    SemanticallyProcessedSpecItem,
 )
 from ..constants import masterformat_to_section_title_map
 
@@ -240,12 +241,38 @@ class FileUploadSerializer(serializers.Serializer):
     project_id = serializers.IntegerField()
     project_version_id = serializers.IntegerField(required=False)
     extract_notices = serializers.BooleanField(required=False)
+    full_spec_processing = serializers.BooleanField(required=False)
 
 
 class CombineSubmittalItemsSerializer(serializers.Serializer):
     lst_all_logs = serializers.ListField(child=serializers.DictField())
     project_id = serializers.IntegerField()
     prepared_object = serializers.DictField()
+
+
+class SemanticallyProcessedSpecItemSerializer(serializers.ModelSerializer):
+    additional_text_locations = serializers.JSONField()
+    text_location = serializers.JSONField()
+    document = EmbedDocumentSerializer()
+
+    project_id = serializers.IntegerField(source='project.id')
+    spec_section = serializers.CharField(source='masterformat_section.masterformat_number')
+    section_title = serializers.SerializerMethodField()
+
+    def get_section_title(self, obj):
+        return obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(
+            obj.masterformat_section.masterformat_number, 'Custom Title')
+
+    class Meta:
+        model = SemanticallyProcessedSpecItem
+        fields = [
+            'id', 'project_id', 'project_version', 'document', 
+            'masterformat_section', 'section_title', 'spec_section_part', 
+            'topic', 'spec_section', 
+            'item_type', 'item_content', 'paragraph_number',
+            'parsing_method', 'parsing_version',
+            'additional_text_locations', 'text_location',
+        ]
 
 
 class SubmittalItemReadSerializer(serializers.ModelSerializer):

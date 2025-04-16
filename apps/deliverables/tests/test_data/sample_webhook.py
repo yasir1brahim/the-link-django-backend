@@ -2054,6 +2054,135 @@ sample_processed_section_webhook = {
     ]
 }
 
+
+full_spec_processing_webhook_payload = {
+    "new_status": "PROCESSED_SECTION",
+    "master_format_section_number": "033001",
+    "document_id": "3605",
+    "project_id": "2573",
+    "user_id": "2787",
+    "filename": "Adams033001.pdf",
+    "project_version_id": "1",
+    "spec_items": [
+        {
+            "spec_section": "033001",
+            "spec_section_part": "PART 1: GENERAL",
+            "paragraph_number": "",
+            "item": [
+                "UNCLASSIFIED"
+            ],
+            "topic": [
+                "UNCLASSIFIED"
+            ],
+            "text": "SECTION 03 30 01\nCAST-IN-PLACE CONCRETE FOR LANDSCAPE APPLICATIONS\nPART 1 - GENERAL",
+            "parsing_method": "REGEX",
+            "text_location": {
+                "page_no": 1,
+                "x": 86.39999389648438,
+                "y": 82.86286163330078,
+                "width": 395.23199462890625,
+                "height": 80.01799774169922,
+                "end_x": 481.6319885253906,
+                "end_y": 162.880859375
+            },
+            "additional_text_locations": []
+        },
+        {
+            "spec_section": "033001",
+            "spec_section_part": "PART 1: GENERAL",
+            "paragraph_number": "1.1",
+            "item": [
+                "UNCLASSIFIED"
+            ],
+            "topic": [
+                "Summary"
+            ],
+            "text": "SUMMARY",
+            "parsing_method": "REGEX",
+            "text_location": {
+                "page_no": 1,
+                "x": 86.4110336303711,
+                "y": 173.1811981201172,
+                "width": 94.8667221069336,
+                "height": 15.168960571289062,
+                "end_x": 181.2777557373047,
+                "end_y": 188.35015869140625
+            },
+            "additional_text_locations": []
+        },
+        {
+            "spec_section": "033001",
+            "spec_section_part": "PART 1: GENERAL",
+            "paragraph_number": "1.1.A",
+            "item": [
+                "Section Includes"
+            ],
+            "topic": [
+                "Summary"
+            ],
+            "text": "Section Includes:",
+            "parsing_method": "REGEX",
+            "text_location": {
+                "page_no": 1,
+                "x": 122.4124755859375,
+                "y": 198.6173553466797,
+                "width": 129.29615783691406,
+                "height": 15.168960571289062,
+                "end_x": 251.70863342285156,
+                "end_y": 213.78631591796875
+            },
+            "additional_text_locations": []
+        },
+        {
+            "spec_section": "033001",
+            "spec_section_part": "PART 1: GENERAL",
+            "paragraph_number": "1.1.A.1",
+            "item": [
+                "Section Includes"
+            ],
+            "topic": [
+                "Summary"
+            ],
+            "text": "Cast-in-Place Smooth formed finish Concrete for planters.",
+            "parsing_method": "REGEX",
+            "text_location": {
+                "page_no": 1,
+                "x": 158.41392517089844,
+                "y": 211.33543395996094,
+                "width": 322.5115203857422,
+                "height": 15.168960571289062,
+                "end_x": 480.9254455566406,
+                "end_y": 226.50439453125
+            },
+            "additional_text_locations": []
+        },
+        {
+            "spec_section": "033001",
+            "spec_section_part": "PART 1: GENERAL",
+            "paragraph_number": "1.1.A.2",
+            "item": [
+                "Section Includes"
+            ],
+            "topic": [
+                "Summary"
+            ],
+            "text": "Anchor and mounting blocks for landscape edgings and tree anchors.",
+            "parsing_method": "REGEX",
+            "text_location": {
+                "page_no": 1,
+                "x": 158.4139404296875,
+                "y": 224.0535125732422,
+                "width": 379.0252685546875,
+                "height": 15.168960571289062,
+                "end_x": 537.439208984375,
+                "end_y": 239.22247314453125
+            },
+            "additional_text_locations": []
+        },
+    ],
+}
+
+
 expected_paragraph_numbers_in_order = [
     "1.4.A",
     "1.4.A-1",

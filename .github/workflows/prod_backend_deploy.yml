@@ -58,6 +58,7 @@ jobs:
             --build-arg NOTICES_LAMBDA_FUNCTION_URL="${{ vars.NOTICES_LAMBDA_FUNCTION_URL }}" \
             --build-arg BACKEND_NOTICES_CALLBACK_URL="${{ vars.BACKEND_NOTICES_CALLBACK_URL }}" \
             --build-arg V2_PROCESS_DELIVERABLES_LAMBDA_FUNCTION_URL="${{ vars.V2_PROCESS_DELIVERABLES_LAMBDA_FUNCTION_URL }}" \
+            --build-arg BACKEND_FULL_SPEC_PROCESSING_CALLBACK_URL="${{ vars.BACKEND_FULL_SPEC_PROCESSING_CALLBACK_URL }}" \
             --build-arg PROCORE_CLIENT_ID="${{ vars.PROCORE_CLIENT_ID }}" \
             --build-arg PROCORE_CLIENT_SECRET="${{ secrets.PROCORE_CLIENT_SECRET }}" \
             --build-arg PROCORE_REDIRECT_URL="${{ vars.PROCORE_REDIRECT_URL }}" \
