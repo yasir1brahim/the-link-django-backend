@@ -113,7 +113,7 @@ class UploadedFile(BaseModel):
         V1 = "V1", "V1"
         V2 = "V2", "V2"
         FULL_SPEC_PROCESSING = "FULL_SPEC_PROCESSING", "Full Spec Processing"
-        
+
     legacy_id = models.IntegerField(blank=True, null=True)
 
     project = models.ForeignKey("Project", on_delete=models.CASCADE)
@@ -162,10 +162,7 @@ class SpecSection(BaseModel):
         return f"{self.document.name} - {self.masterformat_section.masterformat_number}"
 
 
-class SubmittalItem(BaseModel):
-    legacy_id = models.IntegerField(blank=True, null=True)
-    legacy_updated_at = models.DateTimeField(blank=True, null=True)
-
+class BaseSpecItem(BaseModel):
     project = models.ForeignKey("Project", on_delete=models.CASCADE)
     project_version = models.ForeignKey("ProjectVersion", on_delete=models.CASCADE)
     document = models.ForeignKey("UploadedFile", on_delete=models.CASCADE, blank=True, null=True)
@@ -173,23 +170,32 @@ class SubmittalItem(BaseModel):
     spec_section = models.ForeignKey("SpecSection", on_delete=models.PROTECT, blank=True, null=True)
     paragraph_number = models.CharField(max_length=256)
     heirarchical_paragraph_number = models.CharField(max_length=256, default="", blank=True)
+
+    text_location = models.JSONField(blank=True, null=True)
+    additional_text_locations = models.JSONField(blank=True, null=True)
+
+    parsing_method = models.CharField(max_length=256)
+    parsing_version = models.CharField(max_length=256)
+
+    class Meta:
+        abstract = True
+
+
+class SubmittalItem(BaseSpecItem):
+    legacy_id = models.IntegerField(blank=True, null=True)
+    legacy_updated_at = models.DateTimeField(blank=True, null=True)
+
     submittal_type = models.CharField(max_length=256)
     submittal_description = models.CharField(max_length=256)
     submittal_content = models.TextField()
 
     submittal_number = models.DecimalField(max_digits=10, decimal_places=1, blank=True, null=True)
 
-    text_location = models.JSONField(blank=True, null=True)
-    additional_text_locations = models.JSONField(blank=True, null=True)
-
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="created_submittal_items", blank=True, null=True)
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="updated_submittal_items", blank=True, null=True)
 
     procore_submittal_id = models.CharField(max_length=256, blank=True, null=True)
     procore_export_date = models.DateTimeField(blank=True, null=True)
-
-    parsing_method = models.CharField(max_length=256)
-    parsing_version = models.CharField(max_length=256)
 
     added_under_submittal = models.ForeignKey("SubmittalItem", on_delete=models.SET_NULL, blank=True, null=True)
     manually_added = models.BooleanField(default=False)
@@ -225,7 +231,14 @@ class SubmittalItem(BaseModel):
 
     def __str__(self):
         return f"{self.document.name if self.document else ''} - {self.masterformat_section.masterformat_number} - {self.paragraph_number}: {self.submittal_description}"
-    
+
+
+class SemanticallyProcessedSpecItem(BaseSpecItem):
+    spec_section_part = models.CharField(max_length=256)
+    topic = models.JSONField()
+    item_type = models.JSONField()
+    item_content = models.TextField()
+
 
 class SubmittalItemList(BaseModel):
     name = models.CharField(max_length=256)

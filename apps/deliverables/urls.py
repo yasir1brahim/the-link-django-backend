@@ -23,6 +23,11 @@ single_project_router.register(
     views.SubmittalItemListViewSet,
     basename='submittal-list',
 )
+single_project_router.register(
+    'semantically-processed-spec-items',
+    views.SemanticallyProcessedSpecItemViewSet,
+    basename='semantically-processed-spec-item',
+)
 # notices
 single_project_router.register(
     'notices',
@@ -66,6 +71,8 @@ urlpatterns = [
     path('procore/managers/<int:procore_project_id>/', views.GetProcoreManagersView.as_view(), name='procore-managers'),
     path('procore/company_mapping/', views.CreateProcoreCompanyMappingView.as_view(), name='create-procore-company-mapping'),
     path('procore/submittal_mappings/<int:company_id>/', views.ProcoreSubmittalMappingsView.as_view(), name='procore-submittal-mappings'),
+
+    path('webhooks/full-spec-processing/', views.full_spec_processing_webhook, name='webhook-full-spec-processing'),
 ]
 
 

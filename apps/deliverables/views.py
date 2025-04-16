@@ -61,7 +61,8 @@ from .serializers import (
     ExcelExportHeaderSerializer,
     CombineSubmittalItemsSerializer,
     VersionComparisonSerializer,
-    FilteredVersionComparisonSerializer
+    FilteredVersionComparisonSerializer,
+    SemanticallyProcessedSpecItemSerializer
 )
 from .models import (
     Project,
@@ -70,6 +71,7 @@ from .models import (
     UploadedFile,
     SubmittalItem,
     SubmittalItemList,
+    SemanticallyProcessedSpecItem,
     MasterFormatSection,
     SpecSection,
     DocProcessingStatus,
@@ -167,6 +169,27 @@ class SpecStatusRequest(TypedDict):
     submittals: List[SubmittalInfo]
     subsections: List[SpecSubSection]
 
+
+class SpecItem(TypedDict):
+    item: List[str]
+    topic: List[str]
+    text: str
+    spec_section: str
+    spec_section_part: str
+    paragraph_number: str
+    text_location: TextLocation
+    additional_text_locations: List[TextLocation]
+    parsing_method: str
+
+class FullSpecProcessingRequest(TypedDict):
+    new_status: str
+    document_id: str
+    filename: str
+    project_id: str
+    project_version_id: str
+    user_id: str
+    master_format_section_number: str
+    spec_items: List[SpecItem]
 
 class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.all()
@@ -1439,7 +1462,10 @@ def upload_file(request):
     else:
         project_version_id = serializer.validated_data.get('project_version_id')
         if not project_version_id:
-            return Response({'detail': 'Versioning is active but no project_version_id was provided'}, status=status.HTTP_400_BAD_REQUEST)
+            if is_full_spec_processing_flag_active:
+                project_version_id = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first().id
+            else:
+                return Response({'detail': 'Versioning is active but no project_version_id was provided'}, status=status.HTTP_400_BAD_REQUEST)
     
     for file in files:
         try:
@@ -1626,6 +1652,93 @@ def spec_status_webhook(request):
 
     return Response(status=status.HTTP_200_OK)
 
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def full_spec_processing_webhook(request):
+    request_payload = request.data
+    print(f"FULL SPEC PROCESSING WEBHOOK received request: {request_payload}")
+
+    request_data = FullSpecProcessingRequest(**request_payload)
+
+    if request_data['new_status'] == 'SUBSECTIONS_EXTRACTED':
+        print(f"FULL SPEC PROCESSING WEBHOOK: setting document {request_data['document_id']} processing status to SUBSECTIONS_EXTRACTED")
+        UploadedFile.objects.filter(id=int(request_data['document_id'])).update(processing_status=DocProcessingStatus.SUBSECTIONS_EXTRACTED)
+        for subsection in request_data['subsections']:
+            print(f"FULL SPEC PROCESSING WEBHOOK: inserting subsection {subsection['master_format_section_number']} for document {request_data['document_id']}")
+            masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=subsection['master_format_section_number'])
+            section, created = SpecSection.objects.get_or_create(
+                document_id=request_data['document_id'],
+                masterformat_section=masterformat_section,
+                file_s3_key=subsection.get('file_s3_key')
+            )
+            section.processing_status = DocProcessingStatus.PENDING_PROCESSING
+            section.save()
+    elif request_data['new_status'] == 'PROCESSED_SECTION':
+        print(f"FULL SPEC PROCESSING WEBHOOK: saving submittals")
+        spec_section = SpecSection.objects.filter(
+            document_id=int(request_data['document_id']),
+            masterformat_section__masterformat_number=request_data['master_format_section_number']
+        ).first()
+        project_version_id = request_data.get('project_version_id')
+        version_from_spec_section = spec_section.document.project_version.id
+        if project_version_id and str(project_version_id) != str(version_from_spec_section):
+            print(f"FULL SPEC PROCESSING WEBHOOK: project_version_id {project_version_id} does not match version from spec section {version_from_spec_section}")
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+        if not project_version_id:
+            project_version_id = version_from_spec_section
+        for spec_item in request_data['spec_items']:
+            text = change_encode_value(spec_item['text'])
+            masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=request_data['master_format_section_number'])
+            db_spec_item = SemanticallyProcessedSpecItem.objects.create(
+                project_id=request_data['project_id'],
+                project_version_id=project_version_id,
+                masterformat_section=masterformat_section,
+                spec_section=spec_section,
+                topic=spec_item['topic'],
+                item_type=spec_item['item'],
+                item_content=text,
+                spec_section_part=spec_item['spec_section_part'],
+                paragraph_number=spec_item.get('paragraph_number', '') or '',
+                text_location=spec_item.get('text_location'),
+                additional_text_locations=spec_item.get('additional_text_locations', []),
+                document_id=request_data['document_id'],
+                parsing_method="FULL_SPEC_PROCESSING",
+                parsing_version="1.0"
+            )
+        spec_section.processing_status = DocProcessingStatus.PROCESSED
+        spec_section.processing_method = "FULL_SPEC_PROCESSING"
+        spec_section.save()
+    elif request_data['new_status'] == 'FAILED':
+        print(f"SPEC STATUS WEBHOOK: received failure for request: {request_data}")
+        document = UploadedFile.objects.filter(id=int(request_data['document_id'])).first()
+        if document.processing_status == DocProcessingStatus.SUBSECTIONS_EXTRACTED:
+            print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to SECTION_PROCESSING_FAILED")
+            document.processing_status = DocProcessingStatus.SECTION_PROCESSING_FAILED
+            document.save()
+        else:
+            print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to FAILED")
+            document.processing_status = DocProcessingStatus.FAILED
+            document.save()
+    """IF document.processing_status == SUBSECTIONS_EXTRACTED or SECTION_PROCESSING_FAILED then we have records of all extracted subsections.
+    If so, then update document.processing_status to PROCESSED if all subsections have been processed"""
+    print(f"SPEC STATUS WEBHOOK: checking if all subsections have been processed for document {request_data['document_id']}")
+    document = UploadedFile.objects.filter(id=int(request_data['document_id'])).first()
+    if document.processing_status in [DocProcessingStatus.SUBSECTIONS_EXTRACTED, DocProcessingStatus.SECTION_PROCESSING_FAILED]:
+        print(f"SPEC STATUS WEBHOOK: getting unprocessed section count for document {request_data['document_id']}")
+        unprocessed_spec_section_count = SpecSection.objects.filter(document_id=request_data['document_id']).exclude(
+            processing_status=DocProcessingStatus.PROCESSED
+        ).count()
+        print(f"SPEC STATUS WEBHOOK: unprocessed_spec_section_count: {unprocessed_spec_section_count}")
+        if unprocessed_spec_section_count == 0:
+            print(f"SPEC STATUS WEBHOOK: all subsections have been processed for document {request_data['document_id']}")
+            document.processing_status = DocProcessingStatus.PROCESSED
+            document.save()
+
+    return Response(status=status.HTTP_200_OK)
+
+
 # endregion submittal webhook
 
 
@@ -1724,6 +1837,19 @@ class GetExcelExportHeaderView(generics.RetrieveAPIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except ExcelExportHeader.DoesNotExist:
             return Response({"options": []}, status=status.HTTP_200_OK)
+        
+
+class SemanticallyProcessedSpecItemViewSet(viewsets.ModelViewSet):
+    serializer_class = SemanticallyProcessedSpecItemSerializer
+    permission_classes = [IsAuthenticated, SubmittalItemAccessPermissions]
+    queryset = SemanticallyProcessedSpecItem.objects.select_related('masterformat_section', 'spec_section', 'document')
+    pagination_class = SubmittalItemPagination
+
+    def get_queryset(self):
+        project_id = self.kwargs.get('project_id')
+        return self.queryset.filter(project_id=project_id).order_by('id')
+    
+
 
 
 # region notices
