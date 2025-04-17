@@ -1,6 +1,6 @@
 from typing import TypedDict, List
 from concurrent.futures import ThreadPoolExecutor
-
+import csv
 import logging
 import time
 import hashlib
@@ -1839,17 +1839,90 @@ class GetExcelExportHeaderView(generics.RetrieveAPIView):
             return Response({"options": []}, status=status.HTTP_200_OK)
         
 
+
+class SemanticallyProcessedSpecItemPagination(PageNumberPagination):
+    page_query_param = 'page_number'
+    page_size_query_param = 'limit'
+    max_page_size = 200
+
 class SemanticallyProcessedSpecItemViewSet(viewsets.ModelViewSet):
     serializer_class = SemanticallyProcessedSpecItemSerializer
     permission_classes = [IsAuthenticated, SubmittalItemAccessPermissions]
     queryset = SemanticallyProcessedSpecItem.objects.select_related('masterformat_section', 'spec_section', 'document')
-    pagination_class = SubmittalItemPagination
+    pagination_class = SemanticallyProcessedSpecItemPagination
 
     def get_queryset(self):
         project_id = self.kwargs.get('project_id')
         return self.queryset.filter(project_id=project_id).order_by('id')
     
 
+    @extend_schema(
+        summary="Export Semantically Processed Spec Items to CSV",
+        description="Export the semantically processed spec items to a CSV file for the current project.",
+        parameters=[
+            OpenApiParameter(
+                name='project_version_id',
+                description='ID of the project version to filter items, if versioning is active',
+                required=False,
+                type=OpenApiTypes.INT
+            ),
+        ],
+        responses={
+            200: OpenApiResponse(
+                description="CSV file containing the exported spec items"
+            ),
+            400: OpenApiResponse(description="Bad Request"),
+            401: OpenApiResponse(description="Unauthorized"),
+            403: OpenApiResponse(description="Forbidden"),
+            404: OpenApiResponse(description="Not Found"),
+        }
+    )
+    @action(detail=False, methods=['get'], url_path='export-csv')
+    def export_full_spec_csv(self, request, *args, **kwargs):
+        project_id = self.kwargs.get('project_id')
+        project_version_id = request.query_params.get('project_version_id')
+        project = Project.objects.get(id=project_id)
+        if not request.user.is_member_of_project(project):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        team = project.team    
+        # Check for versioning
+        is_versioning_active = is_versioning_feature_flag_active(request.user, team)
+        if is_versioning_active and project_version_id:
+            queryset = self.queryset.filter(
+                project_id=project_id,
+                project_version_id=project_version_id
+            )
+        else:
+            queryset = self.queryset.filter(project_id=project_id)
+        
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="spec_items.csv"'
+        
+        # Create CSV writer
+        writer = csv.DictWriter(
+            response, 
+            fieldnames=[
+                'spec_section', 'spec_section_part', 'paragraph_number', 
+                'topic', 'item', 'text',  
+            ]
+        )
+        writer.writeheader()
+        
+        # Get the multiple classification separator from settings or use default
+        MULTIPLE_CLASSIFICATIONS_SEPARATOR = getattr(settings, 'MULTIPLE_CLASSIFICATIONS_SEPARATOR', '||')
+        
+        # Write each item to CSV
+        for item in queryset:
+            writer.writerow({
+                'spec_section': item.masterformat_section.masterformat_number,
+                'spec_section_part': item.spec_section_part,
+                'paragraph_number': item.paragraph_number,
+                'topic': item.topic,
+                'item': item.item_type,
+                'text': item.item_content,
+            })
+        
+        return response
 
 
 # region notices
