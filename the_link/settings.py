@@ -67,6 +67,7 @@ THIRD_PARTY_APPS = [
     "allauth.account",
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.microsoft",
     "whitenoise.runserver_nostatic",
     "channels",
     "django_otp",
@@ -240,6 +241,10 @@ ACCOUNT_SESSION_REMEMBER = True
 ACCOUNT_LOGOUT_ON_GET = True
 ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = True
 ACCOUNT_LOGIN_BY_CODE_ENABLED = True
+# Authenticate if local account with this email address already exists
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+# Connect local account and social account if local account with that email address already exists
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
 
 ACCOUNT_FORMS = {
     "signup": "apps.teams.forms.TeamSignupForm",
@@ -271,6 +276,18 @@ SOCIALACCOUNT_PROVIDERS = {
             "access_type": "online",
         },
     },
+    'microsoft': {
+        'TENANT': 'organizations',  # or 'common', 'consumers', or your tenant ID
+        'APP': {
+            'client_id': os.environ.get("ELLIS_DON_SSO_CLIENT_ID"),
+            'secret': os.environ.get("ELLIS_DON_SSO_CLIENT_SECRET"),
+            'settings': {
+                'tenant': os.environ.get("ELLIS_DON_SSO_TENANT_ID"),
+            },
+        },
+        "VERIFIED_EMAIL": True,
+        "EMAIL_AUTHENTICATION_AUTO_CONNECT": True
+    }
 }
 
 # For turnstile captchas

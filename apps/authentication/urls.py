@@ -18,4 +18,7 @@ urlpatterns = [
     path("token/verify/", TokenVerifyView.as_view(), name="token_verify"),
     path("token/refresh/", get_refresh_view().as_view(), name="token_refresh"),
     path("user/update-status/", api_views.UserStatusUpdateView.as_view(), name="update_user_status"),
+
+    path("microsoft/login/", api_views.microsoft_login, name="api_microsoft_login"),
+    path("microsoft/login/callback/", api_views.microsoft_callback, name="api_microsoft_callback"),
 ]

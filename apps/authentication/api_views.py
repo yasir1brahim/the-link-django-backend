@@ -13,6 +13,13 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.views import APIView
+from rest_framework.decorators import api_view, permission_classes
+
+from django.conf import settings
+from dj_rest_auth.registration.views import SocialLoginView
+from allauth.socialaccount.providers.microsoft.views import MicrosoftGraphOAuth2Adapter
+from allauth.socialaccount.providers.oauth2.client import OAuth2Client
+
 
 from apps.users.models import CustomUser
 from .serializers import LoginResponseSerializer, OtpRequestSerializer, UserStatusUpdateSerializer
@@ -127,3 +134,119 @@ class UserStatusUpdateView(APIView):
                 return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
         return Response(status_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+class CustomOAuth2Client(OAuth2Client):
+    def __init__(
+        self,
+        request,
+        consumer_key,
+        consumer_secret,
+        access_token_method,
+        access_token_url,
+        callback_url,
+        _scope,  # This is fix for incompatibility between django-allauth==65.3.1 and dj-rest-auth==7.0.1
+        scope_delimiter=" ",
+        headers=None,
+        basic_auth=False,
+    ):
+        super().__init__(
+            request,
+            consumer_key,
+            consumer_secret,
+            access_token_method,
+            access_token_url,
+            callback_url,
+            scope_delimiter,
+            headers,
+            basic_auth,
+        )
+
+# First define a view class for Microsoft login
+class MicrosoftLogin(SocialLoginView):
+    adapter_class = MicrosoftGraphOAuth2Adapter
+    client_class = CustomOAuth2Client
+    callback_url = settings.FRONTEND_BASE_URL + '/microsoft/login/callback/'
+    # callback_url = None  # This will be set from the request data
+    
+    # def get_client(self, request, app):
+    #     callback_url = request.data.get('redirect_uri')
+    #     return self.client_class(
+    #         request,
+    #         app.client_id,
+    #         app.secret,
+    #         self.adapter_class.access_token_url,
+    #         callback_url
+    #     )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def microsoft_login(request):
+    """
+    Initiate Microsoft login and return authorization URL
+    """
+    from allauth.socialaccount.providers.microsoft.provider import MicrosoftGraphProvider
+    from allauth.socialaccount.models import SocialApp
+    from allauth.socialaccount.adapter import get_adapter
+    
+    # Get client_id from request params if provided
+    client_id = request.GET.get('client_id')
+    
+    try:
+        if client_id:
+            # Use specific client_id if provided
+            app = get_adapter().get_app(request, provider='microsoft', client_id=client_id)
+        else:
+            # Otherwise, get the default Microsoft app
+            app = get_adapter().get_app(request, provider='microsoft')
+            
+        provider = MicrosoftGraphProvider(request, app=app)
+        oauth2_adapter = provider.get_oauth2_adapter(request)
+        client = oauth2_adapter.get_client(request, app)
+        # Override the callback URL to use the frontend URL
+        client.callback_url = settings.FRONTEND_BASE_URL + '/microsoft/login/callback/'
+
+        auth_params = provider.get_auth_params()
+        pkce_params = provider.get_pkce_params()
+        code_verifier = pkce_params.pop("code_verifier", None)
+        auth_params.update(pkce_params)
+
+        scope = provider.get_scope()
+
+        auth_url = client.get_redirect_url(oauth2_adapter.authorize_url, scope, auth_params)
+        return Response({'auth_url': auth_url})
+    except SocialApp.DoesNotExist:
+        return Response(
+            {'error': 'Microsoft authentication is not configured correctly.'},
+            status=500
+        )
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def microsoft_callback(request):
+    """
+    Handle the Microsoft OAuth callback using dj-rest-auth
+    """
+    # code = request.data.get('code')
+    # redirect_uri = request.data.get('redirect_uri')
+    
+    # if not code:
+    #     return Response({'error': 'Authorization code is required'}, status=400)
+    
+    # # Prepare data for SocialLoginView
+    # data = {
+    #     'code': code,
+    #     'redirect_uri': redirect_uri
+    # }
+    # print(data)
+    
+    # # Create request with the code
+    # request.data.update(data)
+    
+    # Use the SocialLoginView to handle the login
+    view = MicrosoftLogin.as_view()
+    response = view(request._request)
+    print(response)
+    
+    return response
