@@ -19,6 +19,7 @@ User = get_user_model()
         # No APP config to prevent automatic app creation
     }
 })
+@override_settings(FRONTEND_BASE_URL='http://testfrontendurl.com')
 class MicrosoftSSOTests(TestCase):
     def setUp(self):
         self.factory = RequestFactory()
@@ -66,6 +67,7 @@ class MicrosoftSSOTests(TestCase):
         self.assertEqual(response.status_code, 200)
         print(response.data)
         self.assertTrue('login.microsoftonline.com' in response.data['auth_url'])
+        self.assertTrue('testfrontendurl.com' in response.data['auth_url'])
 
     def test_microsoft_callback(self):
         response = self.client.get(reverse('authentication:api_microsoft_callback'))

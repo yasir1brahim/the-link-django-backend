@@ -67,6 +67,9 @@ jobs:
             --build-arg ELLIS_DON_SSO_CLIENT_ID="${{ vars.ELLIS_DON_SSO_CLIENT_ID }}" \
             --build-arg ELLIS_DON_SSO_CLIENT_SECRET="${{ secrets.ELLIS_DON_SSO_CLIENT_SECRET }}" \
             --build-arg ELLIS_DON_SSO_TENANT_ID="${{ vars.ELLIS_DON_SSO_TENANT_ID }}" \
+            --build-arg THE_LINK_SSO_CLIENT_ID="${{ vars.THE_LINK_SSO_CLIENT_ID }}" \
+            --build-arg THE_LINK_SSO_CLIENT_SECRET="${{ secrets.THE_LINK_SSO_CLIENT_SECRET }}" \
+            --build-arg THE_LINK_SSO_TENANT_ID="${{ vars.THE_LINK_SSO_TENANT_ID }}" \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f ./Dockerfile.deploy .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT

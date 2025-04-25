@@ -265,6 +265,13 @@ AUTHENTICATION_BACKENDS = (
     "allauth.account.auth_backends.AuthenticationBackend",
 )
 
+ELLIS_DON_SSO_CLIENT_ID = os.environ.get("ELLIS_DON_SSO_CLIENT_ID")
+ELLIS_DON_SSO_CLIENT_SECRET = os.environ.get("ELLIS_DON_SSO_CLIENT_SECRET")
+ELLIS_DON_SSO_TENANT_ID = os.environ.get("ELLIS_DON_SSO_TENANT_ID")
+THE_LINK_SSO_CLIENT_ID = os.environ.get("THE_LINK_SSO_CLIENT_ID")
+THE_LINK_SSO_CLIENT_SECRET = os.environ.get("THE_LINK_SSO_CLIENT_SECRET")
+THE_LINK_SSO_TENANT_ID = os.environ.get("THE_LINK_SSO_TENANT_ID")
+
 # enable social login
 SOCIALACCOUNT_PROVIDERS = {
     "google": {
@@ -278,17 +285,27 @@ SOCIALACCOUNT_PROVIDERS = {
     },
     'microsoft': {
         'TENANT': 'organizations',  # or 'common', 'consumers', or your tenant ID
-        'APP': {
-            'client_id': os.environ.get("ELLIS_DON_SSO_CLIENT_ID"),
-            'secret': os.environ.get("ELLIS_DON_SSO_CLIENT_SECRET"),
-            'settings': {
-                'tenant': os.environ.get("ELLIS_DON_SSO_TENANT_ID"),
+        'APPS': [
+            {
+                'client_id': ELLIS_DON_SSO_CLIENT_ID,
+                'secret': ELLIS_DON_SSO_CLIENT_SECRET,
+                'settings': {
+                    'tenant': ELLIS_DON_SSO_TENANT_ID,
+                },
             },
-        },
+            {
+                'client_id': THE_LINK_SSO_CLIENT_ID,
+                'secret': THE_LINK_SSO_CLIENT_SECRET,
+                'settings': {
+                    'tenant': THE_LINK_SSO_TENANT_ID,
+                },
+            }
+        ],
         "VERIFIED_EMAIL": True,
         "EMAIL_AUTHENTICATION_AUTO_CONNECT": True
     }
 }
+DOMAINS_CONFIGURED_FOR_SSO = ['thelink.ai', 'ellisdon.com']
 
 # For turnstile captchas
 TURNSTILE_KEY = os.environ.get("TURNSTILE_KEY", default=None)

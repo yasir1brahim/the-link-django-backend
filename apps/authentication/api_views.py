@@ -191,21 +191,50 @@ def microsoft_login(request):
     from allauth.socialaccount.adapter import get_adapter
     
     # Get client_id from request params if provided
-    client_id = request.GET.get('client_id')
+    organization_domain = request.GET.get('organization_domain')
+    authorize_url = None
     
     try:
-        if client_id:
-            # Use specific client_id if provided
-            app = get_adapter().get_app(request, provider='microsoft', client_id=client_id)
+        if not organization_domain or  organization_domain not in settings.DOMAINS_CONFIGURED_FOR_SSO:
+            return Response({'error': f"Organization domain {organization_domain} not configured for SSO"}, status=400)
+        
+        if organization_domain == 'ellisdon.com':
+            client_id = settings.ELLIS_DON_SSO_CLIENT_ID
+            provider = 'microsoft'
+        elif organization_domain == 'thelink.ai':
+            client_id = settings.THE_LINK_SSO_CLIENT_ID
+            provider = 'microsoft'
         else:
-            # Otherwise, get the default Microsoft app
-            app = get_adapter().get_app(request, provider='microsoft')
-            
-        provider = MicrosoftGraphProvider(request, app=app)
-        oauth2_adapter = provider.get_oauth2_adapter(request)
-        client = oauth2_adapter.get_client(request, app)
-        # Override the callback URL to use the frontend URL
-        client.callback_url = settings.FRONTEND_BASE_URL + '/microsoft/login/callback/'
+            raise ValueError(f"Organization domain {organization_domain} not configured for SSO")
+        
+        app = get_adapter().get_app(request, provider=provider, client_id=client_id)
+        
+        if provider == 'microsoft':
+            provider = MicrosoftGraphProvider(request, app=app)
+            oauth2_adapter = provider.get_oauth2_adapter(request)
+            callback_url = oauth2_adapter.get_callback_url(request, app)
+
+            def _build_tenant_url_with_specific_app(app, path):
+                tenant = app.settings.get("tenant", "common")
+                login_url = app.settings.get("login_url", "https://login.microsoftonline.com")
+                return f"{login_url}/{tenant}{path}"
+            access_token_url = _build_tenant_url_with_specific_app(app, "/oauth2/v2.0/token")
+            authorize_url = _build_tenant_url_with_specific_app(app, "/oauth2/v2.0/authorize")
+            # Constructing a custom OAuth2Client so we can set the access_token_url manually
+            # The default MicrosoftGraphOAuth2Adapter does not work with multiple Microsoft apps
+            client = OAuth2Client(
+                request,
+                app.client_id,
+                app.secret,
+                oauth2_adapter.access_token_method,
+                access_token_url,
+                callback_url,
+                scope_delimiter=oauth2_adapter.scope_delimiter,
+                headers=oauth2_adapter.headers,
+                basic_auth=oauth2_adapter.basic_auth,
+            )
+            # Override the callback URL to use the frontend URL
+            client.callback_url = settings.FRONTEND_BASE_URL + '/microsoft/login/callback/'
 
         auth_params = provider.get_auth_params()
         pkce_params = provider.get_pkce_params()
@@ -214,11 +243,11 @@ def microsoft_login(request):
 
         scope = provider.get_scope()
 
-        auth_url = client.get_redirect_url(oauth2_adapter.authorize_url, scope, auth_params)
+        auth_url = client.get_redirect_url(authorize_url or oauth2_adapter.authorize_url, scope, auth_params)
         return Response({'auth_url': auth_url})
     except SocialApp.DoesNotExist:
         return Response(
-            {'error': 'Microsoft authentication is not configured correctly.'},
+            {'error': 'SSO Authentication is not configured correctly.'},
             status=500
         )
 
@@ -247,6 +276,13 @@ def microsoft_callback(request):
     # Use the SocialLoginView to handle the login
     view = MicrosoftLogin.as_view()
     response = view(request._request)
-    print(response)
-    
+    if response.status_code == status.HTTP_200_OK:
+        # rewrap login responses to match our serializer schema
+        wrapped_jwt_data = {
+            "status": "success",
+            "detail": "User logged in.",
+            "jwt": response.data,
+        }
+        return Response(wrapped_jwt_data, status=200)
     return response
+    
