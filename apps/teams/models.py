@@ -41,6 +41,8 @@ class Team(SubscriptionModelBase, BaseModel):
     procore_id = models.IntegerField(blank=True, null=True)
     procore_name = models.CharField(max_length=256, blank=True, null=True)
 
+    sso_domain = models.CharField(max_length=256, blank=True, null=True)
+
     def __str__(self):
         return self.name
 

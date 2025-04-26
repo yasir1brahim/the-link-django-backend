@@ -2,7 +2,7 @@ from allauth.mfa.totp.internal.auth import TOTP
 from allauth.mfa.utils import is_mfa_enabled
 from allauth.mfa.models import Authenticator
 from apps.teams.permissions import TeamAccessPermissions
-from apps.teams.roles import ROLE_ADMIN
+from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
 from apps.teams.models import Team, Membership as TeamMembership
 from dj_rest_auth.serializers import JWTSerializer
 from dj_rest_auth.views import LoginView
@@ -297,21 +297,23 @@ def the_link_microsoft_callback(request):
     Handle the Microsoft OAuth callback using dj-rest-auth
     """
 
-    client_id = settings.THE_LINK_SSO_CLIENT_ID
-    provider = 'microsoft'
-
-    #TODO: Get app for this organization and use it explicity in the MicrosoftLogin view
-
     view = TheLinkMicrosoftLogin.as_view()
     response = view(request._request)
     if response.status_code == status.HTTP_200_OK:
-        # rewrap login responses to match our serializer schema
-        wrapped_jwt_data = {
-            "status": "success",
-            "detail": "User logged in.",
-            "jwt": response.data,
-        }
-        return Response(wrapped_jwt_data, status=200)
+        user_id = response.data['user']['id']
+        user = CustomUser.objects.get(id=user_id)
+        if user.email.endswith(settings.THE_LINK_SSO_ORGANIZATION_DOMAIN):
+            the_link_organization = Team.objects.get(sso_domain=settings.THE_LINK_SSO_ORGANIZATION_DOMAIN)
+            the_link_team_membership, created = TeamMembership.objects.get_or_create(user=user, team=the_link_organization, role=ROLE_MEMBER)
+            # rewrap login responses to match our serializer schema
+            wrapped_jwt_data = {
+                "status": "success",
+                "detail": "User logged in.",
+                "jwt": response.data,
+            }
+            return Response(wrapped_jwt_data, status=200)
+        else:
+            return Response({"error": "User email address is not registered at thelink.ai"}, status=status.HTTP_403_FORBIDDEN)
     return response
     
 
@@ -323,20 +325,22 @@ def ellisdon_microsoft_callback(request):
     Handle the Microsoft OAuth callback using dj-rest-auth
     """
 
-    client_id = settings.ELLIS_DON_SSO_CLIENT_ID
-    provider = 'microsoft'
-
-    #TODO: Get app for this organization and use it explicity in the MicrosoftLogin view
-
     view = EllisDonMicrosoftLogin.as_view()
     response = view(request._request)
     if response.status_code == status.HTTP_200_OK:
-        # rewrap login responses to match our serializer schema
-        wrapped_jwt_data = {
-            "status": "success",
-            "detail": "User logged in.",
-            "jwt": response.data,
-        }
-        return Response(wrapped_jwt_data, status=200)
+        user_id = response.data['user']['id']
+        user = CustomUser.objects.get(id=user_id)
+        if user.email.endswith(settings.ELLIS_DON_SSO_ORGANIZATION_DOMAIN):
+            ellis_don_organization = Team.objects.get(sso_domain=settings.ELLIS_DON_SSO_ORGANIZATION_DOMAIN)
+            ellis_don_team_membership, created = TeamMembership.objects.get_or_create(user=user, team=ellis_don_organization, role=ROLE_MEMBER)
+            # rewrap login responses to match our serializer schema
+            wrapped_jwt_data = {
+                "status": "success",
+                "detail": "User logged in.",
+                "jwt": response.data,
+            }
+            return Response(wrapped_jwt_data, status=200)
+        else:
+            return Response({"error": "User email address is not registered at ellisdon.com"}, status=status.HTTP_403_FORBIDDEN)
     return response
     
