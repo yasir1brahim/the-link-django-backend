@@ -14,8 +14,12 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes
+from allauth.socialaccount.adapter import get_adapter
+from allauth.core import context
+
 
 from django.conf import settings
+from django.views.decorators.csrf import csrf_exempt
 from dj_rest_auth.registration.views import SocialLoginView
 from allauth.socialaccount.providers.microsoft.views import MicrosoftGraphOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client
@@ -162,23 +166,54 @@ class CustomOAuth2Client(OAuth2Client):
             basic_auth,
         )
 
-# First define a view class for Microsoft login
-class MicrosoftLogin(SocialLoginView):
-    adapter_class = MicrosoftGraphOAuth2Adapter
-    client_class = CustomOAuth2Client
-    callback_url = settings.FRONTEND_BASE_URL + '/microsoft/login/callback/'
-    # callback_url = None  # This will be set from the request data
-    
-    # def get_client(self, request, app):
-    #     callback_url = request.data.get('redirect_uri')
-    #     return self.client_class(
-    #         request,
-    #         app.client_id,
-    #         app.secret,
-    #         self.adapter_class.access_token_url,
-    #         callback_url
-    #     )
 
+class EllisDonMicrosoftGraphOAuth2Adapter(MicrosoftGraphOAuth2Adapter):
+    def get_provider(self):
+        return get_adapter(self.request).get_provider(
+            self.request, provider=self.provider_id, client_id=settings.ELLIS_DON_SSO_CLIENT_ID
+        )
+    
+    def _build_tenant_url(self, path):
+        app = get_adapter().get_app(context.request, provider=self.provider_id, client_id=settings.ELLIS_DON_SSO_CLIENT_ID)
+        tenant = app.settings.get("tenant", "common")
+        login_url = app.settings.get("login_url", "https://login.microsoftonline.com")
+        return f"{login_url}/{tenant}{path}"
+    
+    @property
+    def profile_url(self):
+        app = get_adapter().get_app(context.request, provider=self.provider_id, client_id=settings.ELLIS_DON_SSO_CLIENT_ID)
+        graph_url = app.settings.get("graph_url", "https://graph.microsoft.com")
+        return f"{graph_url}/v1.0/me"
+
+
+class TheLinkMicrosoftGraphOAuth2Adapter(MicrosoftGraphOAuth2Adapter):
+    def get_provider(self):
+        return get_adapter(self.request).get_provider(
+            self.request, provider=self.provider_id, client_id=settings.THE_LINK_SSO_CLIENT_ID
+        )
+    
+    def _build_tenant_url(self, path):
+        app = get_adapter().get_app(context.request, provider=self.provider_id, client_id=settings.THE_LINK_SSO_CLIENT_ID)
+        tenant = app.settings.get("tenant", "common")
+        login_url = app.settings.get("login_url", "https://login.microsoftonline.com")
+        return f"{login_url}/{tenant}{path}"
+    
+    @property
+    def profile_url(self):
+        app = get_adapter().get_app(context.request, provider=self.provider_id, client_id=settings.THE_LINK_SSO_CLIENT_ID)
+        graph_url = app.settings.get("graph_url", "https://graph.microsoft.com")
+        return f"{graph_url}/v1.0/me"
+
+# First define a view class for Microsoft login
+class EllisDonMicrosoftLogin(SocialLoginView):
+    adapter_class = EllisDonMicrosoftGraphOAuth2Adapter
+    client_class = CustomOAuth2Client
+    callback_url = settings.FRONTEND_BASE_URL + '/ellisdon/microsoft/login/callback/'
+    
+class TheLinkMicrosoftLogin(SocialLoginView):
+    adapter_class = TheLinkMicrosoftGraphOAuth2Adapter
+    client_class = CustomOAuth2Client
+    callback_url = settings.FRONTEND_BASE_URL + '/the_link/microsoft/login/callback/'
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -193,6 +228,7 @@ def microsoft_login(request):
     # Get client_id from request params if provided
     organization_domain = request.GET.get('organization_domain')
     authorize_url = None
+    callback_url = None
     
     try:
         if not organization_domain or  organization_domain not in settings.DOMAINS_CONFIGURED_FOR_SSO:
@@ -201,9 +237,11 @@ def microsoft_login(request):
         if organization_domain == 'ellisdon.com':
             client_id = settings.ELLIS_DON_SSO_CLIENT_ID
             provider = 'microsoft'
+            callback_url = settings.FRONTEND_BASE_URL + '/ellisdon/microsoft/login/callback/'
         elif organization_domain == 'thelink.ai':
             client_id = settings.THE_LINK_SSO_CLIENT_ID
             provider = 'microsoft'
+            callback_url = settings.FRONTEND_BASE_URL + '/the_link/microsoft/login/callback/'
         else:
             raise ValueError(f"Organization domain {organization_domain} not configured for SSO")
         
@@ -212,7 +250,6 @@ def microsoft_login(request):
         if provider == 'microsoft':
             provider = MicrosoftGraphProvider(request, app=app)
             oauth2_adapter = provider.get_oauth2_adapter(request)
-            callback_url = oauth2_adapter.get_callback_url(request, app)
 
             def _build_tenant_url_with_specific_app(app, path):
                 tenant = app.settings.get("tenant", "common")
@@ -234,7 +271,7 @@ def microsoft_login(request):
                 basic_auth=oauth2_adapter.basic_auth,
             )
             # Override the callback URL to use the frontend URL
-            client.callback_url = settings.FRONTEND_BASE_URL + '/microsoft/login/callback/'
+            client.callback_url = callback_url
 
         auth_params = provider.get_auth_params()
         pkce_params = provider.get_pkce_params()
@@ -251,30 +288,47 @@ def microsoft_login(request):
             status=500
         )
 
+
+@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
-def microsoft_callback(request):
+def the_link_microsoft_callback(request):
     """
     Handle the Microsoft OAuth callback using dj-rest-auth
     """
-    # code = request.data.get('code')
-    # redirect_uri = request.data.get('redirect_uri')
+
+    client_id = settings.THE_LINK_SSO_CLIENT_ID
+    provider = 'microsoft'
+
+    #TODO: Get app for this organization and use it explicity in the MicrosoftLogin view
+
+    view = TheLinkMicrosoftLogin.as_view()
+    response = view(request._request)
+    if response.status_code == status.HTTP_200_OK:
+        # rewrap login responses to match our serializer schema
+        wrapped_jwt_data = {
+            "status": "success",
+            "detail": "User logged in.",
+            "jwt": response.data,
+        }
+        return Response(wrapped_jwt_data, status=200)
+    return response
     
-    # if not code:
-    #     return Response({'error': 'Authorization code is required'}, status=400)
-    
-    # # Prepare data for SocialLoginView
-    # data = {
-    #     'code': code,
-    #     'redirect_uri': redirect_uri
-    # }
-    # print(data)
-    
-    # # Create request with the code
-    # request.data.update(data)
-    
-    # Use the SocialLoginView to handle the login
-    view = MicrosoftLogin.as_view()
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def ellisdon_microsoft_callback(request):
+    """
+    Handle the Microsoft OAuth callback using dj-rest-auth
+    """
+
+    client_id = settings.ELLIS_DON_SSO_CLIENT_ID
+    provider = 'microsoft'
+
+    #TODO: Get app for this organization and use it explicity in the MicrosoftLogin view
+
+    view = EllisDonMicrosoftLogin.as_view()
     response = view(request._request)
     if response.status_code == status.HTTP_200_OK:
         # rewrap login responses to match our serializer schema

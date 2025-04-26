@@ -20,5 +20,6 @@ urlpatterns = [
     path("user/update-status/", api_views.UserStatusUpdateView.as_view(), name="update_user_status"),
 
     path("microsoft/login/", api_views.microsoft_login, name="api_microsoft_login"),
-    path("microsoft/login/callback/", api_views.microsoft_callback, name="api_microsoft_callback"),
+    path("the_link/microsoft/login/callback/", api_views.the_link_microsoft_callback, name="api_the_link_microsoft_callback"),
+    path("ellisdon/microsoft/login/callback/", api_views.ellisdon_microsoft_callback, name="api_ellisdon_microsoft_callback"),
 ]
