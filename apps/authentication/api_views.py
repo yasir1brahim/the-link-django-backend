@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes
 from allauth.socialaccount.adapter import get_adapter
 from allauth.core import context
-
+from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
@@ -165,6 +165,13 @@ class CustomOAuth2Client(OAuth2Client):
             headers,
             basic_auth,
         )
+
+
+class MicrosoftSSOSocialAccountAdapter(DefaultSocialAccountAdapter):
+    # force return True for email authentication to fix issue with multple apps
+    # This is fine since we are using SSO and the email is verified by Microsoft
+    def can_authenticate_by_email(self, login, email):
+        return True
 
 
 class EllisDonMicrosoftGraphOAuth2Adapter(MicrosoftGraphOAuth2Adapter):
