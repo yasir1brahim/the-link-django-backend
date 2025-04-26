@@ -67,6 +67,7 @@ THIRD_PARTY_APPS = [
     "allauth.account",
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.microsoft",
     "whitenoise.runserver_nostatic",
     "channels",
     "django_otp",
@@ -240,6 +241,10 @@ ACCOUNT_SESSION_REMEMBER = True
 ACCOUNT_LOGOUT_ON_GET = True
 ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = True
 ACCOUNT_LOGIN_BY_CODE_ENABLED = True
+# Authenticate if local account with this email address already exists
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+# Connect local account and social account if local account with that email address already exists
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
 
 ACCOUNT_FORMS = {
     "signup": "apps.teams.forms.TeamSignupForm",
@@ -260,6 +265,15 @@ AUTHENTICATION_BACKENDS = (
     "allauth.account.auth_backends.AuthenticationBackend",
 )
 
+ELLIS_DON_SSO_CLIENT_ID = os.environ.get("ELLIS_DON_SSO_CLIENT_ID")
+ELLIS_DON_SSO_CLIENT_SECRET = os.environ.get("ELLIS_DON_SSO_CLIENT_SECRET")
+ELLIS_DON_SSO_TENANT_ID = os.environ.get("ELLIS_DON_SSO_TENANT_ID")
+ELLIS_DON_SSO_ORGANIZATION_DOMAIN = "ellisdon.com"
+THE_LINK_SSO_CLIENT_ID = os.environ.get("THE_LINK_SSO_CLIENT_ID")
+THE_LINK_SSO_CLIENT_SECRET = os.environ.get("THE_LINK_SSO_CLIENT_SECRET")
+THE_LINK_SSO_TENANT_ID = os.environ.get("THE_LINK_SSO_TENANT_ID")
+THE_LINK_SSO_ORGANIZATION_DOMAIN = "thelink.ai"
+
 # enable social login
 SOCIALACCOUNT_PROVIDERS = {
     "google": {
@@ -271,7 +285,29 @@ SOCIALACCOUNT_PROVIDERS = {
             "access_type": "online",
         },
     },
+    'microsoft': {
+        'TENANT': 'organizations',  # or 'common', 'consumers', or your tenant ID
+        'APPS': [
+            {
+                'client_id': ELLIS_DON_SSO_CLIENT_ID,
+                'secret': ELLIS_DON_SSO_CLIENT_SECRET,
+                'settings': {
+                    'tenant': ELLIS_DON_SSO_TENANT_ID,
+                },
+            },
+            {
+                'client_id': THE_LINK_SSO_CLIENT_ID,
+                'secret': THE_LINK_SSO_CLIENT_SECRET,
+                'settings': {
+                    'tenant': THE_LINK_SSO_TENANT_ID,
+                },
+            }
+        ],
+        "VERIFIED_EMAIL": True,
+        "EMAIL_AUTHENTICATION_AUTO_CONNECT": True
+    }
 }
+DOMAINS_CONFIGURED_FOR_SSO = ['thelink.ai', 'ellisdon.com']
 
 # For turnstile captchas
 TURNSTILE_KEY = os.environ.get("TURNSTILE_KEY", default=None)

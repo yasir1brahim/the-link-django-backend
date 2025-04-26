@@ -64,7 +64,7 @@ cryptography==43.0.0
     #   pyjwt
 dj-database-url==2.2.0
     # via -r requirements/requirements.in
-dj-rest-auth==6.0.0
+dj-rest-auth==7.0.1
     # via -r requirements/requirements.in
 dj-stripe==2.8.4
     # via -r requirements/requirements.in

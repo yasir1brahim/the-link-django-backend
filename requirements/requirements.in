@@ -12,7 +12,7 @@ djangorestframework
 djangorestframework-api-key
 djangorestframework-simplejwt
 dj-database-url
-dj-rest-auth
+dj-rest-auth==7.0.1
 django-cors-headers
 django-health-check
 drf-spectacular
