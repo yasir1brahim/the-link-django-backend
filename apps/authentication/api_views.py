@@ -184,6 +184,24 @@ class EllisDonMicrosoftGraphOAuth2Adapter(MicrosoftGraphOAuth2Adapter):
         app = get_adapter().get_app(context.request, provider=self.provider_id, client_id=settings.ELLIS_DON_SSO_CLIENT_ID)
         graph_url = app.settings.get("graph_url", "https://graph.microsoft.com")
         return f"{graph_url}/v1.0/me"
+    
+    def can_authenticate_by_email(self, login, email):
+        """
+        Returns ``True`` iff  authentication by email is active for this login/email.
+
+        This can be configured with a ``"email_authentication"`` key in the provider
+        app settings, or a ``"VERIFIED_EMAIL"`` in the global provider settings
+        (``SOCIALACCOUNT_PROVIDERS``).
+        """
+        ret = None
+        provider = self.get_provider()
+        if provider.app:
+            ret = provider.app.settings.get("email_authentication")
+        if ret is None:
+            ret = settings.EMAIL_AUTHENTICATION or provider.get_settings().get(
+                "EMAIL_AUTHENTICATION", False
+            )
+        return ret
 
 
 class TheLinkMicrosoftGraphOAuth2Adapter(MicrosoftGraphOAuth2Adapter):
@@ -203,6 +221,24 @@ class TheLinkMicrosoftGraphOAuth2Adapter(MicrosoftGraphOAuth2Adapter):
         app = get_adapter().get_app(context.request, provider=self.provider_id, client_id=settings.THE_LINK_SSO_CLIENT_ID)
         graph_url = app.settings.get("graph_url", "https://graph.microsoft.com")
         return f"{graph_url}/v1.0/me"
+    
+    def can_authenticate_by_email(self, login, email):
+        """
+        Returns ``True`` iff  authentication by email is active for this login/email.
+
+        This can be configured with a ``"email_authentication"`` key in the provider
+        app settings, or a ``"VERIFIED_EMAIL"`` in the global provider settings
+        (``SOCIALACCOUNT_PROVIDERS``).
+        """
+        ret = None
+        provider = self.get_provider()
+        if provider.app:
+            ret = provider.app.settings.get("email_authentication")
+        if ret is None:
+            ret = settings.EMAIL_AUTHENTICATION or provider.get_settings().get(
+                "EMAIL_AUTHENTICATION", False
+            )
+        return ret
 
 # First define a view class for Microsoft login
 class EllisDonMicrosoftLogin(SocialLoginView):
