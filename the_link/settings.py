@@ -275,6 +275,7 @@ THE_LINK_SSO_CLIENT_SECRET = os.environ.get("THE_LINK_SSO_CLIENT_SECRET")
 THE_LINK_SSO_TENANT_ID = os.environ.get("THE_LINK_SSO_TENANT_ID")
 THE_LINK_SSO_ORGANIZATION_DOMAIN = "thelink.ai"
 print(f"THE_LINK_SSO_CLIENT_ID: {THE_LINK_SSO_CLIENT_ID}")
+SOCIALACCOUNT_ADAPTER = "apps.authentication.api_views.MicrosoftSSOSocialAccountAdapter"
 # enable social login
 SOCIALACCOUNT_PROVIDERS = {
     "google": {
