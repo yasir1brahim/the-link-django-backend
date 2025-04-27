@@ -357,7 +357,8 @@ def the_link_microsoft_callback(request):
         user = CustomUser.objects.get(id=user_id)
         if user.email.endswith(settings.THE_LINK_SSO_ORGANIZATION_DOMAIN):
             the_link_organization = Team.objects.get(sso_domain=settings.THE_LINK_SSO_ORGANIZATION_DOMAIN)
-            the_link_team_membership, created = TeamMembership.objects.get_or_create(user=user, team=the_link_organization, role=ROLE_MEMBER)
+            if not TeamMembership.objects.filter(user=user, team=the_link_organization).exists():
+                the_link_team_membership = TeamMembership.objects.create(user=user, team=the_link_organization, role=ROLE_MEMBER)
             # rewrap login responses to match our serializer schema
             wrapped_jwt_data = {
                 "status": "success",
@@ -385,7 +386,8 @@ def ellisdon_microsoft_callback(request):
         user = CustomUser.objects.get(id=user_id)
         if user.email.endswith(settings.ELLIS_DON_SSO_ORGANIZATION_DOMAIN):
             ellis_don_organization = Team.objects.get(sso_domain=settings.ELLIS_DON_SSO_ORGANIZATION_DOMAIN)
-            ellis_don_team_membership, created = TeamMembership.objects.get_or_create(user=user, team=ellis_don_organization, role=ROLE_MEMBER)
+            if not TeamMembership.objects.filter(user=user, team=ellis_don_organization).exists():
+                ellis_don_team_membership = TeamMembership.objects.create(user=user, team=ellis_don_organization, role=ROLE_MEMBER)
             # rewrap login responses to match our serializer schema
             wrapped_jwt_data = {
                 "status": "success",
