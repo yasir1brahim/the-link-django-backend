@@ -172,6 +172,16 @@ class MicrosoftSSOSocialAccountAdapter(DefaultSocialAccountAdapter):
     # This is fine since we are using SSO and the email is verified by Microsoft
     def can_authenticate_by_email(self, login, email):
         return True
+    
+    def get_provider(self, request, provider, client_id=None):
+        if request.path and '/ellisdon/microsoft/login/callback/' in request.path.lower():
+            return super().get_provider(request, provider, client_id=settings.ELLIS_DON_SSO_CLIENT_ID)
+        elif request.path and '/the_link/microsoft/login/callback/' in request.path.lower():
+            return super().get_provider(request, provider, client_id=settings.THE_LINK_SSO_CLIENT_ID)
+        else:
+            return super().get_provider(request, provider, client_id)
+
+    
 
 
 class EllisDonMicrosoftGraphOAuth2Adapter(MicrosoftGraphOAuth2Adapter):
