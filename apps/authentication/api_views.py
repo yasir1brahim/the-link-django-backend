@@ -355,19 +355,16 @@ def the_link_microsoft_callback(request):
     if response.status_code == status.HTTP_200_OK:
         user_id = response.data['user']['id']
         user = CustomUser.objects.get(id=user_id)
-        if user.email.endswith(settings.THE_LINK_SSO_ORGANIZATION_DOMAIN):
-            the_link_organization = Team.objects.get(sso_domain=settings.THE_LINK_SSO_ORGANIZATION_DOMAIN)
-            if not TeamMembership.objects.filter(user=user, team=the_link_organization).exists():
-                the_link_team_membership = TeamMembership.objects.create(user=user, team=the_link_organization, role=ROLE_MEMBER)
-            # rewrap login responses to match our serializer schema
-            wrapped_jwt_data = {
-                "status": "success",
-                "detail": "User logged in.",
-                "jwt": response.data,
-            }
-            return Response(wrapped_jwt_data, status=200)
-        else:
-            return Response({"error": "User email address is not registered at thelink.ai"}, status=status.HTTP_403_FORBIDDEN)
+        the_link_organization = Team.objects.get(sso_domain=settings.THE_LINK_SSO_ORGANIZATION_DOMAIN)
+        if not TeamMembership.objects.filter(user=user, team=the_link_organization).exists():
+            the_link_team_membership = TeamMembership.objects.create(user=user, team=the_link_organization, role=ROLE_MEMBER)
+        # rewrap login responses to match our serializer schema
+        wrapped_jwt_data = {
+            "status": "success",
+            "detail": "User logged in.",
+            "jwt": response.data,
+        }
+        return Response(wrapped_jwt_data, status=200)
     return response
     
 
@@ -384,18 +381,15 @@ def ellisdon_microsoft_callback(request):
     if response.status_code == status.HTTP_200_OK:
         user_id = response.data['user']['id']
         user = CustomUser.objects.get(id=user_id)
-        if user.email.endswith(settings.ELLIS_DON_SSO_ORGANIZATION_DOMAIN):
-            ellis_don_organization = Team.objects.get(sso_domain=settings.ELLIS_DON_SSO_ORGANIZATION_DOMAIN)
-            if not TeamMembership.objects.filter(user=user, team=ellis_don_organization).exists():
-                ellis_don_team_membership = TeamMembership.objects.create(user=user, team=ellis_don_organization, role=ROLE_MEMBER)
-            # rewrap login responses to match our serializer schema
-            wrapped_jwt_data = {
-                "status": "success",
-                "detail": "User logged in.",
-                "jwt": response.data,
-            }
-            return Response(wrapped_jwt_data, status=200)
-        else:
-            return Response({"error": "User email address is not registered at ellisdon.com"}, status=status.HTTP_403_FORBIDDEN)
+        ellis_don_organization = Team.objects.get(sso_domain=settings.ELLIS_DON_SSO_ORGANIZATION_DOMAIN)
+        if not TeamMembership.objects.filter(user=user, team=ellis_don_organization).exists():
+            ellis_don_team_membership = TeamMembership.objects.create(user=user, team=ellis_don_organization, role=ROLE_MEMBER)
+        # rewrap login responses to match our serializer schema
+        wrapped_jwt_data = {
+            "status": "success",
+            "detail": "User logged in.",
+            "jwt": response.data,
+        }
+        return Response(wrapped_jwt_data, status=200)
     return response
     
