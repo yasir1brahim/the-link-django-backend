@@ -1552,6 +1552,25 @@ def change_encode_value(text):
 # region submittal webhook
 # TODO: Move to separate file
 
+def save_submittal_items(submittals, masterformat_section_number, spec_section, project_id, project_version_id, document_id):
+    for submittal in submittals:
+        submittal_text = change_encode_value(submittal['submittal_text'])
+        masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=masterformat_section_number)
+        submittal_item = SubmittalItem.objects.create(
+            project_id=project_id,
+            project_version_id=project_version_id,
+            masterformat_section=masterformat_section,
+            spec_section=spec_section,
+            submittal_type=submittal['submittal_type'],
+            submittal_description=submittal['submittal_description'],
+            submittal_content=submittal_text,
+            paragraph_number=submittal.get('section', '') or '',
+            text_location=submittal.get('text_location'),
+            document_id=document_id,
+            parsing_method=submittal.get('parsing_method', 'UNKNOWN'),
+            additional_text_locations=submittal.get('additional_text_locations', [])
+        )
+
 @extend_schema(
     request=FileUploadSerializer,
     responses={200: {'description': 'File uploaded successfully'}},
@@ -1592,23 +1611,7 @@ def spec_status_webhook(request):
             return Response(status=status.HTTP_400_BAD_REQUEST)
         if not project_version_id:
             project_version_id = version_from_spec_section
-        for submittal in request_data['submittals']:
-            submittal_text = change_encode_value(submittal['submittal_text'])
-            masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=request_data['master_format_section_number'])
-            submittal_item = SubmittalItem.objects.create(
-                project_id=request_data['project_id'],
-                project_version_id=project_version_id,
-                masterformat_section=masterformat_section,
-                spec_section=spec_section,
-                submittal_type=submittal['submittal_type'],
-                submittal_description=submittal['submittal_description'],
-                submittal_content=submittal_text,
-                paragraph_number=submittal.get('section', '') or '',
-                text_location=submittal.get('text_location'),
-                document_id=request_data['document_id'],
-                parsing_method=submittal.get('parsing_method', 'UNKNOWN'),
-                additional_text_locations=submittal.get('additional_text_locations', [])
-            )
+        save_submittal_items(request_data['submittals'], request_data['master_format_section_number'], spec_section, request_data['project_id'], project_version_id, request_data['document_id'])
         if len(request_data['submittals']) == 1 and request_data['submittals'][0]['parsing_method'] == 'PLACEHOLDER':
             processing_method = 'REGEX_UNABLE_TO_DETECT_SUBMITTALS'
         else:
@@ -1619,10 +1622,16 @@ def spec_status_webhook(request):
     elif request_data['new_status'] == 'FAILED':
         print(f"SPEC STATUS WEBHOOK: received failure for request: {request_data}")
         document = UploadedFile.objects.filter(id=int(request_data['document_id'])).first()
+        spec_section = SpecSection.objects.filter(
+            document_id=int(request_data['document_id']),
+            masterformat_section__masterformat_number=request_data['master_format_section_number']
+        ).first()
         if document.processing_status == DocProcessingStatus.SUBSECTIONS_EXTRACTED:
             print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to SECTION_PROCESSING_FAILED")
             document.processing_status = DocProcessingStatus.SECTION_PROCESSING_FAILED
             document.save()
+            submittals = request_data.get('submittals', [])
+            save_submittal_items(submittals, request_data['master_format_section_number'], spec_section, request_data['project_id'], request_data.get('project_version_id'), request_data['document_id'])
         else:
             print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to FAILED")
             document.processing_status = DocProcessingStatus.FAILED
