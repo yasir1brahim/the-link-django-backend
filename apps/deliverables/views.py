@@ -1622,16 +1622,21 @@ def spec_status_webhook(request):
     elif request_data['new_status'] == 'FAILED':
         print(f"SPEC STATUS WEBHOOK: received failure for request: {request_data}")
         document = UploadedFile.objects.filter(id=int(request_data['document_id'])).first()
-        spec_section = SpecSection.objects.filter(
-            document_id=int(request_data['document_id']),
-            masterformat_section__masterformat_number=request_data['master_format_section_number']
-        ).first()
+        masterformat_section_number = request_data.get('master_format_section_number')
+        if masterformat_section_number:
+            spec_section = SpecSection.objects.filter(
+                document_id=int(request_data['document_id']),
+                masterformat_section__masterformat_number=masterformat_section_number
+            ).first()
+        else:
+            spec_section = None
         if document.processing_status == DocProcessingStatus.SUBSECTIONS_EXTRACTED:
             print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to SECTION_PROCESSING_FAILED")
             document.processing_status = DocProcessingStatus.SECTION_PROCESSING_FAILED
             document.save()
-            submittals = request_data.get('submittals', [])
-            save_submittal_items(submittals, request_data['master_format_section_number'], spec_section, request_data['project_id'], request_data.get('project_version_id'), request_data['document_id'])
+            if spec_section:
+                submittals = request_data.get('submittals', [])
+                save_submittal_items(submittals, request_data['master_format_section_number'], spec_section, request_data['project_id'], request_data.get('project_version_id'), request_data['document_id'])
         else:
             print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to FAILED")
             document.processing_status = DocProcessingStatus.FAILED
