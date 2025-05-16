@@ -1867,7 +1867,17 @@ class SemanticallyProcessedSpecItemViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         project_id = self.kwargs.get('project_id')
-        return self.queryset.filter(project_id=project_id).order_by('id')
+
+        queryset = self.queryset.filter(project_id=project_id).order_by('id')
+
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(item_content__icontains=search) | 
+                Q(topic__icontains=search) | 
+                Q(item_type__icontains=search)
+            )
+        return queryset
     
 
     @extend_schema(
