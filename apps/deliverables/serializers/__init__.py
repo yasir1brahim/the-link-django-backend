@@ -254,6 +254,7 @@ class SemanticallyProcessedSpecItemSerializer(serializers.ModelSerializer):
     additional_text_locations = serializers.JSONField()
     text_location = serializers.JSONField()
     document = EmbedDocumentSerializer()
+    document_section_link = serializers.SerializerMethodField()
 
     project_id = serializers.IntegerField(source='project.id')
     spec_section = serializers.CharField(source='masterformat_section.masterformat_number')
@@ -262,13 +263,19 @@ class SemanticallyProcessedSpecItemSerializer(serializers.ModelSerializer):
     def get_section_title(self, obj):
         return obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(
             obj.masterformat_section.masterformat_number, 'Custom Title')
+    
+    def get_document_section_link(self, obj):
+        if obj.spec_section:
+            if obj.spec_section.file_s3_key:
+                return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.spec_section.file_s3_key}, ExpiresIn=3600)
+        return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.document.document_path}, ExpiresIn=3600)
 
     class Meta:
         model = SemanticallyProcessedSpecItem
         fields = [
             'id', 'project_id', 'project_version', 'document', 
             'masterformat_section', 'section_title', 'spec_section_part', 
-            'topic', 'spec_section', 
+            'topic', 'spec_section', 'document_section_link',
             'item_type', 'item_content', 'paragraph_number',
             'parsing_method', 'parsing_version',
             'additional_text_locations', 'text_location',
