@@ -268,7 +268,9 @@ class SemanticallyProcessedSpecItemSerializer(serializers.ModelSerializer):
         if obj.spec_section:
             if obj.spec_section.file_s3_key:
                 return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.spec_section.file_s3_key}, ExpiresIn=3600)
-        return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.document.document_path}, ExpiresIn=3600)
+        if obj.document:
+            return s3.generate_presigned_url('get_object', Params={'Bucket': settings.S3_BUCKET, 'Key': obj.document.document_path}, ExpiresIn=3600)
+        return ""
 
     class Meta:
         model = SemanticallyProcessedSpecItem
