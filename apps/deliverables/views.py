@@ -1877,6 +1877,10 @@ class SemanticallyProcessedSpecItemViewSet(viewsets.ModelViewSet):
                 Q(topic__icontains=search) | 
                 Q(item_type__icontains=search)
             )
+        queryset = queryset.order_by(
+            'masterformat_section__masterformat_number',
+            'id',
+        )
         return queryset
     
 
