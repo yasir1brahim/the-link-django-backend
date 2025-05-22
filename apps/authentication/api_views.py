@@ -268,6 +268,20 @@ class TheLinkMicrosoftLogin(SocialLoginView):
     client_class = CustomOAuth2Client
     callback_url = settings.FRONTEND_BASE_URL + '/the_link/microsoft/login/callback/'
 
+
+
+def extract_domain_from_email_address(email_address):
+    if not email_address:
+        return None
+    if not isinstance(email_address, str):
+        return None
+    if '@' not in email_address:
+        return None
+    if email_address.count('@') != 1:
+        return None
+    return email_address.lower().split('@')[-1]
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def microsoft_login(request):
@@ -279,7 +293,11 @@ def microsoft_login(request):
     from allauth.socialaccount.adapter import get_adapter
     
     # Get client_id from request params if provided
-    organization_domain = request.GET.get('organization_domain')
+    user_email = request.GET.get('user_email')
+    organization_domain = extract_domain_from_email_address(user_email)
+    if not organization_domain:
+        return Response({'error': 'Invalid user email'}, status=400)
+    
     authorize_url = None
     callback_url = None
     
