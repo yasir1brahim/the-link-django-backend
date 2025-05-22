@@ -33,3 +33,8 @@ def is_full_spec_processing_feature_flag_active(user, team, project):
     return (settings.FULL_SPEC_PROCESSING_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
             settings.FULL_SPEC_PROCESSING_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
             settings.FULL_SPEC_PROCESSING_FEATURE_FLAG_NAME in get_active_flags_for_project(project))
+
+def is_specgpt_feature_flag_active(user, team, project):
+    return (settings.SPECGPT_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
+            settings.SPECGPT_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
+            settings.SPECGPT_FEATURE_FLAG_NAME in get_active_flags_for_project(project))

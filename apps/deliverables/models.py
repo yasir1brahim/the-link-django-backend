@@ -114,6 +114,14 @@ class UploadedFile(BaseModel):
         V2 = "V2", "V2"
         FULL_SPEC_PROCESSING = "FULL_SPEC_PROCESSING", "Full Spec Processing"
 
+    class SpecgptProcessingStatusChoices(models.TextChoices):
+        UPLOADING = "UPLOADING", "Uploading"
+        IN_QUEUE = "IN_QUEUE", "In Queue"
+        PROCESSING = "PROCESSING", "Processing"
+        PROCESSED = "PROCESSED", "Processed"
+        FAILED = "FAILED", "Failed"
+        NONE = "NONE", "None"
+
     legacy_id = models.IntegerField(blank=True, null=True)
 
     project = models.ForeignKey("Project", on_delete=models.CASCADE)
@@ -126,8 +134,11 @@ class UploadedFile(BaseModel):
     md5 = models.CharField(max_length=256)
     processing_status = models.CharField(max_length=256)
     processing_method = models.CharField(max_length=256, choices=ProcessingMethodChoices.choices, default=ProcessingMethodChoices.V1)
-
+    
     last_retry = models.DateTimeField(blank=True, null=True)
+
+    specgpt_embedding_enabled = models.BooleanField(default=False)
+    specgpt_processing_status = models.CharField(max_length=256, choices=SpecgptProcessingStatusChoices.choices, default=SpecgptProcessingStatusChoices.NONE)
 
     def __str__(self):
         return self.document_path

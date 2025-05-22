@@ -64,7 +64,8 @@ ARG THE_LINK_SSO_CLIENT_SECRET
 ENV THE_LINK_SSO_CLIENT_SECRET=$THE_LINK_SSO_CLIENT_SECRET
 ARG THE_LINK_SSO_TENANT_ID
 ENV THE_LINK_SSO_TENANT_ID=$THE_LINK_SSO_TENANT_ID
-
+ARG PINECONE_INDEX_NAME
+ENV PINECONE_INDEX_NAME=$PINECONE_INDEX_NAME
 # install node/npm
 RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     --mount=target=/var/cache/apt,type=cache,sharing=locked \
