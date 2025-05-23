@@ -31,3 +31,8 @@ drf-writable-nested
 openpyxl
 pillow
 gunicorn
+langchain
+langchain-openai
+langchain-pinecone
+langchain-community
+promptlayer

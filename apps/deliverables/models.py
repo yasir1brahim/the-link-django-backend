@@ -1,9 +1,13 @@
+import uuid
 from enum import Enum
 from datetime import datetime, timedelta, timezone
+from typing import List
 
 from django.db import models
 from apps.utils.models import BaseModel
 from django.conf import settings
+from langchain.schema.messages import BaseMessage, AIMessage, _message_to_dict, messages_from_dict
+from langchain.schema import BaseChatMessageHistory
 
 
 class Project(BaseModel):
@@ -167,6 +171,7 @@ class SpecSection(BaseModel):
     document = models.ForeignKey("UploadedFile", on_delete=models.CASCADE)
     processing_status = models.CharField(max_length=256, blank=True, null=True)
     processing_method = models.CharField(max_length=256, blank=True, null=True, choices=ProcessingMethod.choices)
+    specgpt_embedding_status = models.CharField(max_length=256, blank=True, null=True, choices=UploadedFile.SpecgptProcessingStatusChoices.choices)
     file_s3_key = models.CharField(max_length=1024, blank=True, null=True)
 
     def __str__(self):
@@ -355,3 +360,43 @@ class ProcoreSubmittalTypeMapping(BaseModel):
         return f"{self.link_type} -> {self.procore_type}"
 
 # endregion Procore
+
+# region SpecGPT
+
+class Chat(BaseModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey("Project", on_delete=models.CASCADE)
+    project_version = models.ForeignKey("ProjectVersion", on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+
+class ChatMessage(BaseModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    chat = models.ForeignKey("Chat", on_delete=models.CASCADE)
+    history = models.JSONField()
+
+    def __str__(self):
+        return f"{self.project.name} - {self.project_version.version_number} - {self.user.email}"
+    
+
+class CustomPostgresChatMessageHistory(BaseChatMessageHistory):
+    def __init__(self, chat: Chat):
+        self.chat = chat
+
+    @property
+    def messages(self) -> List[BaseMessage]:
+        messages = ChatMessage.objects.filter(chat=self.chat).order_by('created_at').values_list('history', flat=True)
+        return messages_from_dict(messages)
+    
+    def add_message(self, message: BaseMessage):
+        try:
+            ChatMessage.objects.create(chat=self.chat, history=_message_to_dict(message))
+        except Exception as e:
+            print(f"Error adding message to chat: {e}")
+
+    def clear(self):
+        ChatMessage.objects.filter(chat=self.chat).delete()
+
+    
+    
+
+# endregion SpecGPT

@@ -632,3 +632,10 @@ PROCORE_BASE_URL = os.environ.get("PROCORE_BASE_URL", default="")
 SPECGPT_CHUNK_SIZE = 1000
 SPECGPT_CHUNK_OVERLAP = 200
 PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", default="")
+BACKEND_SPECGPT_CALLBACK_URL = os.environ.get("BACKEND_SPECGPT_CALLBACK_URL", default="")
+
+PROMPTLAYER_API_KEY = os.environ.get("PROMPTLAYER_API_KEY", default="")
+PROMPTLAYER_PROMPT_NAME = "specgpt"
+
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", default="")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", default="")

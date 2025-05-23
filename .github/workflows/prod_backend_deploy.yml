@@ -71,6 +71,10 @@ jobs:
             --build-arg THE_LINK_SSO_CLIENT_SECRET="${{ secrets.THE_LINK_SSO_CLIENT_SECRET }}" \
             --build-arg THE_LINK_SSO_TENANT_ID="${{ vars.THE_LINK_SSO_TENANT_ID }}" \
             --build-arg PINECONE_INDEX_NAME="${{ vars.PINECONE_INDEX_NAME }}" \
+            --build-arg BACKEND_SPECGPT_CALLBACK_URL="${{ vars.BACKEND_SPECGPT_CALLBACK_URL }}" \
+            --build-arg PROMPTLAYER_API_KEY="${{ secrets.PROMPTLAYER_API_KEY }}" \
+            --build-arg PINECONE_API_KEY="${{ secrets.PINECONE_API_KEY }}" \
+            --build-arg OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f ./Dockerfile.deploy .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT

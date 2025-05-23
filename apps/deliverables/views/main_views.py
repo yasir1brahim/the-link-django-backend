@@ -1274,7 +1274,8 @@ def parse_spec(
     filename, 
     user_id, 
     is_v2_process_deliverables_flag_active, 
-    is_specgpt_flag_active
+    is_specgpt_flag_active,
+    specgpt_callback_url
 ):
     logging.debug(f"parse_spec: {object_key}")
 
@@ -1292,6 +1293,7 @@ def parse_spec(
         "chunk_size": settings.SPECGPT_CHUNK_SIZE,
         "chunk_overlap": settings.SPECGPT_CHUNK_OVERLAP,
         "pinecone_index_name": settings.PINECONE_INDEX_NAME,
+        "specgpt_callback_url": specgpt_callback_url
     }
 
     # update the document status to processing
@@ -1415,7 +1417,8 @@ def upload_to_s3_and_process(file_data):
                 filename=file_data['filename'],
                 user_id=str(file_data['user_id']),
                 is_v2_process_deliverables_flag_active=file_data['is_v2_process_deliverables_flag_active'],
-                is_specgpt_flag_active=file_data['is_specgpt_flag_active']
+                is_specgpt_flag_active=file_data['is_specgpt_flag_active'],
+                specgpt_callback_url=settings.BACKEND_SPECGPT_CALLBACK_URL
             )
         return {'status': 'success', 'document_path': file_data['document_path']}
     except Exception as e:

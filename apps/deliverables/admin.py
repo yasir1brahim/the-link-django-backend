@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
     UploadedFile, SpecSection, MasterFormatSection,
-    SubmittalItemList, ExcelExportHeader, ProjectVersion
+    SubmittalItemList, ExcelExportHeader, ProjectVersion, Chat
 )
 
 
@@ -93,3 +93,10 @@ class SubmittalItemListAdmin(admin.ModelAdmin):
 class ExcelExportHeaderAdmin(admin.ModelAdmin):
     list_display = ["user", "updated_at"]
     search_fields = ["user__email", ]
+
+@admin.register(Chat)
+class ChatAdmin(admin.ModelAdmin):
+    list_display = ["id", "user", "created_at"]
+    list_filter = ["user"]
+    search_fields = ["user__email"]
+
