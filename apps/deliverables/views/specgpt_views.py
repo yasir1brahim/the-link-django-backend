@@ -1,3 +1,7 @@
+import datetime
+from uuid import UUID
+from typing import Any, List, Optional
+
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -10,6 +14,10 @@ from promptlayer.templates import TemplateManager
 from langchain_openai import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain_community.callbacks.promptlayer_callback import PromptLayerCallbackHandler
+from langchain_core.outputs import (
+    ChatGeneration,
+    LLMResult,
+)
 from langchain.prompts.chat import (
     ChatPromptTemplate,
     HumanMessagePromptTemplate,
@@ -121,6 +129,63 @@ def specgpt_embedding_webhook(request):
 
 
 
+class CustomPromptLayerCallbackHandler(PromptLayerCallbackHandler):
+    def on_llm_end(
+        self,
+        response: LLMResult,
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs: Any,
+    ) -> None:
+        from promptlayer.utils import get_api_key, promptlayer_api_request
+
+        run_info = self.runs.get(run_id, {})
+        if not run_info:
+            return
+        run_info["request_end_time"] = datetime.datetime.now().timestamp()
+        for i in range(len(response.generations)):
+            generation = response.generations[i][0]
+
+            resp = {
+                "text": generation.text,
+                "llm_output": response.llm_output,
+            }
+            model_params = run_info.get("invocation_params", {})
+            is_chat_model = run_info.get("messages", None) is not None
+            model_input = (
+                run_info.get("messages", [])[i]
+                if is_chat_model
+                else [run_info.get("prompts", [])[i]]
+            )
+            model_response = (
+                [self._convert_message_to_dict(generation.message)]
+                if is_chat_model and isinstance(generation, ChatGeneration)
+                else resp
+            )
+
+            pl_request_id = promptlayer_api_request(
+                function_name=run_info.get("name"),
+                provider_type="langchain",
+                args=model_input,
+                kwargs=model_params,
+                tags=self.pl_tags,
+                response=model_response,
+                request_start_time=run_info.get("request_start_time"),
+                request_end_time=run_info.get("request_end_time"),
+                api_key=get_api_key(),
+                return_pl_id=bool(self.pl_id_callback is not None),
+                metadata={
+                    "_langchain_run_id": str(run_id),
+                    "_langchain_parent_run_id": str(parent_run_id),
+                    "_langchain_tags": str(run_info.get("tags", [])),
+                },
+            )
+
+            if self.pl_id_callback:
+                self.pl_id_callback(pl_request_id)
+
+
 class ChatViewSet(viewsets.ModelViewSet):
     embedding_model = "text-embedding-3-large"
     vector_dimensionality = 3072
@@ -165,7 +230,7 @@ class ChatViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='generate-response')
     def generate_response(self, request, pk=None, project_id=None):
         chat = self.get_object()
-        user_input = request.data.get('user_input')
+        user_input = request.data.get('user_input', '')
         num_documents_to_return = int(request.data.get('k', 10))
         vectorstore = PineconeVectorStore(
             pinecone_api_key=settings.PINECONE_API_KEY,
@@ -192,7 +257,7 @@ class ChatViewSet(viewsets.ModelViewSet):
                 temperature=promptlayer_model_metadata['parameters']['temperature'],
                 model_name=promptlayer_model_metadata['name'],
                 callbacks=[
-                    PromptLayerCallbackHandler(
+                    CustomPromptLayerCallbackHandler(
                         pl_tags=[
                             f"environment: {settings.ENVIRONMENT}",
                             f"application: deliverables",
