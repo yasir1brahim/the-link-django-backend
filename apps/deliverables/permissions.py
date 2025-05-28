@@ -1,7 +1,7 @@
 from rest_framework import permissions
 from rest_framework.request import Request
 from django.urls import reverse
-from .models import Project, ProjectVersion, SubmittalItem
+from .models import Project, ProjectVersion, SubmittalItem, Chat
 from apps.utils.feature_flags import is_versioning_feature_flag_active
 
 
@@ -77,3 +77,16 @@ class SubmittalItemAccessPermissions(permissions.BasePermission):
 
     def has_permission(self, request, view):
         return request.user.is_member_of_project(view.kwargs['project_id'])
+    
+
+class ChatAccessPermissions(permissions.BasePermission):
+    """
+    Permission to only allow members of a project to access chats.
+    """
+
+    def has_permission(self, request, view):
+        return request.user.is_member_of_project(view.kwargs['project_id'])
+    
+
+    def has_object_permission(self, request, view, obj: Chat):
+        return request.user.is_member_of_project(obj.project) and obj.user == request.user

@@ -25,6 +25,7 @@ from langchain.prompts.chat import (
 )
 
 from apps.deliverables.serializers.specgpt import ChatSerializer
+from apps.deliverables.permissions import ChatAccessPermissions
 from typing import TypedDict, List
 
 from apps.deliverables.models import (
@@ -193,8 +194,9 @@ class ChatViewSet(viewsets.ModelViewSet):
     # TODO: Add permissions to only allow authenticated users to access this viewset
     # TODO: Only allow users to access their own chats
     queryset = Chat.objects.all()
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ChatAccessPermissions]
     serializer_class = ChatSerializer
+
     def get_promptlayer_template(self):
         template_manager = TemplateManager(api_key=settings.PROMPTLAYER_API_KEY)
         return template_manager.get(settings.PROMPTLAYER_PROMPT_NAME, {'label': settings.ENVIRONMENT})
@@ -231,7 +233,20 @@ class ChatViewSet(viewsets.ModelViewSet):
     def generate_response(self, request, pk=None, project_id=None):
         chat = self.get_object()
         user_input = request.data.get('user_input', '')
-        num_documents_to_return = int(request.data.get('k', 10))
+        try:
+            num_documents_to_return = int(request.data.get('k', 10))
+        except ValueError:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'Invalid value for k'
+            })
+
+        try:
+            promptlayer_template = self.get_promptlayer_template()
+        except Exception as e:
+            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR, data={
+                'error': f'Failed to retrieve PromptLayer template: {str(e)}'
+            })
+
         vectorstore = PineconeVectorStore(
             pinecone_api_key=settings.PINECONE_API_KEY,
             index_name=settings.PINECONE_INDEX_NAME,
@@ -247,7 +262,6 @@ class ChatViewSet(viewsets.ModelViewSet):
             return_messages=True,
         )
 
-        promptlayer_template = self.get_promptlayer_template()
         promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
 
         filter_by_user_id = {'userid': {"$eq": str(request.user.id)}}
