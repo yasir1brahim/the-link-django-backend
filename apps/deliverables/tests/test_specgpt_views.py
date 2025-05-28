@@ -56,7 +56,7 @@ class SpecGptViewSetTests(APITestCase):
         # URL for generate-response endpoint
         self.url = reverse(
             'specgpt-chat-generate-response', 
-            kwargs={'project_id': self.project.id, 'pk': self.chat.id}
+            kwargs={'project_id': self.project.id}
         )
 
         # Mock PromptLayer template
@@ -129,12 +129,155 @@ class SpecGptViewSetTests(APITestCase):
         
         # Make request
         response = self.client.post(self.url, {
+            'chat_id': self.chat.id,
             'user_input': 'test question',
             'k': 5
         })
         
         # Assert response
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['chat_id'], self.chat.id)
+        self.assertEqual(response.data['answer'], 'Test answer')
+        self.assertEqual(response.data['question'], 'test question')
+        self.assertEqual(len(response.data['sources']), 1)
+        self.assertEqual(response.data['sources'][0]['text'], 'Test content')
+        self.assertEqual(response.data['sources'][0]['master_format_section_number'], '01 00 00')
+
+        # Verify PromptLayer template was retrieved
+        mock_template_manager_instance.get.assert_called_once()
+
+    @patch('apps.deliverables.views.specgpt_views.PineconeVectorStore')
+    @patch('apps.deliverables.views.specgpt_views.ChatOpenAI')
+    @patch('apps.deliverables.views.specgpt_views.ConversationalRetrievalChain')
+    @patch('apps.deliverables.views.specgpt_views.TemplateManager')
+    def test_calling_endpoint_without_chat_id_creates_new_chat(self, mock_template_manager, mock_chain, mock_chat_openai, mock_pinecone):
+        """Test that authenticated users can generate responses"""
+        # Mock PromptLayer template manager
+        mock_template_manager_instance = MagicMock()
+        mock_template_manager.return_value = mock_template_manager_instance
+        mock_template_manager_instance.get.return_value = self.mock_promptlayer_template
+        
+        # Mock the vector store and its retriever
+        mock_vectorstore = MagicMock()
+        mock_retriever = MagicMock()
+        mock_vectorstore.as_retriever.return_value = mock_retriever
+        mock_pinecone.return_value = mock_vectorstore
+        
+        # Mock the LLM
+        mock_llm = MagicMock()
+        mock_chat_openai.return_value = mock_llm
+        
+        # Mock the chain
+        mock_chain.from_llm.return_value = MagicMock()
+        mock_chain.from_llm.return_value.return_value = {
+            'answer': 'Test answer',
+            'source_documents': [
+                Document(
+                    page_content='Test content',
+                    metadata={
+                        'userid': str(self.user.id),
+                        'master_format_section_number': '01 00 00',
+                        's3_bucket': 'test-bucket',
+                        's3_key': 'test-key',
+                        'source': 'test.pdf'
+                    }
+                )
+            ]
+        }
+        
+        # Authenticate user
+        self.client.force_authenticate(user=self.user)
+        
+        # Make request
+        response = self.client.post(self.url, {
+            'user_input': 'test question',
+            'k': 5
+        })
+
+        # Verify new chat was created
+        self.assertEqual(Chat.objects.count(), 2)
+        new_chat = Chat.objects.exclude(id=self.chat.id).last()
+        self.assertEqual(new_chat.user, self.user)
+        self.assertEqual(new_chat.project, self.project)
+        self.assertEqual(new_chat.project_version, self.project_version)
+        
+        # Assert response
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotEqual(response.data['chat_id'], self.chat.id)
+        self.assertEqual(response.data['chat_id'], new_chat.id)
+        self.assertEqual(response.data['answer'], 'Test answer')
+        self.assertEqual(response.data['question'], 'test question')
+        self.assertEqual(len(response.data['sources']), 1)
+        self.assertEqual(response.data['sources'][0]['text'], 'Test content')
+        self.assertEqual(response.data['sources'][0]['master_format_section_number'], '01 00 00')
+
+        # Verify PromptLayer template was retrieved
+        mock_template_manager_instance.get.assert_called_once()
+
+    @patch('apps.deliverables.views.specgpt_views.PineconeVectorStore')
+    @patch('apps.deliverables.views.specgpt_views.ChatOpenAI')
+    @patch('apps.deliverables.views.specgpt_views.ConversationalRetrievalChain')
+    @patch('apps.deliverables.views.specgpt_views.TemplateManager')
+    def test_calling_endpoint_without_chat_id_and_specifying_project_version_creates_new_chat(self, mock_template_manager, mock_chain, mock_chat_openai, mock_pinecone):
+        """Test that authenticated users can generate responses"""
+        # Mock PromptLayer template manager
+        mock_template_manager_instance = MagicMock()
+        mock_template_manager.return_value = mock_template_manager_instance
+        mock_template_manager_instance.get.return_value = self.mock_promptlayer_template
+        
+        # Mock the vector store and its retriever
+        mock_vectorstore = MagicMock()
+        mock_retriever = MagicMock()
+        mock_vectorstore.as_retriever.return_value = mock_retriever
+        mock_pinecone.return_value = mock_vectorstore
+        
+        # Mock the LLM
+        mock_llm = MagicMock()
+        mock_chat_openai.return_value = mock_llm
+        
+        # Mock the chain
+        mock_chain.from_llm.return_value = MagicMock()
+        mock_chain.from_llm.return_value.return_value = {
+            'answer': 'Test answer',
+            'source_documents': [
+                Document(
+                    page_content='Test content',
+                    metadata={
+                        'userid': str(self.user.id),
+                        'master_format_section_number': '01 00 00',
+                        's3_bucket': 'test-bucket',
+                        's3_key': 'test-key',
+                        'source': 'test.pdf'
+                    }
+                )
+            ]
+        }
+        
+        # Authenticate user
+        self.client.force_authenticate(user=self.user)
+        new_project_version = ProjectVersion.objects.create(
+            project=self.project,
+            version_number=2,
+            version_name='2.0.0'
+        )
+        
+        # Make request
+        response = self.client.post(self.url, {
+            'project_version_id': new_project_version.id,
+            'user_input': 'test question',
+            'k': 5
+        })
+
+        # Verify new chat was created
+        self.assertEqual(Chat.objects.count(), 2)
+        new_chat = Chat.objects.exclude(id=self.chat.id).last()
+        self.assertEqual(new_chat.user, self.user)
+        self.assertEqual(new_chat.project, self.project)
+        self.assertEqual(new_chat.project_version, new_project_version)
+        
+        # Assert response
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['chat_id'], new_chat.id)
         self.assertEqual(response.data['answer'], 'Test answer')
         self.assertEqual(response.data['question'], 'test question')
         self.assertEqual(len(response.data['sources']), 1)
@@ -177,6 +320,7 @@ class SpecGptViewSetTests(APITestCase):
         
         # Make request without k parameter
         response = self.client.post(self.url, {
+            'chat_id': self.chat.id,
             'user_input': 'test question'
         })
         
@@ -206,7 +350,10 @@ class SpecGptViewSetTests(APITestCase):
         self.client.force_authenticate(user=other_user)
         
         # Make request
-        response = self.client.post(self.url, {'user_input': 'test question'})
+        response = self.client.post(self.url, {
+            'chat_id': self.chat.id,
+            'user_input': 'test question'
+        })
         
         # Assert response
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
@@ -228,7 +375,10 @@ class SpecGptViewSetTests(APITestCase):
         self.client.force_authenticate(user=other_user)
         
         # Make request
-        response = self.client.post(self.url, {'user_input': 'test question'})
+        response = self.client.post(self.url, {
+            'chat_id': self.chat.id,
+            'user_input': 'test question'
+        })
 
         # Assert response
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

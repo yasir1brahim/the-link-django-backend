@@ -26,6 +26,7 @@ from langchain.prompts.chat import (
 
 from apps.deliverables.serializers.specgpt import ChatSerializer
 from apps.deliverables.permissions import ChatAccessPermissions
+from apps.deliverables.models import Project, ProjectVersion
 from typing import TypedDict, List
 
 from apps.deliverables.models import (
@@ -229,9 +230,49 @@ class ChatViewSet(viewsets.ModelViewSet):
             })
         return message_sources
 
-    @action(detail=True, methods=['post'], url_path='generate-response')
-    def generate_response(self, request, pk=None, project_id=None):
-        chat = self.get_object()
+    @action(detail=False, methods=['post'], url_path='generate-response')
+    def generate_response(self, request, project_id=None):
+        chat_id = request.data.get('chat_id', None)
+        project_version_id = request.data.get('project_version_id', None)
+        if not project_version_id:
+            project_version = ProjectVersion.objects.filter(project_id=project_id).order_by('-created_at').first()
+            if not project_version:
+                return Response(status=status.HTTP_404_NOT_FOUND, data={
+                    'error': 'No project version found'
+                })
+            project_version_id = project_version.id
+        else:
+            project_version = ProjectVersion.objects.get(id=project_version_id)
+            if project_version.project.id != project_id:
+                return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                    'error': 'Project version does not match project'
+                })
+
+        if not chat_id:
+            chat = Chat.objects.create(
+                user=request.user,
+                project=Project.objects.get(id=project_id),
+                project_version=project_version
+            )
+        else:
+            chat = Chat.objects.get(id=chat_id)
+            if not chat:
+                return Response(status=status.HTTP_404_NOT_FOUND, data={
+                    'error': 'No chat found'
+                })
+            if chat.project_version.id != project_version_id:
+                return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                    'error': 'Chat project version does not match project version'
+                })
+            if chat.project.id != project_id:
+                return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                    'error': 'Chat project does not match project'
+                })
+            if chat.user != request.user:
+                return Response(status=status.HTTP_403_FORBIDDEN, data={
+                    'error': 'Unauthorized'
+                })
+
         user_input = request.data.get('user_input', '')
         try:
             num_documents_to_return = int(request.data.get('k', 10))
@@ -303,6 +344,7 @@ class ChatViewSet(viewsets.ModelViewSet):
         message_sources = self._build_message_sources(source_documents)
 
         return Response(status=status.HTTP_200_OK, data={
+            'chat_id': chat.id,
             'answer': results['answer'],
             'question': user_input,
             'sources': message_sources
