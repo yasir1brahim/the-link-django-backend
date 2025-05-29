@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
     UploadedFile, SpecSection, MasterFormatSection,
-    SubmittalItemList, ExcelExportHeader, ProjectVersion, Chat
+    SubmittalItemList, ExcelExportHeader, ProjectVersion, Chat, ChatMessage
 )
 
 
@@ -99,4 +99,10 @@ class ChatAdmin(admin.ModelAdmin):
     list_display = ["id", "user", "created_at"]
     list_filter = ["user"]
     search_fields = ["user__email"]
+
+@admin.register(ChatMessage)
+class ChatMessageAdmin(admin.ModelAdmin):
+    list_display = ["id", "chat", "created_at"]
+    list_filter = ["chat"]
+    search_fields = ["chat__user__email"]
 

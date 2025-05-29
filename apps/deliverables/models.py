@@ -373,14 +373,16 @@ class ChatMessage(BaseModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     chat = models.ForeignKey("Chat", on_delete=models.CASCADE)
     history = models.JSONField()
+    sources = models.JSONField(blank=True, null=True)
 
     def __str__(self):
-        return f"{self.project.name} - {self.project_version.version_number} - {self.user.email}"
+        return f"{self.chat.project.name} - {self.chat.project_version.version_number} - {self.chat.user.email}"
     
 
 class CustomPostgresChatMessageHistory(BaseChatMessageHistory):
     def __init__(self, chat: Chat):
         self.chat = chat
+        self.message_id = None
 
     @property
     def messages(self) -> List[BaseMessage]:
@@ -389,7 +391,8 @@ class CustomPostgresChatMessageHistory(BaseChatMessageHistory):
     
     def add_message(self, message: BaseMessage):
         try:
-            ChatMessage.objects.create(chat=self.chat, history=_message_to_dict(message))
+            chat_message = ChatMessage.objects.create(chat=self.chat, history=_message_to_dict(message))
+            self.message_id = chat_message.id
         except Exception as e:
             print(f"Error adding message to chat: {e}")
 

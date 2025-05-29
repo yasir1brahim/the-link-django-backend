@@ -24,7 +24,7 @@ from langchain.prompts.chat import (
     SystemMessagePromptTemplate,
 )
 
-from apps.deliverables.serializers.specgpt import ChatSerializer
+from apps.deliverables.serializers.specgpt import ChatDetailSerializer
 from apps.deliverables.permissions import ChatAccessPermissions
 from apps.deliverables.models import Project, ProjectVersion
 from typing import TypedDict, List
@@ -192,11 +192,9 @@ class ChatViewSet(viewsets.ModelViewSet):
     embedding_model = "text-embedding-3-large"
     vector_dimensionality = 3072
     embedding_provider = OpenAIEmbeddings
-    # TODO: Add permissions to only allow authenticated users to access this viewset
-    # TODO: Only allow users to access their own chats
     queryset = Chat.objects.all()
     permission_classes = [IsAuthenticated, ChatAccessPermissions]
-    serializer_class = ChatSerializer
+    serializer_class = ChatDetailSerializer
 
     def get_promptlayer_template(self):
         template_manager = TemplateManager(api_key=settings.PROMPTLAYER_API_KEY)
@@ -305,7 +303,11 @@ class ChatViewSet(viewsets.ModelViewSet):
 
         promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
 
-        filter_by_user_id = {'userid': {"$eq": str(request.user.id)}}
+        vectorstore_filter = {
+            'userid': {"$eq": str(request.user.id)},
+            # 'project_id': {"$eq": str(project_id)},
+            # 'project_version_id': {"$eq": str(project_version_id)},
+        }
 
         specgpt_qa = ConversationalRetrievalChain.from_llm(
             llm=ChatOpenAI(
@@ -328,8 +330,7 @@ class ChatViewSet(viewsets.ModelViewSet):
             retriever=vectorstore.as_retriever(
                 search_kwargs={
                     "k": num_documents_to_return, 
-                    # TODO: Add project_id and version_id filter
-                    "filter": filter_by_user_id
+                    "filter": vectorstore_filter
                 }
             ),
             memory=memory,
@@ -341,6 +342,12 @@ class ChatViewSet(viewsets.ModelViewSet):
         results = specgpt_qa({'question': user_input})
 
         source_documents = results['source_documents']
+        chat_message = ChatMessage.objects.get(id=chat_memory.message_id)
+        chat_message.sources = [
+            {'metadata': x.metadata, 'page_content': x.page_content}
+            for x in source_documents
+        ]
+        chat_message.save()
         message_sources = self._build_message_sources(source_documents)
 
         return Response(status=status.HTTP_200_OK, data={
