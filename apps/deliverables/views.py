@@ -1600,10 +1600,14 @@ def spec_status_webhook(request):
             section.save()
     elif request_data['new_status'] == 'PROCESSED_SECTION':
         print(f"SPEC STATUS WEBHOOK: saving submittals")
-        spec_section = SpecSection.objects.filter(
+        spec_sections = SpecSection.objects.filter(
             document_id=int(request_data['document_id']),
-            masterformat_section__masterformat_number=request_data['master_format_section_number']
-        ).first()
+            masterformat_section__masterformat_number=request_data['master_format_section_number'],
+        )
+        if request_data.get('file_s3_key'):
+            spec_section = spec_sections.filter(file_s3_key=request_data['file_s3_key']).first()
+        else:
+            spec_section = spec_sections.first()
         project_version_id = request_data.get('project_version_id')
         version_from_spec_section = spec_section.document.project_version.id
         if project_version_id and str(project_version_id) != str(version_from_spec_section):
@@ -1691,10 +1695,14 @@ def full_spec_processing_webhook(request):
             section.save()
     elif request_data['new_status'] == 'PROCESSED_SECTION':
         print(f"FULL SPEC PROCESSING WEBHOOK: saving submittals")
-        spec_section = SpecSection.objects.filter(
+        spec_sections = SpecSection.objects.filter(
             document_id=int(request_data['document_id']),
-            masterformat_section__masterformat_number=request_data['master_format_section_number']
-        ).first()
+            masterformat_section__masterformat_number=request_data['master_format_section_number'],
+        )
+        if request_data.get('file_s3_key'):
+            spec_section = spec_sections.filter(file_s3_key=request_data['file_s3_key']).first()
+        else:
+            spec_section = spec_sections.first()
         project_version_id = request_data.get('project_version_id')
         version_from_spec_section = spec_section.document.project_version.id
         if project_version_id and str(project_version_id) != str(version_from_spec_section):
