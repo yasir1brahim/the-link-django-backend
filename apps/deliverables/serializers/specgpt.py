@@ -1,16 +1,14 @@
 from rest_framework import serializers
-from apps.deliverables.models import Chat
+from apps.deliverables.models import Chat, ChatMessage
 
 
-class ChatMessageSerializer(serializers.Serializer):
-    id = serializers.UUIDField()
-    message = serializers.CharField()
-    created_at = serializers.DateTimeField()
-    role = serializers.CharField()
-    sources = serializers.SerializerMethodField()
+class ChatMessageSerializer(serializers.ModelSerializer):
+    sources = serializers.JSONField()
 
-    def get_sources(self, obj):
-        return obj.sources
+    class Meta:
+        model = ChatMessage
+        fields = ['id', 'message', 'created_at', 'type', 'sources']
+
 
 
 class ChatDetailSerializer(serializers.ModelSerializer):
@@ -22,6 +20,7 @@ class ChatDetailSerializer(serializers.ModelSerializer):
 
     def get_messages(self, obj):
         return ChatMessageSerializer(obj.messages, many=True).data
+
 
 
 

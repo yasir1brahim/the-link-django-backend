@@ -305,8 +305,8 @@ class ChatViewSet(viewsets.ModelViewSet):
 
         vectorstore_filter = {
             'userid': {"$eq": str(request.user.id)},
-            # 'project_id': {"$eq": str(project_id)},
-            # 'project_version_id': {"$eq": str(project_version_id)},
+            'project_id': {"$eq": str(project_id)},
+            'project_version_id': {"$eq": str(project_version_id)},
         }
 
         specgpt_qa = ConversationalRetrievalChain.from_llm(
@@ -342,7 +342,7 @@ class ChatViewSet(viewsets.ModelViewSet):
         results = specgpt_qa({'question': user_input})
 
         source_documents = results['source_documents']
-        chat_message = ChatMessage.objects.get(id=chat_memory.message_id)
+        chat_message = chat_memory.message_db_object
         chat_message.sources = [
             {'metadata': x.metadata, 'page_content': x.page_content}
             for x in source_documents

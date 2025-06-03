@@ -370,9 +370,15 @@ class Chat(BaseModel):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
 
 class ChatMessage(BaseModel):
+    class ChatMessageType(models.TextChoices):
+        AI = "ai", "ai"
+        HUMAN = "human", "human"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    chat = models.ForeignKey("Chat", on_delete=models.CASCADE)
-    history = models.JSONField()
+    chat = models.ForeignKey("Chat", on_delete=models.CASCADE, related_name="messages")
+    type = models.CharField(max_length=256, choices=ChatMessageType.choices)
+    message = models.TextField()
+    raw_message = models.JSONField(blank=True, null=True)
     sources = models.JSONField(blank=True, null=True)
 
     def __str__(self):
@@ -382,17 +388,22 @@ class ChatMessage(BaseModel):
 class CustomPostgresChatMessageHistory(BaseChatMessageHistory):
     def __init__(self, chat: Chat):
         self.chat = chat
-        self.message_id = None
+        self.message_db_object = None
 
     @property
     def messages(self) -> List[BaseMessage]:
-        messages = ChatMessage.objects.filter(chat=self.chat).order_by('created_at').values_list('history', flat=True)
+        messages = ChatMessage.objects.filter(chat=self.chat).order_by('created_at').values_list('raw_message', flat=True)
         return messages_from_dict(messages)
     
     def add_message(self, message: BaseMessage):
         try:
-            chat_message = ChatMessage.objects.create(chat=self.chat, history=_message_to_dict(message))
-            self.message_id = chat_message.id
+            chat_message = ChatMessage.objects.create(
+                chat=self.chat,
+                type=message.type,
+                message=message.content,
+                raw_message=_message_to_dict(message)
+            )
+            self.message_db_object = chat_message
         except Exception as e:
             print(f"Error adding message to chat: {e}")
 
