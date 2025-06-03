@@ -965,6 +965,45 @@ sample_v2_subsections_extracted_webhook = {
     ]
 }
 
+
+sample_v2_subsections_extracted_webhook_with_multiple_specsections_with_same_masterformat_number = {
+    "new_status": "SUBSECTIONS_EXTRACTED",
+    "document_id": "1",
+    "project_id": "1",
+    "user_id": "2787",
+    "filename": "03_3001_-WLA_CAST-IN-PLACE_LANDSCAPE_CONCRETE.pdf",
+    "subsections": [
+        {
+            "master_format_section_number": "033001",
+            "subsection_type": "SUBMITTAL_SECTION",
+            "file_s3_key": "test/key/1",
+            "subsection_index": 0,
+            "subsection_id": "17552407-85f4-47c6-85c6-6b76219d17fa"
+        },
+        {
+            "master_format_section_number": "033001",
+            "subsection_type": "SUBMITTAL_SECTION",
+            "file_s3_key": "test/key/2",
+            "subsection_index": 1,
+            "subsection_id": "17552407-85f4-47c6-85c6-6b76219aaaaa"
+        },
+        {
+            "master_format_section_number": "033001",
+            "subsection_type": "SUBMITTAL_SECTION",
+            "file_s3_key": "test/key/3",
+            "subsection_index": 2,
+            "subsection_id": "17552407-85f4-47c6-85c6-6b76219aaaab"
+        },
+        {
+            "master_format_section_number": "033004",
+            "subsection_type": "SUBMITTAL_SECTION",
+            "file_s3_key": "test/key/4",
+            "subsection_index": 3,
+            "subsection_id": "17552407-85f4-47c6-85c6-6b76219aaaaac"
+        },
+    ]
+}
+
 sample_processed_placeholder_webhook = {
     "new_status": "PROCESSED_SECTION",
     "master_format_section_number": "033001",
