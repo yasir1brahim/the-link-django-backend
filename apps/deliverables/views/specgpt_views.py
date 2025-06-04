@@ -196,6 +196,76 @@ class ChatViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, ChatAccessPermissions]
     serializer_class = ChatDetailSerializer
 
+    def list(self, request, project_id=None):
+        """
+        Return a list of chats for the project with custom pagination and metadata.
+        """
+        project_version_id = request.query_params.get('project_version_id', None)
+        history_today = []
+        history_yesterday = []
+        history_prev_7_days = []
+        history_prev_30_days = []
+        history_next_30_days = []
+        _now = datetime.datetime.utcnow()
+        start_of_today = _now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_of_yesterday = start_of_today - datetime.timedelta(days=1)
+        end_of_prev_7_days = start_of_today - datetime.timedelta(days=6, microseconds=1)
+        end_of_prev_30_days = start_of_today - datetime.timedelta(days=29, microseconds=1)
+        if not project_version_id:
+            project_version = ProjectVersion.objects.filter(project_id=project_id).order_by('-created_at').first()
+            if not project_version:
+                return Response(status=status.HTTP_404_NOT_FOUND, data={
+                    'error': 'No project version found'
+                })
+            project_version_id = project_version.id
+        
+        # Get queryset and apply pagination
+        queryset = self.get_queryset().filter(project_id=project_id, project_version_id=project_version_id)
+        
+        for chat in queryset:
+            first_human_message = chat.messages.filter(type=ChatMessage.ChatMessageType.HUMAN).order_by('created_at').first()
+            _history = {
+                'session_id': chat.id,
+                'question': first_human_message.message if first_human_message else '',
+            }
+            if chat.created_at.astimezone(datetime.UTC) > start_of_today.astimezone(datetime.UTC):
+                history_today.append(_history)
+            elif chat.created_at.astimezone(datetime.UTC) > start_of_yesterday.astimezone(datetime.UTC):
+                history_yesterday.append(_history)
+            elif chat.created_at.astimezone(datetime.UTC) > end_of_prev_7_days.astimezone(datetime.UTC):
+                history_prev_7_days.append(_history)
+            elif chat.created_at.astimezone(datetime.UTC) > end_of_prev_30_days.astimezone(datetime.UTC):
+                history_prev_30_days.append(_history)
+            else:
+                history_next_30_days.append(_history)
+
+        session_id_history_list = [
+            {
+                'day': "Today",
+                'chats': history_today
+            },
+            {
+                'day': "Yesterday",
+                'chats': history_yesterday
+            },
+            {
+                'day': "Previous 7 Days",
+                'chats': history_prev_7_days
+            },
+            {
+                'day': "Previous 30 Days",
+                'chats': history_prev_30_days
+            },
+            {
+                'day': "30 Days After",
+                'chats': history_next_30_days
+            }
+        ]
+        
+        return Response(status=status.HTTP_200_OK, data={
+            'results': session_id_history_list
+        })
+
     def get_promptlayer_template(self):
         template_manager = TemplateManager(api_key=settings.PROMPTLAYER_API_KEY)
         return template_manager.get(settings.PROMPTLAYER_PROMPT_NAME, {'label': settings.ENVIRONMENT})
@@ -230,6 +300,8 @@ class ChatViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='generate-response')
     def generate_response(self, request, project_id=None):
+        print("Generate response")
+        print(request.data)
         chat_id = request.data.get('chat_id', None)
         project_version_id = request.data.get('project_version_id', None)
         if not project_version_id:
