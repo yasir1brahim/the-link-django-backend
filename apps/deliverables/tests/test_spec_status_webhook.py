@@ -20,6 +20,7 @@ from apps.deliverables.tests.test_data.sample_webhook import (
     sample_processed_placeholder_webhook,
     sample_multiple_subsections_extracted_webhook,
     sample_v2_subsections_extracted_webhook,
+    sample_v2_subsections_extracted_webhook_with_multiple_specsections_with_same_masterformat_number,
 )
 
 class TestSpecStatusWebhook(APITestCase):
@@ -556,5 +557,112 @@ class TestSpecStatusWebhook(APITestCase):
         self.assertEqual(master_format_section_numbers, ["033001", "033002", "033004"])
 
 
+
+    @patch('apps.deliverables.views.parse_spec')
+    def test_spec_status_webhook_end_to_end_success_with_multiple_specsections_with_same_masterformat_number(self, mock_parse_spec):
+        # Upload a file to the project
+        upload_response = self.client.post(reverse('deliverables:upload_file'), {
+            'project_id': self.project.id,
+            'files': [self.mock_file],
+        })
+        self.assertEqual(upload_response.status_code, status.HTTP_200_OK)
+        uploaded_file = UploadedFile.objects.get(project=self.project)
+        self.assertEqual(uploaded_file.processing_status, 'PENDING_PROCESSING')
+        uploaded_file.refresh_from_db()
+
+        # Update test data to use correct IDs
+        sample_processing_webhook['document_id'] = uploaded_file.id
+        sample_processing_webhook['project_id'] = self.project.id
+        sample_processing_webhook['user_id'] = self.user.id
+        sample_v2_subsections_extracted_webhook_with_multiple_specsections_with_same_masterformat_number['document_id'] = uploaded_file.id
+        sample_v2_subsections_extracted_webhook_with_multiple_specsections_with_same_masterformat_number['project_id'] = self.project.id
+        sample_v2_subsections_extracted_webhook_with_multiple_specsections_with_same_masterformat_number['user_id'] = self.user.id
+        sample_processed_placeholder_webhook['document_id'] = uploaded_file.id
+        sample_processed_placeholder_webhook['project_id'] = self.project.id
+        sample_processed_placeholder_webhook['user_id'] = self.user.id
+        sample_processed_section_webhook['document_id'] = uploaded_file.id
+        sample_processed_section_webhook['project_id'] = self.project.id
+        sample_processed_section_webhook['user_id'] = self.user.id
+    
+
+        # Simulate receiving the processing webhook
+        response = self.client.post(self.webhook_url, data=json.dumps(sample_processing_webhook), content_type='application/json')
+        print(response.data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Simulate receiving the subsections extracted webhook
+        response = self.client.post(self.webhook_url, data=json.dumps(sample_v2_subsections_extracted_webhook_with_multiple_specsections_with_same_masterformat_number), content_type='application/json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        uploaded_file.refresh_from_db()
+        self.assertEqual(uploaded_file.processing_status, 'SUBSECTIONS_EXTRACTED')
+
+        # Simulate receiving the processed section webhooks
+        processed_section_info = [
+            (
+                subsection['subsection_id'],
+                subsection['master_format_section_number'],
+                subsection['file_s3_key']
+            ) 
+            for subsection in sample_v2_subsections_extracted_webhook_with_multiple_specsections_with_same_masterformat_number['subsections']]
+        section_id_to_have_actual_submittals = processed_section_info[2][0]
+
+        for section_id, master_format_section_number, file_s3_key in processed_section_info:
+            if section_id == section_id_to_have_actual_submittals:
+                webhook_data = deepcopy(sample_processed_section_webhook)
+                webhook_data['subsection_id'] = section_id
+                webhook_data['master_format_section_number'] = master_format_section_number
+                webhook_data['file_s3_key'] = file_s3_key
+            else:
+                webhook_data = deepcopy(sample_processed_placeholder_webhook)
+                webhook_data['subsection_id'] = section_id
+                webhook_data['master_format_section_number'] = master_format_section_number
+                webhook_data['file_s3_key'] = file_s3_key
+            response = self.client.post(self.webhook_url, data=json.dumps(webhook_data), content_type='application/json')
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        uploaded_file.refresh_from_db()
+        self.assertEqual(uploaded_file.processing_status, 'PROCESSED')
+
+        # check that the submittal items were created as expected
+        submittal_items = SubmittalItem.objects.filter(project=self.project)
+
+        self.assertEqual(submittal_items.count(), 53 + 3) # 3 placeholder sections plus 53 actual submittals
+
+        actual_submittal_items = submittal_items.exclude(parsing_method='PLACEHOLDER').order_by('heirarchical_paragraph_number')
+        self.assertEqual(actual_submittal_items[0].submittal_type, 'Action/Information Submittals')
+        self.assertEqual(actual_submittal_items[0].submittal_description, 'Product Data')
+        self.assertEqual(actual_submittal_items[0].submittal_content, 'Product Data:  Submit preprinted data for each type of manufactured material')
+        # check that submittal numbers were assigned as expected
+        for index, expected_paragraph_number in enumerate(expected_paragraph_numbers_in_order):
+            expected_submittal_number = index + 1
+            submittal_item = actual_submittal_items.filter(paragraph_number=expected_paragraph_number).first()
+            self.assertEqual(int(submittal_item.submittal_number), expected_submittal_number)
+            self.assertEqual(submittal_item.paragraph_number, expected_paragraph_number)
+
+        for placeholder_submittal_item in submittal_items.filter(parsing_method='PLACEHOLDER'):
+            self.assertEqual(placeholder_submittal_item.submittal_type, 'N/A')
+            self.assertEqual(placeholder_submittal_item.submittal_description, 'N/A')
+            self.assertEqual(placeholder_submittal_item.submittal_content, 'Unable to extract submittals from text')
+            self.assertEqual(placeholder_submittal_item.submittal_number, None)
+
+        # check that get submittal items API returns the submittal items in the correct order
+        url = reverse('submittal-item-list', kwargs={'project_id': self.project.id})
+        print(url)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        print([submittal_item['spec_section'] for submittal_item in response.data['message']])
+        self.assertEqual(len(response.data['message']), 53 + 3) # 3 placeholder sections plus 53 actual submittals
+
+        for index, submittal_item in enumerate(response.data['message']):
+            if index < 53:
+                self.assertEqual(submittal_item['spec_section'], "033001")
+                displayed_submittal_number = submittal_item['submittal_number']
+                if displayed_submittal_number.endswith('.0'):
+                    displayed_submittal_number = displayed_submittal_number[:-2]
+                self.assertEqual(submittal_item['para_no'], expected_paragraph_numbers_in_order[index])
+                self.assertEqual(int(displayed_submittal_number), index + 1)
+        placeholder_submittal_items = response.data['message'][53:]
+        master_format_section_numbers = [submittal_item['spec_section'] for submittal_item in placeholder_submittal_items]
+        self.assertEqual(master_format_section_numbers, ["033001", "033001", "033004"])
 
 
