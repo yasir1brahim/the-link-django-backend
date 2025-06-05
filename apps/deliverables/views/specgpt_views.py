@@ -1,7 +1,7 @@
 import datetime
 from uuid import UUID
 from typing import Any, List, Optional
-
+import boto3
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -427,6 +427,35 @@ class ChatViewSet(viewsets.ModelViewSet):
             'answer': results['answer'],
             'question': user_input,
             'sources': message_sources
+        })
+
+    @action(detail=False, methods=['get'], url_path='generate-presigned-url')
+    def generate_presigned_url(self, request, project_id=None):
+        print("Generate presigned url")
+        print(request.query_params)
+        s3_key = request.query_params.get('s3_key', None)
+        s3_bucket = request.query_params.get('s3_bucket', None)
+        if not s3_key:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'S3 key is required'
+            })
+        if not s3_bucket:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'S3 bucket is required'
+            })
+        s3 = boto3.client(
+            "s3",
+            region_name=settings.AWS_REGION,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
+        )
+        presigned_url = s3.generate_presigned_url(
+            'get_object', 
+            Params={'Bucket': s3_bucket, 'Key': s3_key}, 
+            ExpiresIn=3600
+        )
+        return Response(status=status.HTTP_200_OK, data={
+            'url': presigned_url
         })
         
         
