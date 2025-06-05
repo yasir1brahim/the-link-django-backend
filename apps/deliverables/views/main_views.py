@@ -48,7 +48,7 @@ from rest_framework import viewsets
 
 from apps.teams.models import Team, Flag
 from apps.users.models import CustomUser
-from .serializers import (
+from ..serializers import (
     ProjectDetailsSerializer,
     ProjectVersionSerializer,
     ProjectMembershipAddSerializer,
@@ -64,7 +64,7 @@ from .serializers import (
     FilteredVersionComparisonSerializer,
     SemanticallyProcessedSpecItemSerializer
 )
-from .models import (
+from ..models import (
     Project,
     ProjectVersion,
     ProjectMembership,
@@ -81,7 +81,7 @@ from .models import (
     ProcoreSubmittalTypeMapping,
     ROLE_PROJECT_MEMBER,
 )
-from .permissions import (
+from ..permissions import (
     ProjectAccessPermissions,
     SubmittalItemAccessPermissions,
     SubmittalListAccessPermissions,
@@ -89,17 +89,17 @@ from .permissions import (
 )
 from apps.utils.feature_flags import (
     is_notices_feature_flag_active, is_versioning_feature_flag_active, is_v2_process_deliverables_feature_flag_active,
-    is_full_spec_processing_feature_flag_active
+    is_full_spec_processing_feature_flag_active, is_specgpt_feature_flag_active
 )
-from .constants import masterformat_to_section_title_map
-from .serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
-from .serializers.procore import (ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer,
+from ..constants import masterformat_to_section_title_map
+from ..serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
+from ..serializers.procore import (ProcoreFetchAccessTokenSerializer, ProcoreAccessTokenSerializer,
                                    ProcoreCompanyMappingSerializer, ProcoreCompanySerializer, ProcoreMeSerializer,
                                    ProcoreProjectMappingSerializer, ProcoreSubmittalSerializer,
                                    ProcoreSubmittalCreationResponseSerializer, CreateProcoreProjectMappingSerializer,
                                    CreateProcoreCompanyMappingSerializer, UpdateProcoreSubmittalMappingsSerializer)
-from .services import SubmittalService, VersionComparisonService
-from .integrations.procore import (get_procore_access_token, get_companies, get_fresh_token_for_user, 
+from ..services import SubmittalService, VersionComparisonService
+from ..integrations.procore import (get_procore_access_token, get_companies, get_fresh_token_for_user, 
                                    ProcoreException, get_me, get_status, get_spec_divisions, get_spec_sections,
                                    create_spec_division, create_spec_section, create_submittal, get_projects,
                                    get_managers, get_submittal_types)
@@ -1265,11 +1265,19 @@ def invoke_lambda(payload, lambda_url):
         # if we timed out, it's a larger document and the lambda is processing it
         pass
 
-def parse_spec(callback_url, document_id, project_id, project_version_id, object_key, filename, user_id, is_v2_process_deliverables_flag_active):
+def parse_spec(
+    callback_url, 
+    document_id, 
+    project_id, 
+    project_version_id, 
+    object_key, 
+    filename, 
+    user_id, 
+    is_v2_process_deliverables_flag_active, 
+    is_specgpt_flag_active,
+    specgpt_callback_url
+):
     logging.debug(f"parse_spec: {object_key}")
-
-    CHUNK_SIZE = 1200
-    CHUNK_OVERLAP = 100
 
     payload = {
         "object_key": object_key,
@@ -1278,11 +1286,14 @@ def parse_spec(callback_url, document_id, project_id, project_version_id, object
         "user_id": user_id,
         "project_id": project_id,
         "project_version_id": str(project_version_id),
-        "chunk_size": CHUNK_SIZE,
-        "chunk_overlap": CHUNK_OVERLAP,
         "callback_url": callback_url,
         "ENVIRONMENT": settings.ENVIRONMENT,
-        "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
+        "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
+        "is_specgpt_flag_active": is_specgpt_flag_active,
+        "chunk_size": settings.SPECGPT_CHUNK_SIZE,
+        "chunk_overlap": settings.SPECGPT_CHUNK_OVERLAP,
+        "pinecone_index_name": settings.PINECONE_INDEX_NAME,
+        "specgpt_callback_url": specgpt_callback_url
     }
 
     # update the document status to processing
@@ -1405,7 +1416,9 @@ def upload_to_s3_and_process(file_data):
                 object_key=file_data['document_path'],
                 filename=file_data['filename'],
                 user_id=str(file_data['user_id']),
-                is_v2_process_deliverables_flag_active=file_data['is_v2_process_deliverables_flag_active']
+                is_v2_process_deliverables_flag_active=file_data['is_v2_process_deliverables_flag_active'],
+                is_specgpt_flag_active=file_data['is_specgpt_flag_active'],
+                specgpt_callback_url=settings.BACKEND_SPECGPT_CALLBACK_URL
             )
         return {'status': 'success', 'document_path': file_data['document_path']}
     except Exception as e:
@@ -1453,6 +1466,7 @@ def upload_file(request):
     is_versioning_flag_active = is_versioning_feature_flag_active(request.user, project.team)
     is_v2_process_deliverables_flag_active = is_v2_process_deliverables_feature_flag_active(request.user, project.team, project)
     is_full_spec_processing_flag_active = is_full_spec_processing_feature_flag_active(request.user, project.team, project)
+    is_specgpt_flag_active = is_specgpt_feature_flag_active(request.user, project.team, project)
 
     print(f"is_notices_flag_active: {is_notices_flag_active}")
     print(f"is_versioning_flag_active: {is_versioning_flag_active}")
@@ -1493,7 +1507,9 @@ def upload_file(request):
                 document_path=document_path,
                 parsed_document_path=parsed_document_path,
                 processing_status='PENDING_PROCESSING',
-                processing_method=processing_method
+                processing_method=processing_method,
+                specgpt_embedding_enabled=is_specgpt_flag_active,
+                specgpt_processing_status=UploadedFile.SpecgptProcessingStatusChoices.IN_QUEUE if is_specgpt_flag_active else UploadedFile.SpecgptProcessingStatusChoices.NONE
             )
 
             files_to_process.append({
@@ -1508,7 +1524,8 @@ def upload_file(request):
                 'is_v2_process_deliverables_flag_active': is_v2_process_deliverables_flag_active,
                 'is_full_spec_processing_flag_active': is_full_spec_processing_flag_active,
                 'extract_notices': extract_notices,
-                'full_spec_processing': full_spec_processing
+                'full_spec_processing': full_spec_processing,
+                'is_specgpt_flag_active': is_specgpt_flag_active
             })
         except Exception as e:
             logging.error(f"Error uploading file: {e}")

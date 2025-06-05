@@ -28,6 +28,11 @@ single_project_router.register(
     views.SemanticallyProcessedSpecItemViewSet,
     basename='semantically-processed-spec-item',
 )
+single_project_router.register(
+    'specgpt-chats',
+    views.ChatViewSet,
+    basename='specgpt-chat',
+)
 # notices
 single_project_router.register(
     'notices',
@@ -73,6 +78,7 @@ urlpatterns = [
     path('procore/submittal_mappings/<int:company_id>/', views.ProcoreSubmittalMappingsView.as_view(), name='procore-submittal-mappings'),
 
     path('webhooks/full-spec-processing/', views.full_spec_processing_webhook, name='webhook-full-spec-processing'),
+    path('webhooks/specgpt-embedding/', views.specgpt_embedding_webhook, name='webhook-specgpt-embedding'),
 ]
 
 
