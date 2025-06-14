@@ -165,7 +165,7 @@ class DocumentSubsectionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SpecSection
-        fields = ['id', 'masterformat_number', 'processing_status']
+        fields = ['id', 'masterformat_number', 'processing_status', 'specgpt_embedding_status']
 
 
 class EmbedDocumentSerializer(serializers.ModelSerializer):
@@ -189,12 +189,14 @@ class EmbedDocumentSerializer(serializers.ModelSerializer):
 
 class DocumentSerializer(EmbedDocumentSerializer):
     document_status = serializers.CharField(source="processing_status")
+    specgpt_processing_status = serializers.CharField()
     document_subsections = DocumentSubsectionSerializer(source="specsection_set", many=True)
     project_version = ProjectVersionSerializer(many=False)
 
     class Meta(EmbedDocumentSerializer.Meta):
         fields = [
             *EmbedDocumentSerializer.Meta.fields,
+            'specgpt_processing_status',
             'document_status',
             'project_version',
             'document_subsections',
