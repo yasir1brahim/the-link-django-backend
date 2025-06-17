@@ -85,6 +85,7 @@ class TestSpecStatusWebhook(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         uploaded_file.refresh_from_db()
         self.assertEqual(uploaded_file.processing_status, 'SUBSECTIONS_EXTRACTED')
+        self.assertEqual(uploaded_file.specgpt_processing_status, UploadedFile.SpecgptProcessingStatusChoices.SUBSECTIONS_EXTRACTED)
 
         # Simulate receiving the processed section webhook
         response = self.client.post(self.webhook_url, data=json.dumps(sample_processed_section_webhook), content_type='application/json')
