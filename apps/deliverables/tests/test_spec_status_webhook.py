@@ -52,7 +52,7 @@ class TestSpecStatusWebhook(APITestCase):
         ProjectVersion.objects.all().delete()
 
 
-    @patch('apps.deliverables.views.parse_spec')
+    @patch('apps.deliverables.views.main_views.parse_spec')
     def test_spec_status_webhook_end_to_end_success_with_null_project_version_id(self, mock_parse_spec):
         # Upload a file to the project
         upload_response = self.client.post(reverse('deliverables:upload_file'), {
@@ -124,8 +124,8 @@ class TestSpecStatusWebhook(APITestCase):
             self.assertEqual(submittal_item['para_no'], expected_paragraph_numbers_in_order[index])
             self.assertEqual(int(displayed_submittal_number), index + 1)
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
-    @patch('apps.deliverables.views.parse_spec')
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.parse_spec')
     def test_spec_status_webhook_end_to_end_success_with_provided_project_version_id(self, mock_parse_spec, mock_is_versioning_feature_flag_active):
         project_version_2 = ProjectVersion.objects.create(project=self.project, version_number=2, version_name="Version 2")
         project_version_3 = ProjectVersion.objects.create(project=self.project, version_number=3, version_name="Version 3")
@@ -202,7 +202,7 @@ class TestSpecStatusWebhook(APITestCase):
             self.assertEqual(int(displayed_submittal_number), index + 1)
 
 
-    @patch('apps.deliverables.views.parse_spec')
+    @patch('apps.deliverables.views.main_views.parse_spec')
     def test_spec_status_webhook_end_to_end_success_with_regex_failure(self, mock_parse_spec):
         # Upload a file to the project
         upload_response = self.client.post(reverse('deliverables:upload_file'), {
@@ -253,7 +253,7 @@ class TestSpecStatusWebhook(APITestCase):
 
 
 
-    @patch('apps.deliverables.views.parse_spec')
+    @patch('apps.deliverables.views.main_views.parse_spec')
     def test_spec_status_webhook_end_to_end_success_with_placeholder_sections(self, mock_parse_spec):
         # Upload a file to the project
         upload_response = self.client.post(reverse('deliverables:upload_file'), {
@@ -352,8 +352,8 @@ class TestSpecStatusWebhook(APITestCase):
         self.assertEqual(master_format_section_numbers, ["033001", "033002", "033004"])
 
     @skip("Skipping this test for now, keeps causing weird issues with the other tests in this file")
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
-    @patch('apps.deliverables.views.parse_spec')
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.parse_spec')
     def test_spec_status_webhook_end_to_end_success_with_multiple_versions(self, mock_parse_spec, mock_is_versioning_feature_flag_active):
         def simulate_end_to_end_success_with_version(project_version_id: int):
             mock_file = SimpleUploadedFile(
@@ -444,7 +444,7 @@ class TestSpecStatusWebhook(APITestCase):
         check_submittal_items_for_version(self.default_project_version.id)
         check_submittal_items_for_version(project_version_2.id)
 
-    @patch('apps.deliverables.views.parse_spec')
+    @patch('apps.deliverables.views.main_views.parse_spec')
     def test_spec_status_webhook_end_to_end_success_with_new_parser_returning_subfile_keys(self, mock_parse_spec):
         # Upload a file to the project
         upload_response = self.client.post(reverse('deliverables:upload_file'), {
@@ -558,7 +558,7 @@ class TestSpecStatusWebhook(APITestCase):
 
 
 
-    @patch('apps.deliverables.views.parse_spec')
+    @patch('apps.deliverables.views.main_views.parse_spec')
     def test_spec_status_webhook_end_to_end_success_with_multiple_specsections_with_same_masterformat_number(self, mock_parse_spec):
         # Upload a file to the project
         upload_response = self.client.post(reverse('deliverables:upload_file'), {
@@ -665,4 +665,36 @@ class TestSpecStatusWebhook(APITestCase):
         master_format_section_numbers = [submittal_item['spec_section'] for submittal_item in placeholder_submittal_items]
         self.assertEqual(master_format_section_numbers, ["033001", "033001", "033004"])
 
+    @patch('apps.deliverables.views.main_views.parse_spec')
+    def test_spec_status_webhook_end_to_end_success_with_no_subsections_sets_all_processing_statuses_to_processed(self, mock_parse_spec):
+        # Upload a file to the project
+        upload_response = self.client.post(reverse('deliverables:upload_file'), {
+            'project_id': self.project.id,
+            'files': [self.mock_file],
+        })
+        self.assertEqual(upload_response.status_code, status.HTTP_200_OK)
+        uploaded_file = UploadedFile.objects.get(project=self.project)
+        self.assertEqual(uploaded_file.processing_status, 'PENDING_PROCESSING')
+        self.assertEqual(uploaded_file.specgpt_processing_status, UploadedFile.SpecgptProcessingStatusChoices.NONE)
+
+        # Update test data to use correct IDs
+        sample_processing_webhook['document_id'] = uploaded_file.id
+        sample_processing_webhook['project_id'] = self.project.id
+        sample_processing_webhook['user_id'] = self.user.id
+        sample_v2_subsections_extracted_webhook['document_id'] = uploaded_file.id
+        sample_v2_subsections_extracted_webhook['project_id'] = self.project.id
+        sample_v2_subsections_extracted_webhook['user_id'] = self.user.id
+        sample_v2_subsections_extracted_webhook['subsections'] = []
+
+         # Simulate receiving the processing webhook
+        response = self.client.post(self.webhook_url, data=json.dumps(sample_processing_webhook), content_type='application/json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        uploaded_file.refresh_from_db()
+        
+        # Simulate receiving the subsections extracted webhook
+        response = self.client.post(self.webhook_url, data=json.dumps(sample_v2_subsections_extracted_webhook), content_type='application/json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        uploaded_file.refresh_from_db()
+        self.assertEqual(uploaded_file.processing_status, 'PROCESSED')
+        self.assertEqual(uploaded_file.specgpt_processing_status, UploadedFile.SpecgptProcessingStatusChoices.PROCESSED)
 

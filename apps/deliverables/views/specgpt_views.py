@@ -72,8 +72,6 @@ def specgpt_embedding_webhook(request):
         section.save()
     elif request_data['new_status'] == 'PROCESSED':
         print(f"SPEC GPT EMBEDDING WEBHOOK: setting document {request_data['doc_db_record_id']} section {request_data['master_format_section_number']} with file_s3_key {request_data['file_s3_key']} processing status to PROCESSED")
-        uploaded_file.specgpt_processing_status = UploadedFile.SpecgptProcessingStatusChoices.PROCESSED
-        uploaded_file.save()
         section.specgpt_embedding_status = UploadedFile.SpecgptProcessingStatusChoices.PROCESSED
         section.save()
     elif request_data['new_status'] == 'FAILED':
