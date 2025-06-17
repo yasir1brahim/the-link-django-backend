@@ -1472,9 +1472,11 @@ def upload_file(request):
     print(f"is_versioning_flag_active: {is_versioning_flag_active}")
 
     if not is_versioning_flag_active:
+        print("is_versioning_flag_active is false, using latest project version")
         project_version_id = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first().id
     else:
         project_version_id = serializer.validated_data.get('project_version_id')
+        print(f"versioning is active, project_version_id: {project_version_id}")
         if not project_version_id:
             if is_full_spec_processing_flag_active:
                 project_version_id = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first().id
@@ -1605,6 +1607,13 @@ def spec_status_webhook(request):
     if request_data['new_status'] == 'SUBSECTIONS_EXTRACTED':
         print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to SUBSECTIONS_EXTRACTED")
         UploadedFile.objects.filter(id=int(request_data['document_id'])).update(processing_status=DocProcessingStatus.SUBSECTIONS_EXTRACTED)
+        if not request_data['subsections']:
+            print(f"SPEC STATUS WEBHOOK: no subsections found for document {request_data['document_id']}, marking as processed")
+            UploadedFile.objects.filter(id=int(request_data['document_id'])).update(
+                processing_status=DocProcessingStatus.PROCESSED,
+                specgpt_processing_status=UploadedFile.SpecgptProcessingStatusChoices.PROCESSED
+            )
+            return Response(status=status.HTTP_200_OK)
         for subsection in request_data['subsections']:
             print(f"SPEC STATUS WEBHOOK: inserting subsection {subsection['master_format_section_number']} for document {request_data['document_id']}")
             masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=subsection['master_format_section_number'])
