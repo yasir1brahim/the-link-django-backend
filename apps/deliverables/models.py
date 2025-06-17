@@ -121,6 +121,8 @@ class UploadedFile(BaseModel):
     class SpecgptProcessingStatusChoices(models.TextChoices):
         UPLOADING = "UPLOADING", "Uploading"
         IN_QUEUE = "IN_QUEUE", "In Queue"
+        SUBSECTIONS_EXTRACTED = "SUBSECTIONS_EXTRACTED", "Subsections Extracted"
+        SECTION_PROCESSING_FAILED = "SECTION_PROCESSING_FAILED", "Section Processing Failed"
         PROCESSING = "PROCESSING", "Processing"
         PROCESSED = "PROCESSED", "Processed"
         FAILED = "FAILED", "Failed"

@@ -1606,7 +1606,10 @@ def spec_status_webhook(request):
 
     if request_data['new_status'] == 'SUBSECTIONS_EXTRACTED':
         print(f"SPEC STATUS WEBHOOK: setting document {request_data['document_id']} processing status to SUBSECTIONS_EXTRACTED")
-        UploadedFile.objects.filter(id=int(request_data['document_id'])).update(processing_status=DocProcessingStatus.SUBSECTIONS_EXTRACTED)
+        UploadedFile.objects.filter(id=int(request_data['document_id'])).update(
+            processing_status=DocProcessingStatus.SUBSECTIONS_EXTRACTED,
+            specgpt_processing_status=UploadedFile.SpecgptProcessingStatusChoices.SUBSECTIONS_EXTRACTED
+        )
         if not request_data['subsections']:
             print(f"SPEC STATUS WEBHOOK: no subsections found for document {request_data['document_id']}, marking as processed")
             UploadedFile.objects.filter(id=int(request_data['document_id'])).update(
