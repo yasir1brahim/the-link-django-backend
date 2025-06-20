@@ -321,6 +321,10 @@ pyjwt[crypto]==2.9.0
     # via
     #   django-allauth
     #   djangorestframework-simplejwt
+pymupdf==1.24.4
+    # via -r requirements/requirements.in
+pymupdfb==1.24.3
+    # via pymupdf
 pypng==0.20220715.0
     # via qrcode
 pytest==8.3.5

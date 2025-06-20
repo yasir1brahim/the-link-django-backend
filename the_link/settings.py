@@ -635,7 +635,8 @@ PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", default="")
 BACKEND_SPECGPT_CALLBACK_URL = os.environ.get("BACKEND_SPECGPT_CALLBACK_URL", default="")
 
 PROMPTLAYER_API_KEY = os.environ.get("PROMPTLAYER_API_KEY", default="")
-PROMPTLAYER_PROMPT_NAME = "specgpt"
+SPEC_GPT_PROMPTLAYER_PROMPT_NAME = "specgpt"
+INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME = "inspection_log"
 
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", default="")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", default="")

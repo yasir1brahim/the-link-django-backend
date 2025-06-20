@@ -36,3 +36,4 @@ langchain-openai
 langchain-pinecone
 langchain-community
 promptlayer
+PyMuPDF==1.24.4
