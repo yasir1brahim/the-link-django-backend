@@ -1,4 +1,5 @@
 import datetime
+import json
 from uuid import UUID
 from typing import Any, List, Optional
 import boto3
@@ -7,6 +8,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+import pymupdf
+from openai import OpenAI
 from django.conf import settings
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
@@ -233,12 +236,22 @@ class ChatViewSet(viewsets.ModelViewSet):
             'results': session_id_history_list
         })
 
-    def get_promptlayer_template(self):
+    def get_promptlayer_template(self, promptlayer_prompt_name):
         template_manager = TemplateManager(api_key=settings.PROMPTLAYER_API_KEY)
-        return template_manager.get(settings.PROMPTLAYER_PROMPT_NAME, {'label': settings.ENVIRONMENT})
+        return template_manager.get(promptlayer_prompt_name, {'label': settings.ENVIRONMENT})
 
     def get_promptlayer_model_metadata(self, promptlayer_template):
         return promptlayer_template['metadata']['model']
+    
+    def get_promptlayer_system_prompt(self, promptlayer_template):
+        prompts = promptlayer_template['prompt_template']['messages']
+        system_prompt = [prompt for prompt in prompts if prompt['role'] == 'system']
+        return system_prompt[0]['content'][0]['text']
+    
+    def get_promptlayer_user_prompt(self, promptlayer_template):
+        prompts = promptlayer_template['prompt_template']['messages']
+        user_prompt = [prompt for prompt in prompts if prompt['role'] == 'user']
+        return user_prompt[0]['content'][0]['text']
     
     def get_prompt(self, promptlayer_template):
         print("PROMPTLAYER TEMPLATE")
@@ -319,7 +332,7 @@ class ChatViewSet(viewsets.ModelViewSet):
             })
 
         try:
-            promptlayer_template = self.get_promptlayer_template()
+            promptlayer_template = self.get_promptlayer_template(settings.SPEC_GPT_PROMPTLAYER_PROMPT_NAME)
         except Exception as e:
             return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR, data={
                 'error': f'Failed to retrieve PromptLayer template: {str(e)}'
@@ -343,7 +356,6 @@ class ChatViewSet(viewsets.ModelViewSet):
         promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
 
         vectorstore_filter = {
-            'userid': {"$eq": str(request.user.id)},
             'project_id': {"$eq": str(project_id)},
             'project_version_id': {"$eq": str(project_version_id)},
         }
@@ -394,6 +406,85 @@ class ChatViewSet(viewsets.ModelViewSet):
             'answer': results['answer'],
             'question': user_input,
             'sources': message_sources
+        })
+    
+    @action(detail=False, methods=['post'], url_path='generate-inspection-log')
+    def generate_inspection_log(self, request, project_id=None):
+        print("Generate inspection log")
+        print(request.data)
+        project_version_id = request.data.get('project_version_id', None)
+        if not project_version_id:
+            project_version = ProjectVersion.objects.filter(project_id=project_id).order_by('-created_at').first()
+            if not project_version:
+                return Response(status=status.HTTP_404_NOT_FOUND, data={
+                    'error': 'No project version found'
+                })
+            project_version_id = project_version.id
+        else:
+            project_version = ProjectVersion.objects.get(id=project_version_id)
+            if project_version.project.id != project_id:
+                return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                    'error': 'Project version does not match project'
+                })
+        
+        
+        try:
+            promptlayer_template = self.get_promptlayer_template(settings.INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME)
+        except Exception as e:
+            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR, data={
+                'error': f'Failed to retrieve PromptLayer template: {str(e)}'
+            })
+
+        system_prompt = self.get_promptlayer_system_prompt(promptlayer_template)
+        user_prompt = self.get_promptlayer_user_prompt(promptlayer_template)
+        promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
+
+        project_version_files = UploadedFile.objects.filter(project_version=project_version)
+        file_content = ""
+        for file in project_version_files:
+            try:
+                # Get the file content from S3
+                s3_client = boto3.client('s3')
+                response = s3_client.get_object(
+                    Bucket=settings.S3_BUCKET,
+                    Key=file.document_path
+                )
+                
+                # Read the PDF content
+                pdf_bytes = response['Body'].read()
+                
+                # Extract text from PDF using PyMuPDF
+                pdf_document = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+                pdf_text = ""
+                for page_num in range(pdf_document.page_count):
+                    page = pdf_document[page_num]
+                    pdf_text += page.get_text() + "\n"
+                pdf_document.close()
+                
+                file_content += f"\n\n--- File: {file.name} ---\n"
+                file_content += pdf_text
+                
+            except Exception as e:
+                print(f"Error reading file {file.name}: {str(e)}")
+                file_content += f"\n\n--- File: {file.name} (Error reading file) ---\n"
+
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        completion = client.chat.completions.create(
+            model=promptlayer_model_metadata['name'],
+            messages=[
+                {
+                    "role": "developer",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt.format(file_content=file_content)
+                }
+            ]
+        )
+
+        return Response(status=status.HTTP_200_OK, data={
+            'answer': completion.choices[0].message.content,
         })
 
     @action(detail=False, methods=['get'], url_path='generate-presigned-url')
