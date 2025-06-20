@@ -426,12 +426,6 @@ class ChatViewSet(viewsets.ModelViewSet):
                 return Response(status=status.HTTP_400_BAD_REQUEST, data={
                     'error': 'Project version does not match project'
                 })
-
-        chat = Chat.objects.create(
-            user=request.user,
-            project=Project.objects.get(id=project_id),
-            project_version=project_version
-        )
         
         
         try:
@@ -440,9 +434,6 @@ class ChatViewSet(viewsets.ModelViewSet):
             return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR, data={
                 'error': f'Failed to retrieve PromptLayer template: {str(e)}'
             })
-        print("PROMPTLAYER TEMPLATE")
-        print(json.dumps(promptlayer_template, indent=4))
-        print("================================================")
 
         system_prompt = self.get_promptlayer_system_prompt(promptlayer_template)
         user_prompt = self.get_promptlayer_user_prompt(promptlayer_template)
@@ -492,25 +483,8 @@ class ChatViewSet(viewsets.ModelViewSet):
             ]
         )
 
-        print("================================================")
-        print(completion.choices[0].message.content)
-        print("================================================")
-
-        assistant_response_message = ChatMessage.objects.create(
-            chat=chat,
-            message=completion.choices[0].message.content,
-            type=ChatMessage.ChatMessageType.AI
-        )
-        user_message = ChatMessage.objects.create(
-            chat=chat,
-            message="Create an inspection log for this project version",
-            type=ChatMessage.ChatMessageType.HUMAN
-        )
-
         return Response(status=status.HTTP_200_OK, data={
-            'chat_id': chat.id,
             'answer': completion.choices[0].message.content,
-            'question': "Create an inspection log for this project version",
         })
 
     @action(detail=False, methods=['get'], url_path='generate-presigned-url')
