@@ -23,6 +23,7 @@ from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, Case, When, IntegerField
 from django.db import connection, transaction, IntegrityError
+from django.core.exceptions import TooManyFilesSent
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -1438,8 +1439,11 @@ def upload_to_s3_and_process(file_data):
 def upload_file(request):
     if not request.user.is_authenticated:
         return Response({'detail': 'User is not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
-        
-    serializer = FileUploadSerializer(data=request.data)
+    
+    try:
+        serializer = FileUploadSerializer(data=request.data)
+    except TooManyFilesSent as e:
+        return Response({'error': 'TOO_MANY_FILES', 'detail': f'You can only upload up to {settings.DATA_UPLOAD_MAX_NUMBER_FILES} files at once'}, status=status.HTTP_400_BAD_REQUEST)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
