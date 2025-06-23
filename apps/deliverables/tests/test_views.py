@@ -775,7 +775,7 @@ class UploadFileTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
     
-    @patch('apps.deliverables.views.invoke_lambda')
+    @patch('apps.deliverables.views.main_views.invoke_lambda')
     def test_project_member_can_upload_file_to_their_project(self, mock_invoke_lambda):
         """Test that a project member can upload a file to their project"""
         ProjectMembership.objects.create(
@@ -802,7 +802,12 @@ class UploadFileTests(APITestCase):
             "chunk_overlap": 100,
             "callback_url": settings.BACKEND_CALLBACK_URL,
             "ENVIRONMENT": settings.ENVIRONMENT,
-            "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
+            "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
+            'is_specgpt_flag_active': False,
+            'chunk_size': settings.SPECGPT_CHUNK_SIZE,
+            'chunk_overlap': settings.SPECGPT_CHUNK_OVERLAP,
+            'pinecone_index_name': settings.PINECONE_INDEX_NAME,
+            'specgpt_callback_url': settings.BACKEND_SPECGPT_CALLBACK_URL,
         }
         assert f"version_{default_project_version.id}" in expected_payload['object_key']
         mock_invoke_lambda.assert_called_with(
@@ -810,7 +815,7 @@ class UploadFileTests(APITestCase):
             lambda_url=settings.LAMBDA_FUNCTION_URL
         )
 
-    @patch('apps.deliverables.views.invoke_lambda')
+    @patch('apps.deliverables.views.main_views.invoke_lambda')
     def test_project_member_can_upload_upto_250_files_at_once(self, mock_invoke_lambda):
         """Test that a project member can upload a file to their project"""
         ProjectMembership.objects.create(
@@ -846,8 +851,10 @@ class UploadFileTests(APITestCase):
             'files': list_of_files,
         })
         self.assertEqual(too_many_files_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(too_many_files_response.data['error'], "TOO_MANY_FILES")
+        self.assertEqual(too_many_files_response.data['detail'], "You can only upload up to 250 files at once")
 
-    @patch('apps.deliverables.views.invoke_lambda')
+    @patch('apps.deliverables.views.main_views.invoke_lambda')
     def test_company_admin_can_upload_file_to_project(self, mock_invoke_lambda):
         """Test that a company admin can upload a file to a project"""
         self.client.force_authenticate(user=self.company_admin)
@@ -857,7 +864,7 @@ class UploadFileTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    @patch('apps.deliverables.views.invoke_lambda')
+    @patch('apps.deliverables.views.main_views.invoke_lambda')
     def test_superuser_can_upload_file_to_project(self, mock_invoke_lambda):
         """Test that a superuser can upload a file to a project"""
         self.client.force_authenticate(user=self.superuser)
@@ -867,7 +874,7 @@ class UploadFileTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    @patch('apps.deliverables.views.invoke_lambda')
+    @patch('apps.deliverables.views.main_views.invoke_lambda')
     def test_company_member_cannot_upload_file_to_project_they_are_not_a_member_of(self, mock_invoke_lambda):
         """Test that a company member cannot upload a file to a project they are not a member of"""
         self.client.force_authenticate(user=self.company_member)
@@ -877,8 +884,8 @@ class UploadFileTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=False)
-    @patch('apps.deliverables.views.invoke_lambda')
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=False)
+    @patch('apps.deliverables.views.main_views.invoke_lambda')
     def test_versioning_feature_flag_inactive_uploads_to_default_version(self, mock_invoke_lambda, mock_is_versioning_feature_flag_active):
         """Test that when versioning is inactive, uploads are associated with the default version of the project"""
         self.client.force_authenticate(user=self.company_admin)
@@ -902,7 +909,12 @@ class UploadFileTests(APITestCase):
             "chunk_overlap": 100,
             "callback_url": settings.BACKEND_CALLBACK_URL,
             "ENVIRONMENT": settings.ENVIRONMENT,
-            "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
+            "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
+            'is_specgpt_flag_active': False,
+            'chunk_size': settings.SPECGPT_CHUNK_SIZE,
+            'chunk_overlap': settings.SPECGPT_CHUNK_OVERLAP,
+            'pinecone_index_name': settings.PINECONE_INDEX_NAME,
+            'specgpt_callback_url': settings.BACKEND_SPECGPT_CALLBACK_URL,
         }
         assert f"version_{default_project_version.id}" in expected_payload['object_key']
         mock_invoke_lambda.assert_called_with(
@@ -911,8 +923,8 @@ class UploadFileTests(APITestCase):
         )
 
     
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
-    @patch('apps.deliverables.views.invoke_lambda')
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.invoke_lambda')
     def test_versioning_feature_flag_active_requires_project_version_id(self, mock_invoke_lambda, mock_is_versioning_feature_flag_active):
         """Test that when versioning is active, uploads require a project version ID"""
         self.client.force_authenticate(user=self.company_admin)
@@ -922,8 +934,8 @@ class UploadFileTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
-    @patch('apps.deliverables.views.invoke_lambda')
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.invoke_lambda')
     def test_versioning_feature_flag_active_saves_to_given_project_version(self, mock_invoke_lambda, mock_is_versioning_feature_flag_active):
         """Test that when versioning is active, uploads are saved to the given project version"""
         self.client.force_authenticate(user=self.company_admin)
@@ -947,7 +959,12 @@ class UploadFileTests(APITestCase):
             "chunk_overlap": 100,
             "callback_url": settings.BACKEND_CALLBACK_URL,
             "ENVIRONMENT": settings.ENVIRONMENT,
-            "AWS_UPLOAD_BUCKET": settings.S3_BUCKET
+            "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
+            'is_specgpt_flag_active': False,
+            'chunk_size': settings.SPECGPT_CHUNK_SIZE,
+            'chunk_overlap': settings.SPECGPT_CHUNK_OVERLAP,
+            'pinecone_index_name': settings.PINECONE_INDEX_NAME,
+            'specgpt_callback_url': settings.BACKEND_SPECGPT_CALLBACK_URL,
         }
         assert f"version_{project_version_2.id}" in expected_payload['object_key']
         mock_invoke_lambda.assert_called_with(
@@ -955,9 +972,9 @@ class UploadFileTests(APITestCase):
             lambda_url=settings.LAMBDA_FUNCTION_URL
         )
 
-    @patch('apps.deliverables.views.is_v2_process_deliverables_feature_flag_active', return_value=True)
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
-    @patch('apps.deliverables.views.invoke_lambda')
+    @patch('apps.deliverables.views.main_views.is_v2_process_deliverables_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.invoke_lambda')
     def test_v2_process_deliverables_flag_active_stores_processing_version_and_calls_v2_lambda(self, mock_invoke_lambda, mock_is_versioning_feature_flag_active, mock_is_v2_process_deliverables_flag_active):
         """Test that when v2 process deliverables is active, uploads are saved to the given project version"""
         self.client.force_authenticate(user=self.company_admin)
@@ -983,6 +1000,11 @@ class UploadFileTests(APITestCase):
             "callback_url": settings.BACKEND_CALLBACK_URL,
             "ENVIRONMENT": settings.ENVIRONMENT,
             "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
+            'is_specgpt_flag_active': False,
+            'chunk_size': settings.SPECGPT_CHUNK_SIZE,
+            'chunk_overlap': settings.SPECGPT_CHUNK_OVERLAP,
+            'pinecone_index_name': settings.PINECONE_INDEX_NAME,
+            'specgpt_callback_url': settings.BACKEND_SPECGPT_CALLBACK_URL,
         }
         assert f"version_{project_version_2.id}" in expected_payload['object_key']
         mock_invoke_lambda.assert_called_with(
@@ -990,9 +1012,9 @@ class UploadFileTests(APITestCase):
             lambda_url=settings.V2_PROCESS_DELIVERABLES_LAMBDA_FUNCTION_URL
         )
 
-    @patch('apps.deliverables.views.is_full_spec_processing_feature_flag_active', return_value=True)
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
-    @patch('apps.deliverables.views.invoke_lambda')
+    @patch('apps.deliverables.views.main_views.is_full_spec_processing_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.invoke_lambda')
     def test_full_spec_processing_flag_invokes_full_spec_processing_lambda(self, mock_invoke_lambda, mock_is_versioning_feature_flag_active, mock_is_full_spec_processing_feature_flag_active):
         """Test that when full spec processing is active, uploads invoke the full spec processing lambda"""
         self.client.force_authenticate(user=self.company_admin)
@@ -1019,7 +1041,7 @@ class UploadFileTests(APITestCase):
             "callback_url": settings.BACKEND_FULL_SPEC_PROCESSING_CALLBACK_URL,
             "ENVIRONMENT": settings.ENVIRONMENT,
             "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
-            "full_spec_processing": True
+            "full_spec_processing": True,
         }
         assert f"version_{project_version_2.id}" in expected_payload['object_key']
         mock_invoke_lambda.assert_called_with(
