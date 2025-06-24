@@ -26,6 +26,7 @@ from langchain.prompts.chat import (
     HumanMessagePromptTemplate,
     SystemMessagePromptTemplate,
 )
+import tiktoken
 
 from apps.deliverables.serializers.specgpt import ChatDetailSerializer
 from apps.deliverables.permissions import ChatAccessPermissions
@@ -40,6 +41,82 @@ from apps.deliverables.models import (
 )
 
 from langchain.memory import ConversationBufferMemory
+
+
+def count_tokens(text: str, model: str = "gpt-4o") -> int:
+    """Count the number of tokens in a text string."""
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+        return len(encoding.encode(text))
+    except KeyError:
+        # Fallback to cl100k_base encoding for unknown models
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
+
+
+def split_file_content_into_chunks(
+        file_content: str,
+        max_tokens_per_chunk: int = settings.OPENAI_MODEL_MAX_CONTEXT_SIZE, 
+        model: str = "gpt-4o",
+        preferred_separator: str = f'\n\n{"-"*100}\n'
+    ) -> List[str]:
+    """
+    Split large content into chunks that fit within the model's context limit.
+    
+    Args:
+        system_prompt: The system prompt
+        user_prompt_template: The user prompt template with {file_content} placeholder
+        file_content: The file contents to split over multiple LLM calls
+        max_tokens_per_chunk: Maximum tokens per chunk
+        model: The model name for token counting
+        preferred_separator: The separator to use between chunks (defaults to "\n\n")
+    Returns:
+        List of content chunks
+    """
+    
+    # Split content into chunks using regex
+    chunks = []
+    current_chunk = ""
+    current_tokens = 0
+    
+    # Split by separator to maintain some structure
+    pieces = file_content.split(preferred_separator)
+    
+    for piece in pieces:
+        piece_tokens = count_tokens(piece, model)
+        
+        if current_tokens + piece_tokens > max_tokens_per_chunk:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+                current_chunk = piece
+                current_tokens = piece_tokens
+            else:
+                # Single line is too long, split it further
+                lines = piece.split("\n")
+                for line in lines:
+                    line_tokens = count_tokens(line + '\n', model)
+                    if current_tokens + line_tokens > max_tokens_per_chunk:
+                        if current_chunk:
+                            chunks.append(current_chunk.strip())
+                            current_chunk = line + '\n'
+                            current_tokens = line_tokens
+                        else:
+                            # Single line is too long, truncate
+                            chunks.append(line[:max_tokens_per_chunk//4] + "...")
+                            current_chunk = ""
+                            current_tokens = 0
+                    else:
+                        current_chunk += line + '\n'
+                        current_tokens += line_tokens
+        else:
+            current_chunk += preferred_separator + piece
+            current_tokens += piece_tokens
+    
+    # Add the last chunk if it has content
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+    
+    return chunks
 
 
 class SpecGptEmbeddingRequest(TypedDict):
@@ -253,6 +330,11 @@ class ChatViewSet(viewsets.ModelViewSet):
         user_prompt = [prompt for prompt in prompts if prompt['role'] == 'user']
         return user_prompt[0]['content'][0]['text']
     
+    def get_promptlayer_developer_prompt(self, promptlayer_template):
+        prompts = promptlayer_template['prompt_template']['messages']
+        developer_prompt = [prompt for prompt in prompts if prompt['role'] == 'developer']
+        return developer_prompt[0]['content'][0]['text']
+    
     def get_prompt(self, promptlayer_template):
         print("PROMPTLAYER TEMPLATE")
         print(promptlayer_template)
@@ -437,6 +519,7 @@ class ChatViewSet(viewsets.ModelViewSet):
 
         system_prompt = self.get_promptlayer_system_prompt(promptlayer_template)
         user_prompt = self.get_promptlayer_user_prompt(promptlayer_template)
+        developer_prompt_to_rejoin_separate_logs = self.get_promptlayer_developer_prompt(promptlayer_template)
         promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
 
         project_version_files = UploadedFile.objects.filter(project_version=project_version)
@@ -461,30 +544,83 @@ class ChatViewSet(viewsets.ModelViewSet):
                     pdf_text += page.get_text() + "\n"
                 pdf_document.close()
                 
-                file_content += f"\n\n--- File: {file.name} ---\n"
+                file_content += f"\n\n{'-'*100}\n"
                 file_content += pdf_text
                 
             except Exception as e:
                 print(f"Error reading file {file.name}: {str(e)}")
-                file_content += f"\n\n--- File: {file.name} (Error reading file) ---\n"
+                file_content += f"\n\n{'-'*100}\n"
 
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        completion = client.chat.completions.create(
-            model=promptlayer_model_metadata['name'],
-            messages=[
-                {
-                    "role": "developer",
-                    "content": system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt.format(file_content=file_content)
-                }
-            ]
-        )
+        
+        # Check if content is too large for a single request
+        model_name = promptlayer_model_metadata['name']
+        full_user_prompt = user_prompt.format(file_content=file_content)
+        total_tokens = count_tokens(system_prompt + full_user_prompt, model_name)
+        
+        if total_tokens > settings.OPENAI_MODEL_MAX_CONTEXT_SIZE:
+            # Split content into chunks
+            print(f"Content too large ({total_tokens} tokens), splitting into chunks...")
+            chunks = split_file_content_into_chunks(
+                file_content, 
+                settings.OPENAI_MODEL_MAX_CONTEXT_SIZE,
+                model_name,
+                preferred_separator="\n\n"
+            )
+            
+            chunk_results = []
+            for i, chunk in enumerate(chunks):
+                chunk_user_prompt = user_prompt.format(file_content=chunk)
+                chunk_completion = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": system_prompt
+                        },
+                        {
+                            "role": "user",
+                            "content": chunk_user_prompt
+                        }
+                    ]
+                )
+                chunk_results.append(chunk_completion.choices[0].message.content)
+            
+            # Stitch results together
+            print("Separate agent responses")
+            print(chunk_results)
+            print("Rejoin prompt")
+            print(developer_prompt_to_rejoin_separate_logs)
+            rejoin_prompt = developer_prompt_to_rejoin_separate_logs.format(separate_agent_responses="\n\n".join(chunk_results))
+            rejoin_completion = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": rejoin_prompt
+                    }
+                ]
+            )
+            final_answer = rejoin_completion.choices[0].message.content
+        else:
+            # Process normally with single request
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": full_user_prompt
+                    }
+                ]
+            )
+            final_answer = completion.choices[0].message.content
 
         return Response(status=status.HTTP_200_OK, data={
-            'answer': completion.choices[0].message.content,
+            'answer': final_answer,
         })
 
     @action(detail=False, methods=['get'], url_path='generate-presigned-url')

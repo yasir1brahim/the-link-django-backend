@@ -641,3 +641,6 @@ INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME = "inspection_log"
 
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", default="")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", default="")
+
+# OpenAI model context settings
+OPENAI_MODEL_MAX_CONTEXT_SIZE = 1000000
