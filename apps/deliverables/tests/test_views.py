@@ -1689,7 +1689,7 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['message'][0]['parsing_method'], 'PLACEHOLDER')
 
-    def set_up_test_data(self):
+    def set_up_test_data(self, include_illegal_characters=False):
         # Create MasterFormatSections
         mf1 = MasterFormatSection.objects.create(masterformat_number="033001")
         mf2 = MasterFormatSection.objects.create(masterformat_number="033002")
@@ -1779,6 +1779,18 @@ class SubmittalItemViewSetTests(APITestCase):
             submittal_type="Samples",
             project_version=self.project_version_2,
         )
+        if include_illegal_characters:
+            SubmittalItem.objects.create(
+                project=self.project,
+                document=self.document2,
+                masterformat_section=mf4,
+                spec_section=spec4,
+                paragraph_number="4.1",
+                submittal_number="5",
+                submittal_type="Samples",
+                project_version=self.project_version_2,
+                submittal_content="\001\002\003\004\005\006\007\010\013\014\016\037"
+            )
 
     def test_default_ordering(self):
         self.set_up_test_data()
@@ -2269,7 +2281,7 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(list(response.data['all_filter_vals']['spec_section']), ['033000', '102000', '123456'])
         self.assertEqual(list(response.data['all_filter_vals']['type']), ['Type 1', 'Type 2', 'ZZZ'])
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_export_to_xlsx_with_versioning_active(self, mock_is_versioning_feature_flag_active):
         self.set_up_test_data()
         self.client.force_authenticate(user=self.user)
@@ -2284,6 +2296,18 @@ class SubmittalItemViewSetTests(APITestCase):
         workbook = load_workbook(BytesIO(response.content))
         worksheet = workbook.active
         self.assertEqual(worksheet.dimensions, 'A1:G6') # 5 rows of data plus header
+
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
+    def test_export_to_xlsx_with_versioning_active_and_illegal_characters_in_submittal_content(self, mock_is_versioning_feature_flag_active):
+        self.set_up_test_data(include_illegal_characters=True)
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-export', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_2.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        workbook = load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+        self.assertEqual(worksheet.dimensions, 'A1:G4') # 3 rows of data plus header
+        
 
 
     @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)

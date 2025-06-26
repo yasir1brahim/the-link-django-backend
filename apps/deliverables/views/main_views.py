@@ -15,6 +15,7 @@ import ast
 import json
 
 import openpyxl
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 
@@ -740,7 +741,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
                     item.paragraph_number,
                     item.submittal_type,
                     item.submittal_description,
-                    item.submittal_content
+                    re.sub(ILLEGAL_CHARACTERS_RE, '', item.submittal_content)
                 ]
                 worksheet.append(row)
                 for col in range(1, len(row) + 1):
@@ -762,7 +763,8 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
                     elif header_option['name'] == 'Submittal Title':
                         field_value = item.submittal_description
                     elif header_option['name'] == 'Submittal Description':
-                        field_value = item.submittal_content
+                        field_value = re.sub(ILLEGAL_CHARACTERS_RE, '', item.submittal_content)
+
                     cell = worksheet.cell(row=row_idx, column=header_option['col'] + 1)
                     cell.value = field_value
                     cell.alignment = text_alignment
