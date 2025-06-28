@@ -1,5 +1,6 @@
 import datetime
 import json
+import csv
 from uuid import UUID
 from typing import Any, List, Optional
 import boto3
@@ -27,6 +28,11 @@ from langchain.prompts.chat import (
     SystemMessagePromptTemplate,
 )
 import tiktoken
+from django.http import HttpResponse
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
+import io
 
 from apps.deliverables.serializers.specgpt import ChatDetailSerializer
 from apps.deliverables.permissions import ChatAccessPermissions
@@ -41,6 +47,7 @@ from apps.deliverables.models import (
 )
 
 from langchain.memory import ConversationBufferMemory
+from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
@@ -623,6 +630,7 @@ class ChatViewSet(viewsets.ModelViewSet):
             'answer': final_answer,
         })
 
+        
     @action(detail=False, methods=['get'], url_path='generate-presigned-url')
     def generate_presigned_url(self, request, project_id=None):
         print("Generate presigned url")
@@ -651,5 +659,155 @@ class ChatViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_200_OK, data={
             'url': presigned_url
         })
+        
+    @action(detail=False, methods=['post'], url_path='extract-tables-to-csv')
+    def extract_tables_to_csv(self, request, project_id=None):
+        """
+        Extract markdown tables from AI response text and convert to Excel format.
+        
+        Expected payload:
+        {
+            "text": "AI response containing markdown tables...",
+            "extract_all": true  // if false, only extract first table
+        }
+        """
+        text = request.data.get('text', '')
+        extract_all = request.data.get('extract_all', True)
+        
+        if not text:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'Text content is required'
+            })
+        
+        try:
+            if extract_all:
+                csv_tables = extract_and_convert_tables_to_csv(text)
+                if not csv_tables:
+                    return Response(status=status.HTTP_404_NOT_FOUND, data={
+                        'error': 'No markdown tables found in the text'
+                    })
+                
+                # Create Excel workbook
+                workbook = Workbook()
+                
+                # Remove default sheet
+                workbook.remove(workbook.active)
+                
+                # Add each table as a separate worksheet
+                for i, csv_content in enumerate(csv_tables, 1):
+                    worksheet = workbook.create_sheet(title=f"Table_{i}")
+                    
+                    # Parse CSV content and add to worksheet
+                    csv_lines = csv_content.strip().split('\n')
+                    for row_idx, line in enumerate(csv_lines, 1):
+                        # Use proper CSV parsing to handle quoted values
+                        csv_reader = csv.reader([line])
+                        cells = next(csv_reader)
+                        for col_idx, cell_value in enumerate(cells, 1):
+                            worksheet.cell(row=row_idx, column=col_idx, value=cell_value)
+                    
+                    # Style the header row
+                    if csv_lines:
+                        header_font = Font(bold=True, color='FFFFFF')
+                        header_fill = PatternFill(start_color='202a44', end_color='202a44', fill_type='solid')
+                        header_alignment = Alignment(wrap_text=True, vertical='center')
+                        
+                        # Parse first line to get column count
+                        csv_reader = csv.reader([csv_lines[0]])
+                        header_cells = next(csv_reader)
+                        
+                        for col in range(1, len(header_cells) + 1):
+                            cell = worksheet.cell(row=1, column=col)
+                            cell.font = header_font
+                            cell.fill = header_fill
+                            cell.alignment = header_alignment
+                    
+                    # Auto-adjust column widths
+                    for col_num, col in enumerate(worksheet.columns, 1):
+                        max_length = 0
+                        column = get_column_letter(col_num)
+                        for cell in col:
+                            try:
+                                if len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                        worksheet.column_dimensions[column].width = adjusted_width
+                
+                # Create response with Excel content type
+                response = HttpResponse(
+                    content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                )
+                response['Content-Disposition'] = 'attachment; filename=inspection_log.xlsx'
+                
+                # Save workbook to response
+                workbook.save(response)
+                return response
+                
+            else:
+                csv_content = extract_first_table_to_csv(text)
+                if csv_content is None:
+                    return Response(status=status.HTTP_404_NOT_FOUND, data={
+                        'error': 'No markdown tables found in the text'
+                    })
+                
+                # Create Excel workbook for single table
+                workbook = Workbook()
+                worksheet = workbook.active
+                worksheet.title = "Inspection Log"
+                
+                # Parse CSV content and add to worksheet
+                csv_lines = csv_content.strip().split('\n')
+                for row_idx, line in enumerate(csv_lines, 1):
+                    # Use proper CSV parsing to handle quoted values
+                    csv_reader = csv.reader([line])
+                    cells = next(csv_reader)
+                    for col_idx, cell_value in enumerate(cells, 1):
+                        worksheet.cell(row=row_idx, column=col_idx, value=cell_value)
+                
+                # Style the header row
+                if csv_lines:
+                    header_font = Font(bold=True, color='FFFFFF')
+                    header_fill = PatternFill(start_color='202a44', end_color='202a44', fill_type='solid')
+                    header_alignment = Alignment(wrap_text=True, vertical='center')
+                    
+                    # Parse first line to get column count
+                    csv_reader = csv.reader([csv_lines[0]])
+                    header_cells = next(csv_reader)
+                    
+                    for col in range(1, len(header_cells) + 1):
+                        cell = worksheet.cell(row=1, column=col)
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = header_alignment
+                
+                # Auto-adjust column widths
+                for col_num, col in enumerate(worksheet.columns, 1):
+                    max_length = 0
+                    column = get_column_letter(col_num)
+                    for cell in col:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                    worksheet.column_dimensions[column].width = adjusted_width
+                
+                # Create response with Excel content type
+                response = HttpResponse(
+                    content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                )
+                response['Content-Disposition'] = 'attachment; filename=inspection_log.xlsx'
+                
+                # Save workbook to response
+                workbook.save(response)
+                return response
+                
+        except Exception as e:
+            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR, data={
+                'error': f'Failed to extract tables: {str(e)}'
+            })
         
         
