@@ -41,6 +41,7 @@ from apps.deliverables.models import (
 )
 
 from langchain.memory import ConversationBufferMemory
+from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
@@ -623,6 +624,7 @@ class ChatViewSet(viewsets.ModelViewSet):
             'answer': final_answer,
         })
 
+        
     @action(detail=False, methods=['get'], url_path='generate-presigned-url')
     def generate_presigned_url(self, request, project_id=None):
         print("Generate presigned url")
@@ -651,5 +653,45 @@ class ChatViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_200_OK, data={
             'url': presigned_url
         })
+        
+    @action(detail=False, methods=['post'], url_path='extract-tables-to-csv')
+    def extract_tables_to_csv(self, request, project_id=None):
+        """
+        Extract markdown tables from AI response text and convert to CSV format.
+        
+        Expected payload:
+        {
+            "text": "AI response containing markdown tables...",
+            "extract_all": true  // if false, only extract first table
+        }
+        """
+        text = request.data.get('text', '')
+        extract_all = request.data.get('extract_all', True)
+        
+        if not text:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'Text content is required'
+            })
+        
+        try:
+            if extract_all:
+                csv_tables = extract_and_convert_tables_to_csv(text)
+                return Response(status=status.HTTP_200_OK, data={
+                    'tables_count': len(csv_tables),
+                    'csv_tables': csv_tables
+                })
+            else:
+                csv_content = extract_first_table_to_csv(text)
+                if csv_content is None:
+                    return Response(status=status.HTTP_404_NOT_FOUND, data={
+                        'error': 'No markdown tables found in the text'
+                    })
+                return Response(status=status.HTTP_200_OK, data={
+                    'csv_content': csv_content
+                })
+        except Exception as e:
+            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR, data={
+                'error': f'Failed to extract tables: {str(e)}'
+            })
         
         

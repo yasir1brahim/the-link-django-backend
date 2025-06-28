@@ -1,6 +1,192 @@
+import re
+import csv
+import io
+from typing import List, Optional, Tuple
+
 ANCHOR_REPR_DELIMITER = '$$$'
 
 
 def format_anchor_repr(anchor: list) -> str:
     # TODO: Is this good enough? Will this clash with any established practice?
     return ANCHOR_REPR_DELIMITER.join(anchor)
+
+
+def extract_markdown_tables(text: str) -> List[str]:
+    """
+    Extract markdown tables from text content.
+    
+    Args:
+        text: The text content that may contain markdown tables
+        
+    Returns:
+        List of markdown table strings found in the text
+        
+    Example:
+        >>> text = "Here's a table:\n| Name | Age |\n|------|-----|\n| John | 25  |\nAnd another:\n| City | State |\n|------|-------|\n| NYC  | NY    |"
+        >>> tables = extract_markdown_tables(text)
+        >>> len(tables)
+        2
+    """
+    lines = text.split('\n')
+    tables = []
+    current_table = []
+    in_table = False
+    
+    for line in lines:
+        stripped_line = line.strip()
+        
+        # Check if this line looks like a table row (starts and ends with |)
+        if stripped_line.startswith('|') and stripped_line.endswith('|'):
+            if not in_table:
+                in_table = True
+            current_table.append(line)
+        elif in_table:
+            # Check if this is a separator line (contains dashes and pipes)
+            if '|' in stripped_line and any(char in stripped_line for char in ['-', ':']):
+                current_table.append(line)
+            else:
+                # End of table
+                if len(current_table) >= 2:  # At least header and separator
+                    tables.append('\n'.join(current_table))
+                current_table = []
+                in_table = False
+    
+    # Handle table at end of text
+    if in_table and len(current_table) >= 2:
+        tables.append('\n'.join(current_table))
+    
+    return [table.strip() for table in tables]
+
+
+def parse_markdown_table(markdown_table: str) -> Tuple[List[str], List[List[str]]]:
+    """
+    Parse a markdown table string into headers and data rows.
+    
+    Args:
+        markdown_table: A markdown table string
+        
+    Returns:
+        Tuple of (headers, data_rows) where headers is a list of strings
+        and data_rows is a list of lists of strings
+        
+    Example:
+        >>> table = "| Name | Age | City |\n|------|-----|------|\n| John | 25  | NYC  |\n| Jane | 30  | LA   |"
+        >>> headers, data = parse_markdown_table(table)
+        >>> headers
+        ['Name', 'Age', 'City']
+        >>> data
+        [['John', '25', 'NYC'], ['Jane', '30', 'LA']]
+    """
+    lines = markdown_table.strip().split('\n')
+    
+    # Extract headers from the first line
+    header_line = lines[0]
+    headers = [cell.strip() for cell in header_line.split('|')[1:-1]]
+    
+    # Skip the separator line (second line with dashes)
+    data_lines = lines[2:] if len(lines) > 2 else []
+    
+    # Parse data rows
+    data_rows = []
+    for line in data_lines:
+        if line.strip() and '|' in line:
+            cells = [cell.strip() for cell in line.split('|')[1:-1]]
+            data_rows.append(cells)
+    
+    return headers, data_rows
+
+
+def markdown_table_to_csv(markdown_table: str, csv_string: bool = True) -> str:
+    """
+    Convert a markdown table to CSV format.
+    
+    Args:
+        markdown_table: A markdown table string
+        csv_string: If True, return CSV as string. If False, return as bytes.
+        
+    Returns:
+        CSV formatted string or bytes
+        
+    Example:
+        >>> table = "| Name | Age | City |\n|------|-----|------|\n| John | 25  | NYC  |"
+        >>> csv_data = markdown_table_to_csv(table)
+        >>> print(csv_data)
+        Name,Age,City
+        John,25,NYC
+    """
+    headers, data_rows = parse_markdown_table(markdown_table)
+    
+    # Create CSV output
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Write headers
+    writer.writerow(headers)
+    
+    # Write data rows (if any)
+    for row in data_rows:
+        writer.writerow(row)
+    
+    csv_content = output.getvalue()
+    output.close()
+    
+    # Normalize line endings to Unix style
+    csv_content = csv_content.replace('\r\n', '\n')
+    
+    if csv_string:
+        return csv_content
+    else:
+        return csv_content.encode('utf-8')
+
+
+def extract_and_convert_tables_to_csv(text: str) -> List[str]:
+    """
+    Extract all markdown tables from text and convert each to CSV format.
+    
+    Args:
+        text: The text content that may contain markdown tables
+        
+    Returns:
+        List of CSV strings, one for each table found
+        
+    Example:
+        >>> text = "Table 1:\n| A | B |\n|---|---|\n| 1 | 2 |\n\nTable 2:\n| X | Y |\n|---|---|\n| 3 | 4 |"
+        >>> csv_list = extract_and_convert_tables_to_csv(text)
+        >>> len(csv_list)
+        2
+        >>> print(csv_list[0])
+        A,B
+        1,2
+    """
+    tables = extract_markdown_tables(text)
+    csv_tables = []
+    
+    for table in tables:
+        csv_content = markdown_table_to_csv(table)
+        csv_tables.append(csv_content)
+    
+    return csv_tables
+
+
+def extract_first_table_to_csv(text: str) -> Optional[str]:
+    """
+    Extract the first markdown table from text and convert it to CSV format.
+    
+    Args:
+        text: The text content that may contain markdown tables
+        
+    Returns:
+        CSV string of the first table found, or None if no tables found
+        
+    Example:
+        >>> text = "Here's a table:\n| Name | Age |\n|------|-----|\n| John | 25  |"
+        >>> csv_data = extract_first_table_to_csv(text)
+        >>> print(csv_data)
+        Name,Age
+        John,25
+    """
+    tables = extract_markdown_tables(text)
+    if not tables:
+        return None
+    
+    return markdown_table_to_csv(tables[0])
