@@ -152,6 +152,68 @@ class SpecGptViewSetTests(APITestCase):
     @patch('apps.deliverables.views.specgpt_views.ChatOpenAI')
     @patch('apps.deliverables.views.specgpt_views.ConversationalRetrievalChain')
     @patch('apps.deliverables.views.specgpt_views.TemplateManager')
+    def test_chat_with_more_than_10_messages_returns_400(self, mock_template_manager, mock_chain, mock_chat_openai, mock_pinecone):
+        """Test that authenticated users can generate responses"""
+        # Mock PromptLayer template manager
+        mock_template_manager_instance = MagicMock()
+        mock_template_manager.return_value = mock_template_manager_instance
+        mock_template_manager_instance.get.return_value = self.mock_promptlayer_template
+        
+        # Mock the vector store and its retriever
+        mock_vectorstore = MagicMock()
+        mock_retriever = MagicMock()
+        mock_vectorstore.as_retriever.return_value = mock_retriever
+        mock_pinecone.return_value = mock_vectorstore
+
+        # Create 10 messages
+        for i in range(10):
+            ChatMessage.objects.create(
+                chat=self.chat,
+                message=f"Message {i}",
+                type=ChatMessage.ChatMessageType.HUMAN
+            )
+        
+        # Mock the LLM
+        mock_llm = MagicMock()
+        mock_chat_openai.return_value = mock_llm
+        
+        # Mock the chain
+        mock_chain.from_llm.return_value = MagicMock()
+        mock_chain.from_llm.return_value.return_value = {
+            'answer': 'Test answer',
+            'source_documents': [
+                Document(
+                    page_content='Test content',
+                    metadata={
+                        'userid': str(self.user.id),
+                        'master_format_section_number': '01 00 00',
+                        's3_bucket': 'test-bucket',
+                        's3_key': 'test-key',
+                        'source': 'test.pdf'
+                    }
+                )
+            ]
+        }
+        
+        # Authenticate user
+        self.client.force_authenticate(user=self.user)
+        
+        # Make request
+        response = self.client.post(self.url, {
+            'chat_id': self.chat.id,
+            'user_input': 'test question',
+            'k': 5
+        })
+        
+        # Assert response
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['error'], 'Chat has reached the maximum number of messages')
+
+
+    @patch('apps.deliverables.views.specgpt_views.PineconeVectorStore')
+    @patch('apps.deliverables.views.specgpt_views.ChatOpenAI')
+    @patch('apps.deliverables.views.specgpt_views.ConversationalRetrievalChain')
+    @patch('apps.deliverables.views.specgpt_views.TemplateManager')
     def test_calling_endpoint_without_chat_id_creates_new_chat(self, mock_template_manager, mock_chain, mock_chat_openai, mock_pinecone):
         """Test that authenticated users can generate responses"""
         # Mock PromptLayer template manager
