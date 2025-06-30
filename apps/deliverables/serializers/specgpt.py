@@ -19,7 +19,7 @@ class ChatDetailSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'created_at', 'messages']
 
     def get_messages(self, obj):
-        return ChatMessageSerializer(obj.messages, many=True).data
+        return ChatMessageSerializer(obj.messages.order_by('created_at'), many=True).data
 
 
 

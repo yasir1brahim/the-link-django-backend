@@ -319,6 +319,8 @@ class ChatViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_200_OK, data={
             'results': session_id_history_list
         })
+    
+
 
     def get_promptlayer_template(self, promptlayer_prompt_name):
         template_manager = TemplateManager(api_key=settings.PROMPTLAYER_API_KEY)
@@ -411,6 +413,12 @@ class ChatViewSet(viewsets.ModelViewSet):
                 return Response(status=status.HTTP_403_FORBIDDEN, data={
                     'error': 'Unauthorized'
                 })
+            print(f"AI messages count: {chat.messages.filter(type=ChatMessage.ChatMessageType.AI).count()}")
+            if chat.messages.filter(type=ChatMessage.ChatMessageType.AI).count() >= settings.MAX_CHAT_MESSAGES:
+                return Response(status=status.HTTP_200_OK, data={
+                    'error': 'Chat has reached the maximum number of messages',
+                    'max_chat_messages': settings.MAX_CHAT_MESSAGES
+                })
 
         user_input = request.data.get('user_input', '')
         try:
@@ -494,7 +502,8 @@ class ChatViewSet(viewsets.ModelViewSet):
             'chat_id': chat.id,
             'answer': results['answer'],
             'question': user_input,
-            'sources': message_sources
+            'sources': message_sources,
+            'max_chat_messages': settings.MAX_CHAT_MESSAGES
         })
     
     @action(detail=False, methods=['post'], url_path='generate-inspection-log')
