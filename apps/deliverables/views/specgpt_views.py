@@ -3,6 +3,7 @@ import json
 import csv
 from uuid import UUID
 from typing import Any, List, Optional
+from enum import Enum
 import boto3
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -18,6 +19,7 @@ from promptlayer.templates import TemplateManager
 from langchain_openai import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain_community.callbacks.promptlayer_callback import PromptLayerCallbackHandler
+from langchain.schema.messages import BaseMessage, AIMessage, _message_to_dict, messages_from_dict
 from langchain_core.outputs import (
     ChatGeneration,
     LLMResult,
@@ -250,6 +252,11 @@ class ChatViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, ChatAccessPermissions]
     serializer_class = ChatDetailSerializer
 
+    class RESPONSE_TYPES(str, Enum):
+        STANDARD = "standard"
+        INSPECTION_LOG = "inspection_log"
+        
+
     def list(self, request, project_id=None):
         """
         Return a list of chats for the project with custom pagination and metadata.
@@ -277,7 +284,7 @@ class ChatViewSet(viewsets.ModelViewSet):
         queryset = self.get_queryset().filter(project_id=project_id, project_version_id=project_version_id)
         
         for chat in queryset:
-            first_human_message = chat.messages.filter(type=ChatMessage.ChatMessageType.HUMAN).order_by('created_at').first()
+            first_human_message = chat.messages.filter(type__in=[ChatMessage.ChatMessageType.HUMAN, ChatMessage.ChatMessageType.SYSTEM]).order_by('created_at').first()
             _history = {
                 'session_id': chat.id,
                 'question': first_human_message.message if first_human_message else '',
@@ -368,66 +375,25 @@ class ChatViewSet(viewsets.ModelViewSet):
                 'text': source_document.page_content
             })
         return message_sources
-
-    @action(detail=False, methods=['post'], url_path='generate-response')
-    def generate_response(self, request, project_id=None):
-        print("Generate response")
-        print(request.data)
-        chat_id = request.data.get('chat_id', None)
-        project_version_id = request.data.get('project_version_id', None)
-        if not project_version_id:
-            project_version = ProjectVersion.objects.filter(project_id=project_id).order_by('-created_at').first()
-            if not project_version:
-                return Response(status=status.HTTP_404_NOT_FOUND, data={
-                    'error': 'No project version found'
-                })
-            project_version_id = project_version.id
-        else:
-            project_version = ProjectVersion.objects.get(id=project_version_id)
-            if project_version.project.id != project_id:
-                return Response(status=status.HTTP_400_BAD_REQUEST, data={
-                    'error': 'Project version does not match project'
-                })
-
-        if not chat_id:
-            chat = Chat.objects.create(
-                user=request.user,
-                project=Project.objects.get(id=project_id),
-                project_version=project_version
-            )
-        else:
-            chat = Chat.objects.get(id=chat_id)
-            if not chat:
-                return Response(status=status.HTTP_404_NOT_FOUND, data={
-                    'error': 'No chat found'
-                })
-            if chat.project_version.id != project_version_id:
-                return Response(status=status.HTTP_400_BAD_REQUEST, data={
-                    'error': 'Chat project version does not match project version'
-                })
-            if chat.project.id != project_id:
-                return Response(status=status.HTTP_400_BAD_REQUEST, data={
-                    'error': 'Chat project does not match project'
-                })
-            if chat.user != request.user:
-                return Response(status=status.HTTP_403_FORBIDDEN, data={
-                    'error': 'Unauthorized'
-                })
-            print(f"AI messages count: {chat.messages.filter(type=ChatMessage.ChatMessageType.AI).count()}")
-            if chat.messages.filter(type=ChatMessage.ChatMessageType.AI).count() >= settings.MAX_CHAT_MESSAGES:
-                return Response(status=status.HTTP_200_OK, data={
-                    'error': 'Chat has reached the maximum number of messages',
-                    'max_chat_messages': settings.MAX_CHAT_MESSAGES
-                })
-
-        user_input = request.data.get('user_input', '')
-        try:
-            num_documents_to_return = int(request.data.get('k', 10))
-        except ValueError:
-            return Response(status=status.HTTP_400_BAD_REQUEST, data={
-                'error': 'Invalid value for k'
-            })
-
+    
+    def create_raw_message(self, message, role):
+        return {
+            'data': {
+                'id': None,
+                'name': None,
+                'type': role,
+                'content': message,
+                'example': False,
+                'tool_calls': [],
+                'usage_metadata': None,
+                'additional_kwargs': {},
+                'response_metadata': {},
+                'invalid_tool_calls': []
+            },
+            'type': role
+        }
+    
+    def generate_standard_chat_response(self, chat, project_id, project_version_id, user_email, user_input, num_documents_to_return):
         try:
             promptlayer_template = self.get_promptlayer_template(settings.SPEC_GPT_PROMPTLAYER_PROMPT_NAME)
         except Exception as e:
@@ -466,7 +432,7 @@ class ChatViewSet(viewsets.ModelViewSet):
                         pl_tags=[
                             f"environment: {settings.ENVIRONMENT}",
                             f"application: deliverables",
-                            f"user: {request.user.email}",
+                            f"user: {user_email}",
                             f"prompt_name: {promptlayer_template['prompt_name']}",
                             f"prompt_commit_message: {promptlayer_template['commit_message']}",
                             f"llm_model_name: {promptlayer_model_metadata['name']}",
@@ -497,35 +463,10 @@ class ChatViewSet(viewsets.ModelViewSet):
         ]
         chat_message.save()
         message_sources = self._build_message_sources(source_documents)
-
-        return Response(status=status.HTTP_200_OK, data={
-            'chat_id': chat.id,
-            'answer': results['answer'],
-            'question': user_input,
-            'sources': message_sources,
-            'max_chat_messages': settings.MAX_CHAT_MESSAGES
-        })
+        return results['answer'], message_sources
     
-    @action(detail=False, methods=['post'], url_path='generate-inspection-log')
-    def generate_inspection_log(self, request, project_id=None):
-        print("Generate inspection log")
-        print(request.data)
-        project_version_id = request.data.get('project_version_id', None)
-        if not project_version_id:
-            project_version = ProjectVersion.objects.filter(project_id=project_id).order_by('-created_at').first()
-            if not project_version:
-                return Response(status=status.HTTP_404_NOT_FOUND, data={
-                    'error': 'No project version found'
-                })
-            project_version_id = project_version.id
-        else:
-            project_version = ProjectVersion.objects.get(id=project_version_id)
-            if project_version.project.id != project_id:
-                return Response(status=status.HTTP_400_BAD_REQUEST, data={
-                    'error': 'Project version does not match project'
-                })
-        
-        
+
+    def generate_inspection_log(self, chat, project_id, project_version_id, user):
         try:
             promptlayer_template = self.get_promptlayer_template(settings.INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME)
         except Exception as e:
@@ -538,7 +479,7 @@ class ChatViewSet(viewsets.ModelViewSet):
         developer_prompt_to_rejoin_separate_logs = self.get_promptlayer_developer_prompt(promptlayer_template)
         promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
 
-        project_version_files = UploadedFile.objects.filter(project_version=project_version)
+        project_version_files = UploadedFile.objects.filter(project_version_id=project_version_id)
         file_content = ""
         for file in project_version_files:
             try:
@@ -635,9 +576,100 @@ class ChatViewSet(viewsets.ModelViewSet):
             )
             final_answer = completion.choices[0].message.content
 
+        # save chat messages
+        human_chat_message = ChatMessage.objects.create(
+            chat=chat,
+            message="Generate inspection log",
+            type=ChatMessage.ChatMessageType.SYSTEM,
+            raw_message=self.create_raw_message("Generate inspection log", "human")
+        )
+        ai_chat_message = ChatMessage.objects.create(
+            chat=chat,
+            message=final_answer,
+            type=ChatMessage.ChatMessageType.AI_INSPECTION_LOG,
+            raw_message=self.create_raw_message(final_answer, "ai")
+        )
+
+        return final_answer, []
+
+
+    @action(detail=False, methods=['post'], url_path='generate-response')
+    def generate_response(self, request, project_id=None):
+        print("Generate response")
+        print(request.data)
+        chat_id = request.data.get('chat_id', None)
+        project_version_id = request.data.get('project_version_id', None)
+        if not project_version_id:
+            project_version = ProjectVersion.objects.filter(project_id=project_id).order_by('-created_at').first()
+            if not project_version:
+                return Response(status=status.HTTP_404_NOT_FOUND, data={
+                    'error': 'No project version found'
+                })
+            project_version_id = project_version.id
+        else:
+            project_version = ProjectVersion.objects.get(id=project_version_id)
+            if project_version.project.id != project_id:
+                return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                    'error': 'Project version does not match project'
+                })
+
+        if not chat_id:
+            chat = Chat.objects.create(
+                user=request.user,
+                project=Project.objects.get(id=project_id),
+                project_version=project_version
+            )
+        else:
+            chat = Chat.objects.get(id=chat_id)
+            if not chat:
+                return Response(status=status.HTTP_404_NOT_FOUND, data={
+                    'error': 'No chat found'
+                })
+            if chat.project_version.id != project_version_id:
+                return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                    'error': 'Chat project version does not match project version'
+                })
+            if chat.project.id != project_id:
+                return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                    'error': 'Chat project does not match project'
+                })
+            if chat.user != request.user:
+                return Response(status=status.HTTP_403_FORBIDDEN, data={
+                    'error': 'Unauthorized'
+                })
+            print(f"AI messages count: {chat.messages.filter(type=ChatMessage.ChatMessageType.AI).count()}")
+            if chat.messages.filter(type=ChatMessage.ChatMessageType.AI).count() >= settings.MAX_CHAT_MESSAGES:
+                return Response(status=status.HTTP_200_OK, data={
+                    'error': 'Chat has reached the maximum number of messages',
+                    'max_chat_messages': settings.MAX_CHAT_MESSAGES
+                })
+
+        user_input = request.data.get('user_input', '')
+        response_type = request.data.get('response_type', self.RESPONSE_TYPES.STANDARD)
+        try:
+            num_documents_to_return = int(request.data.get('k', 10))
+        except ValueError:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'Invalid value for k'
+            })
+
+        if response_type == self.RESPONSE_TYPES.STANDARD:
+            answer, message_sources = self.generate_standard_chat_response(chat, project_id, project_version_id, request.user.email, user_input, num_documents_to_return)
+        elif response_type == self.RESPONSE_TYPES.INSPECTION_LOG:
+            answer, message_sources = self.generate_inspection_log(chat, project_id, project_version_id, request.user)
+        else:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'Invalid response type'
+            })
+
         return Response(status=status.HTTP_200_OK, data={
-            'answer': final_answer,
+            'chat_id': chat.id,
+            'answer': answer,
+            'question': user_input,
+            'sources': message_sources,
+            'max_chat_messages': settings.MAX_CHAT_MESSAGES
         })
+    
 
         
     @action(detail=False, methods=['get'], url_path='generate-presigned-url')

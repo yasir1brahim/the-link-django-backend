@@ -375,7 +375,11 @@ class ChatMessage(BaseModel):
     class ChatMessageType(models.TextChoices):
         AI = "ai", "ai"
         HUMAN = "human", "human"
+        SYSTEM = "system", "system"
+        ERROR = "error", "error"
+        AI_INSPECTION_LOG = "ai_inspection_log", "ai_inspection_log"
 
+        
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     chat = models.ForeignKey("Chat", on_delete=models.CASCADE, related_name="messages")
     type = models.CharField(max_length=256, choices=ChatMessageType.choices)
