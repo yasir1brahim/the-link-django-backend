@@ -378,7 +378,7 @@ class ChatMessage(BaseModel):
         SYSTEM = "system", "system"
         ERROR = "error", "error"
         AI_INSPECTION_LOG = "ai_inspection_log", "ai_inspection_log"
-
+        AI_OWNER_DELIVERABLES_LOG = "ai_owner_deliverables_log", "ai_owner_deliverables_log"
         
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     chat = models.ForeignKey("Chat", on_delete=models.CASCADE, related_name="messages")

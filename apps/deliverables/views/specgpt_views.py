@@ -255,6 +255,7 @@ class ChatViewSet(viewsets.ModelViewSet):
     class RESPONSE_TYPES(str, Enum):
         STANDARD = "standard"
         INSPECTION_LOG = "inspection_log"
+        OWNER_DELIVERABLES_LOG = "owner_deliverables_log"
         
 
     def list(self, request, project_id=None):
@@ -466,14 +467,14 @@ class ChatViewSet(viewsets.ModelViewSet):
         return results['answer'], message_sources
     
 
-    def generate_inspection_log(self, chat, project_id, project_version_id, user):
+    def generate_general_log(self, chat, project_id, project_version_id, user, promptlayer_template_name):
         try:
-            promptlayer_template = self.get_promptlayer_template(settings.INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME)
+            promptlayer_template = self.get_promptlayer_template(promptlayer_template_name)
         except Exception as e:
             return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR, data={
                 'error': f'Failed to retrieve PromptLayer template: {str(e)}'
             })
-
+        
         system_prompt = self.get_promptlayer_system_prompt(promptlayer_template)
         user_prompt = self.get_promptlayer_user_prompt(promptlayer_template)
         developer_prompt_to_rejoin_separate_logs = self.get_promptlayer_developer_prompt(promptlayer_template)
@@ -576,6 +577,11 @@ class ChatViewSet(viewsets.ModelViewSet):
             )
             final_answer = completion.choices[0].message.content
 
+        return final_answer
+
+    def generate_inspection_log(self, chat, project_id, project_version_id, user):
+        final_answer = self.generate_general_log(chat, project_id, project_version_id, user, settings.INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME)
+
         # save chat messages
         human_chat_message = ChatMessage.objects.create(
             chat=chat,
@@ -587,6 +593,25 @@ class ChatViewSet(viewsets.ModelViewSet):
             chat=chat,
             message=final_answer,
             type=ChatMessage.ChatMessageType.AI_INSPECTION_LOG,
+            raw_message=self.create_raw_message(final_answer, "ai")
+        )
+
+        return final_answer, []
+    
+    def generate_owner_deliverables_log(self, chat, project_id, project_version_id, user):
+        final_answer = self.generate_general_log(chat, project_id, project_version_id, user, settings.OWNER_DELIVERABLES_PROMPTLAYER_PROMPT_NAME)
+
+        # save chat messages
+        human_chat_message = ChatMessage.objects.create(
+            chat=chat,
+            message="Generate owner deliverables log",
+            type=ChatMessage.ChatMessageType.SYSTEM,
+            raw_message=self.create_raw_message("Generate owner deliverables log", "human")
+        )
+        ai_chat_message = ChatMessage.objects.create(
+            chat=chat,
+            message=final_answer,
+            type=ChatMessage.ChatMessageType.AI_OWNER_DELIVERABLES_LOG,
             raw_message=self.create_raw_message(final_answer, "ai")
         )
 
@@ -657,6 +682,8 @@ class ChatViewSet(viewsets.ModelViewSet):
             answer, message_sources = self.generate_standard_chat_response(chat, project_id, project_version_id, request.user.email, user_input, num_documents_to_return)
         elif response_type == self.RESPONSE_TYPES.INSPECTION_LOG:
             answer, message_sources = self.generate_inspection_log(chat, project_id, project_version_id, request.user)
+        elif response_type == self.RESPONSE_TYPES.OWNER_DELIVERABLES_LOG:
+            answer, message_sources = self.generate_owner_deliverables_log(chat, project_id, project_version_id, request.user)
         else:
             return Response(status=status.HTTP_400_BAD_REQUEST, data={
                 'error': 'Invalid response type'
