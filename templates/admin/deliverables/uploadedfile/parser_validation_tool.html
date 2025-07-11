@@ -1,0 +1,344 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    .parser-validation-form {
+        max-width: 800px;
+        margin: 20px auto;
+        padding: 20px;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .form-group {
+        margin-bottom: 20px;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+        color: #333;
+    }
+    
+    .form-group input[type="file"] {
+        width: 100%;
+        padding: 10px;
+        border: 2px dashed #ddd;
+        border-radius: 4px;
+        background: #f9f9f9;
+    }
+    
+    .form-group input[type="file"]:hover {
+        border-color: #007cba;
+    }
+    
+    .submit-btn {
+        background: #007cba;
+        color: white;
+        padding: 12px 24px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: bold;
+    }
+    
+    .submit-btn:hover {
+        background: #005a87;
+    }
+    
+    .submit-btn:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+    
+    .loading {
+        display: none;
+        text-align: center;
+        margin: 20px 0;
+    }
+    
+    .results-container {
+        margin-top: 30px;
+        display: none;
+    }
+    
+    .result-item {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        padding: 15px;
+        margin-bottom: 10px;
+    }
+    
+    .result-item.correct {
+        border-left: 4px solid #28a745;
+    }
+    
+    .result-item.incorrect {
+        border-left: 4px solid #dc3545;
+    }
+    
+    .result-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    
+    .result-status {
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: bold;
+    }
+    
+    .status-correct {
+        background: #d4edda;
+        color: #155724;
+    }
+    
+    .status-incorrect {
+        background: #f8d7da;
+        color: #721c24;
+    }
+    
+    .result-text {
+        font-family: monospace;
+        background: #fff;
+        padding: 10px;
+        border-radius: 4px;
+        margin: 10px 0;
+        white-space: pre-wrap;
+        max-height: 100px;
+        overflow-y: auto;
+    }
+    
+    .failure-mode {
+        background: #fff3cd;
+        border: 1px solid #ffeaa7;
+        padding: 10px;
+        border-radius: 4px;
+        margin: 10px 0;
+    }
+    
+    .missing-keywords {
+        background: #e2e3e5;
+        border: 1px solid #d6d8db;
+        padding: 10px;
+        border-radius: 4px;
+        margin: 10px 0;
+    }
+    
+    .missing-keywords ul {
+        margin: 5px 0;
+        padding-left: 20px;
+    }
+    
+    .error-message {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 15px;
+        border-radius: 4px;
+        margin: 20px 0;
+        border: 1px solid #f5c6cb;
+    }
+    
+    .success-message {
+        background: #d4edda;
+        color: #155724;
+        padding: 15px;
+        border-radius: 4px;
+        margin: 20px 0;
+        border: 1px solid #c3e6cb;
+    }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label='deliverables' %}">{% trans 'Deliverables' %}</a>
+    &rsaquo; <a href="{% url 'admin:deliverables_uploadedfile_changelist' %}">{% trans 'Uploaded files' %}</a>
+    &rsaquo; {% trans 'Parser Validation Tool' %}
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="parser-validation-form">
+    <h1>{% trans 'Parser Validation Tool' %}</h1>
+    <p>Upload your specification PDF and parser results to validate classifications using OpenAI.</p>
+    
+    <form id="validationForm" enctype="multipart/form-data">
+        {% csrf_token %}
+        
+        <div class="form-group">
+            <label for="spec_pdf">Specification PDF File:</label>
+            <input type="file" id="spec_pdf" name="spec_pdf" accept=".pdf" required>
+            <small>Upload the original specification PDF file that was parsed.</small>
+        </div>
+        
+        <div class="form-group">
+            <label for="parser_results_csv">Parser Results CSV:</label>
+            <input type="file" id="parser_results_csv" name="parser_results_csv" accept=".csv" required>
+            <small>CSV file containing parser results with columns: text, paragraph_number, parser_classification</small>
+        </div>
+        
+        <div class="form-group">
+            <label for="keywords_csv">Keywords CSV:</label>
+            <input type="file" id="keywords_csv" name="keywords_csv" accept=".csv" required>
+            <small>CSV file containing keywords used by the parser with columns: keyword, description</small>
+        </div>
+        
+        <button type="submit" class="submit-btn" id="submitBtn">
+            {% trans 'Validate Classifications' %}
+        </button>
+    </form>
+    
+    <div class="loading" id="loading">
+        <p>Processing with OpenAI... This may take a few minutes.</p>
+        <div style="text-align: center;">
+            <div style="display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #007cba; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+        </div>
+    </div>
+    
+    <div class="results-container" id="resultsContainer">
+        <h2>Validation Results</h2>
+        <div id="resultsContent"></div>
+    </div>
+</div>
+
+<style>
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+</style>
+
+<script>
+document.getElementById('validationForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const submitBtn = document.getElementById('submitBtn');
+    const loading = document.getElementById('loading');
+    const resultsContainer = document.getElementById('resultsContainer');
+    const resultsContent = document.getElementById('resultsContent');
+    
+    // Show loading, disable submit button
+    submitBtn.disabled = true;
+    loading.style.display = 'block';
+    resultsContainer.style.display = 'none';
+    
+    try {
+        const response = await fetch('{% url "admin:parser-validation-tool" %}', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            displayResults(data.results);
+        } else {
+            displayError(data.error || 'An error occurred during validation.');
+        }
+    } catch (error) {
+        displayError('Network error: ' + error.message);
+    } finally {
+        submitBtn.disabled = false;
+        loading.style.display = 'none';
+    }
+});
+
+function displayResults(results) {
+    const resultsContent = document.getElementById('resultsContent');
+    const resultsContainer = document.getElementById('resultsContainer');
+    
+    let html = '';
+    
+    let correctCount = 0;
+    let incorrectCount = 0;
+    
+    results.forEach((result, index) => {
+        if (result.correct_classification) {
+            correctCount++;
+        } else {
+            incorrectCount++;
+        }
+        
+        const statusClass = result.correct_classification ? 'correct' : 'incorrect';
+        const statusText = result.correct_classification ? 'Correct' : 'Incorrect';
+        const statusStyle = result.correct_classification ? 'status-correct' : 'status-incorrect';
+        
+        html += `
+            <div class="result-item ${statusClass}">
+                <div class="result-header">
+                    <strong>Paragraph ${result.paragraph_number}</strong>
+                    <span class="result-status ${statusStyle}">${statusText}</span>
+                </div>
+                
+                <div class="result-text">${escapeHtml(result.text)}</div>
+                
+                <div><strong>Parser Classification:</strong> ${escapeHtml(result.parser_classification)}</div>
+                <div><strong>LLM Classification:</strong> ${escapeHtml(result.llm_classification)}</div>
+                
+                ${result.failure_mode ? `
+                    <div class="failure-mode">
+                        <strong>Failure Mode:</strong> ${escapeHtml(result.failure_mode)}
+                    </div>
+                ` : ''}
+                
+                ${result.missing_keywords && result.missing_keywords.length > 0 ? `
+                    <div class="missing-keywords">
+                        <strong>Suggested Missing Keywords:</strong>
+                        <ul>
+                            ${result.missing_keywords.map(keyword => `<li>${escapeHtml(keyword)}</li>`).join('')}
+                        </ul>
+                    </div>
+                ` : ''}
+                <div><strong>Reasoning Notes:</strong> ${escapeHtml(result.reasoning_notes)}</div>
+            </div>
+        `;
+    });
+    
+    // Add summary
+    html = `
+        <div class="success-message">
+            <strong>Validation Complete!</strong><br>
+            Correct: ${correctCount} | Incorrect: ${incorrectCount} | Total: ${results.length}
+        </div>
+        ${html}
+    `;
+    
+    resultsContent.innerHTML = html;
+    resultsContainer.style.display = 'block';
+}
+
+function displayError(message) {
+    const resultsContent = document.getElementById('resultsContent');
+    const resultsContainer = document.getElementById('resultsContainer');
+    
+    resultsContent.innerHTML = `
+        <div class="error-message">
+            <strong>Error:</strong> ${escapeHtml(message)}
+        </div>
+    `;
+    
+    resultsContainer.style.display = 'block';
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}
