@@ -11,6 +11,8 @@ from django.contrib import messages
 from django.shortcuts import redirect
 from django.urls import reverse
 from pydantic import BaseModel, Field
+from promptlayer.templates import TemplateManager
+
 from typing import Literal
 import json
 import csv
@@ -99,7 +101,8 @@ class UploadedFileAdmin(admin.ModelAdmin):
 
 
 class ValidationResult(BaseModel):
-    correct_classification: bool = Field(description="Whether the parser classification is correct, if true, parser_topic_classification and parser_item_classification should be the same")
+    correct_topic_classification: bool = Field(description="Whether the parser topic classification is correct")
+    correct_item_classification: bool = Field(description="Whether the parser item classification is correct")
     parser_topic_classification: str = Field(description="The classification determined by the parser")
     parser_item_classification: str = Field(description="The classification determined by the parser")
     llm_topic_classification: str = Field(description="The classification determined by the LLM")
@@ -113,6 +116,9 @@ class ValidationResult(BaseModel):
         description="List of suggested keywords to add"
     )
     reasoning_notes: str = Field(description="Reasoning notes for the classification")
+
+class BatchValidationResult(BaseModel):
+    results: List[ValidationResult] = Field(description="List of validation results")
 
 class ParserValidationToolView(View):
     """
@@ -128,34 +134,34 @@ class ParserValidationToolView(View):
     
     def post(self, request):
         """Process the uploaded files and validate classifications."""
-        # try:
-        # Get uploaded files
-        spec_pdf = request.FILES.get('spec_pdf')
-        parser_results_csv = request.FILES.get('parser_results_csv')
-        keywords_csv = request.FILES.get('keywords_csv')
-        
-        if not all([spec_pdf, parser_results_csv, keywords_csv]):
-            messages.error(request, 'All three files are required: Spec PDF, Parser Results CSV, and Keywords CSV.')
-            return redirect(reverse('admin:parser-validation-tool'))
-        
-        # Read CSV files
-        parser_results = self._read_csv(parser_results_csv)
-        keywords = self._read_csv(keywords_csv)
-        
-        # Process with OpenAI
-        validation_results = self._validate_with_openai(spec_pdf, parser_results, keywords)
-        
-        # Return results as JSON
-        return JsonResponse({
-            'success': True,
-            'results': validation_results
-        })
+        try:
+            # Get uploaded files
+            spec_pdf = request.FILES.get('spec_pdf')
+            parser_results_csv = request.FILES.get('parser_results_csv')
+            keywords_csv = request.FILES.get('keywords_csv')
             
-        # except Exception as e:
-        #     return JsonResponse({
-        #         'success': False,
-        #         'error': str(e)
-        #     }, status=500)
+            if not all([spec_pdf, parser_results_csv, keywords_csv]):
+                messages.error(request, 'All three files are required: Spec PDF, Parser Results CSV, and Keywords CSV.')
+                return redirect(reverse('admin:parser-validation-tool'))
+            
+            # Read CSV files
+            parser_results = self._read_csv(parser_results_csv)
+            keywords = self._read_csv(keywords_csv)
+            
+            # Process with OpenAI
+            validation_results = self._validate_with_openai(spec_pdf, parser_results, keywords)
+            
+            # Return results as JSON
+            return JsonResponse({
+                'success': True,
+                'results': validation_results
+            })
+                
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
     
     def _read_csv(self, csv_file) -> List[Dict[str, Any]]:
         """Read CSV file and return as list of dictionaries."""
@@ -164,67 +170,122 @@ class ParserValidationToolView(View):
         return list(csv_reader)
     
     def _validate_with_openai(self, spec_pdf, parser_results: List[Dict], keywords: List[Dict]) -> List[Dict]:
-        """Validate parser results using OpenAI."""
+        """Validate parser results using OpenAI with batching."""
         # Read PDF content
         pdf_content = spec_pdf.read()
         pdf_base64 = base64.b64encode(pdf_content).decode('utf-8')
         
-        print(f"Keywords: {keywords}")
+        # Prepare keywords context
+        keywords_text = str(keywords)
         
+        # Process in batches
+        batch_size = 5  # Process 5 items per API call
         validation_results = []
         
-        for result in parser_results:
-            # Prepare the prompt for OpenAI
-            prompt = self._create_validation_prompt(
-                result.get('text', ''),
-                result.get('paragraph_number', ''),
-                result.get('topic', ''),
-                result.get('item', ''),
-                str(keywords)
-            )
-            
-            # Call OpenAI
-            llm_response = self._call_openai(prompt, spec_pdf.name, pdf_base64)
-            
-            # Parse the response
-            validation_result = self._parse_llm_response(llm_response, result)
-            validation_results.append(validation_result)
+        for i in range(0, len(parser_results), batch_size):
+            batch = parser_results[i:i + batch_size]
+            batch_results = self._process_batch(batch, spec_pdf.name, pdf_base64, keywords_text)
+            validation_results.extend(batch_results)
+            print(f"Batch {i//batch_size + 1} results: {batch_results}")
         
         return validation_results
     
-    def _create_validation_prompt(self, text: str, paragraph_number: str, parser_topic_classification: str, parser_item_classification: str, keywords_text: str) -> str:
-        """Create the prompt for OpenAI validation."""
-        return f"""
-You are an expert at analyzing construction specification documents and validating parser classifications.
-
-Context:
-- Keywords used by the parser: {keywords_text}
-
-Task:
-Analyze the following text from a construction specification document and validate the parser's classification.
-
-Text: "{text}"
-Paragraph Number: {paragraph_number}
-Parser Topic Classification: {parser_topic_classification}
-Parser Item Classification: {parser_item_classification}
-
-Please determine if the parser classification is correct. If not, identify the failure mode and suggest missing keywords.
-To help deduce the failure mode, consider the following:
-- The parser works by parsing the text into a tree-like hierarchy of sections, keywords, and subkeywords.
-- For each node in the hierarchy, the parser looks for keywords in the text. If the item is a non-terminal node, the parser will look for keywords of the "topic" type. If the item is a terminal node, the parser will look for keywords of the "item" type.
-- The "item" keywords that are considered are restricted by the topic of the node's parent. For example, if the node's parent is a "Summary" node, the parser will only consider "item" keywords that are relevant to the topic "Summary".
-- Unfortunately, the parser does not always get the hierarchy correct, which can lead to incorrect classifications.
-- One good way to check for hierarchy parsing errors is to look at the "paragraph number" of the text. If the paragraph number does not match what you see in the PDF file, it is likely due to a hierarchy parsing error.
-- If the paragraph and hierarchy parsing looks correct, but the classification is still "UNKNOWN" or seems incorrect, it is likely due to a missing keyword. In this case, you should mark the failure mode as "Missing keyword" and suggest missing keywords.
-
-
-Be thorough in your analysis and provide specific reasoning for your classification.
-"""
+    def _process_batch(self, batch: List[Dict], pdf_filename: str, pdf_base64: str, keywords_text: str) -> List[Dict]:
+        """Process a batch of parser results in a single OpenAI call."""
+        # Create batch prompt
+        batch_prompt = self._create_batch_prompt(batch, keywords_text)
+        
+        # Call OpenAI
+        llm_response = self._call_openai(batch_prompt, pdf_filename, pdf_base64)
+        
+        # Parse batch response
+        return self._parse_batch_response(llm_response, batch)
     
+    def get_promptlayer_template(self, promptlayer_prompt_name):
+        template_manager = TemplateManager(api_key=settings.PROMPTLAYER_API_KEY)
+        return template_manager.get(promptlayer_prompt_name, {'label': settings.ENVIRONMENT})
+
+    def get_promptlayer_model_metadata(self, promptlayer_template):
+        return promptlayer_template['metadata']['model']
+    
+    def get_promptlayer_system_prompt(self, promptlayer_template):
+        prompts = promptlayer_template['prompt_template']['messages']
+        system_prompt = [prompt for prompt in prompts if prompt['role'] == 'system']
+        return system_prompt[0]['content'][0]['text']
+    
+    def get_promptlayer_user_prompt(self, promptlayer_template):
+        prompts = promptlayer_template['prompt_template']['messages']
+        user_prompt = [prompt for prompt in prompts if prompt['role'] == 'user']
+        return user_prompt[0]['content'][0]['text']
+    
+    def _create_batch_prompt(self, batch: List[Dict], keywords_text: str) -> str:
+        """Create a prompt for processing multiple classifications at once."""
+        batch_items = []
+        
+        for i, result in enumerate(batch, 1):
+            item_text = f"""
+Item {i}:
+Text: "{result.get('text', '')}"
+Paragraph Number: {result.get('paragraph_number', '')}
+Parser Topic Classification: {result.get('topic', '')}
+Parser Item Classification: {result.get('item', '')}
+"""
+            batch_items.append(item_text)
+        
+        batch_text = "\n".join(batch_items)
+
+        promptlayer_template = self.get_promptlayer_template('classification_checker')
+        promptlayer_system_prompt = self.get_promptlayer_system_prompt(promptlayer_template)
+        promptlayer_user_prompt = self.get_promptlayer_user_prompt(promptlayer_template)
+
+        print(promptlayer_system_prompt)
+        print(promptlayer_user_prompt)
+
+        user_prompt = promptlayer_user_prompt.format(batch_text=batch_text, keywords_text=keywords_text)
+        
+        return f"{promptlayer_system_prompt}\n\n{user_prompt}"
+    
+    def _parse_batch_response(self, llm_response: str, batch: List[Dict]) -> List[Dict]:
+        """Parse the batch response and format it according to the required structure."""
+        try:
+            parsed_response = json.loads(llm_response)['results']
+            
+            # Handle both single object and array responses
+            if isinstance(parsed_response, dict):
+                # Single object response - convert to array
+                parsed_response = [parsed_response]
+            elif isinstance(parsed_response, list):
+                # Array response - use as is
+                pass
+            else:
+                raise ValueError("Unexpected response format")
+            
+            results = parsed_response
+            return results
+            
+        except json.JSONDecodeError:
+            # Fallback if JSON parsing fails
+            fallback_results = []
+            for original_result in batch:
+                fallback_result = {
+                    "text": original_result.get('text', ''),
+                    "paragraph_number": original_result.get('paragraph_number', ''),
+                    "correct_classification": False,
+                    "parser_topic_classification": original_result.get('topic', ''),
+                    "parser_item_classification": original_result.get('item', ''),
+                    "llm_topic_classification": "Error parsing batch response",
+                    "llm_item_classification": "Error parsing batch response",
+                    "failure_mode": "Unknown",
+                    "missing_keywords": [],
+                    "reasoning_notes": "Error parsing batch response"
+                }
+                fallback_results.append(fallback_result)
+            return fallback_results
+
+
     def _call_openai(self, prompt: str, pdf_filename: str, pdf_base64: str) -> str:
         """Call OpenAI API with the prompt and PDF context."""
         try:
-            print(f"Calling OpenAI with prompt: {prompt}")
             client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
             
             response = client.chat.completions.create(
@@ -254,50 +315,18 @@ Be thorough in your analysis and provide specific reasoning for your classificat
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
-                        "name": "ValidationResult",
-                        "schema": ValidationResult.model_json_schema()
+                        "name": "BatchValidationResult",
+                        "schema": BatchValidationResult.model_json_schema()
                     },
                 },
                 temperature=0.1
             )
-            
+            print("Batch validation result:")
+            print(response.choices[0].message.content)
             return response.choices[0].message.content
             
         except Exception as e:
             raise Exception(f"OpenAI API error: {str(e)}")
-    
-    def _parse_llm_response(self, llm_response: str, original_result: Dict) -> Dict:
-        """Parse the LLM response and format it according to the required structure."""
-        try:
-            parsed_response = json.loads(llm_response)
-            
-            return {
-                "text": original_result.get('text', ''),
-                "paragraph_number": original_result.get('paragraph_number', ''),
-                "correct_classification": parsed_response.get('correct_classification', False),
-                "parser_topic_classification": original_result.get('topic', ''),
-                "parser_item_classification": original_result.get('item', ''),
-                "llm_topic_classification": parsed_response.get('llm_topic_classification', ''),
-                "llm_item_classification": parsed_response.get('llm_item_classification', ''),
-                "failure_mode": parsed_response.get('failure_mode'),
-                "missing_keywords": parsed_response.get('missing_keywords', []),
-                "reasoning_notes": parsed_response.get('reasoning_notes', '')
-            }
-            
-        except json.JSONDecodeError:
-            # Fallback if JSON parsing fails
-            return {
-                "text": original_result.get('text', ''),
-                "paragraph_number": original_result.get('paragraph_number', ''),
-                "correct_classification": False,
-                "parser_topic_classification": original_result.get('topic', ''),
-                "parser_item_classification": original_result.get('item', ''),
-                "llm_topic_classification": "Error parsing response",
-                "llm_item_classification": "Error parsing response",
-                "failure_mode": "Unknown",
-                "missing_keywords": [],
-                "reasoning_notes": "Error parsing response"
-            }
 
 
 @admin.register(SpecSection)
