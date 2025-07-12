@@ -179,7 +179,7 @@ class ParserValidationToolView(View):
         keywords_text = str(keywords)
         
         # Process in batches
-        batch_size = 5  # Process 5 items per API call
+        batch_size = 10  # Process 10 items per API call
         validation_results = []
         
         for i in range(0, len(parser_results), batch_size):
