@@ -179,7 +179,7 @@ class ParserValidationToolView(View):
         keywords_text = str(keywords)
         
         # Process in batches
-        batch_size = 5  # Process 5 items per API call
+        batch_size = 10  # Process 10 items per API call
         validation_results = []
         
         for i in range(0, len(parser_results), batch_size):
@@ -238,9 +238,6 @@ Parser Item Classification: {result.get('item', '')}
         promptlayer_system_prompt = self.get_promptlayer_system_prompt(promptlayer_template)
         promptlayer_user_prompt = self.get_promptlayer_user_prompt(promptlayer_template)
 
-        print(promptlayer_system_prompt)
-        print(promptlayer_user_prompt)
-
         user_prompt = promptlayer_user_prompt.format(batch_text=batch_text, keywords_text=keywords_text)
         
         return f"{promptlayer_system_prompt}\n\n{user_prompt}"
@@ -261,6 +258,9 @@ Parser Item Classification: {result.get('item', '')}
                 raise ValueError("Unexpected response format")
             
             results = parsed_response
+            for i, original_item in enumerate(batch):
+                results[i]['text'] = original_item['text']
+                results[i]['paragraph_number'] = original_item['paragraph_number']
             return results
             
         except json.JSONDecodeError:
