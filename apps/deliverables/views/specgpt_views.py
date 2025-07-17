@@ -750,9 +750,11 @@ class ChatViewSet(viewsets.ModelViewSet):
         try:
             if extract_all:
                 csv_tables = extract_and_convert_tables_to_csv(text)
+                print("CSV TABLES")
+                print(csv_tables)
                 if not csv_tables:
-                    return Response(status=status.HTTP_404_NOT_FOUND, data={
-                        'error': 'No markdown tables found in the text'
+                    return Response(status=status.HTTP_422_UNPROCESSABLE_ENTITY, data={
+                        'error': 'No tables found'
                     })
                 
                 # Create Excel workbook
@@ -816,7 +818,7 @@ class ChatViewSet(viewsets.ModelViewSet):
             else:
                 csv_content = extract_first_table_to_csv(text)
                 if csv_content is None:
-                    return Response(status=status.HTTP_404_NOT_FOUND, data={
+                    return Response(status=status.HTTP_422_UNPROCESSABLE_ENTITY, data={
                         'error': 'No markdown tables found in the text'
                     })
                 
