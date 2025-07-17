@@ -1,7 +1,7 @@
 import re
 import csv
 import io
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 ANCHOR_REPR_DELIMITER = '$$$'
 
@@ -35,11 +35,22 @@ def extract_markdown_tables(text: str) -> List[str]:
     for line in lines:
         stripped_line = line.strip()
         
-        # Check if this line looks like a table row (starts and ends with |)
+        # Check if this line looks like a table row
+        # Case 1: Wrapped in pipes (standard markdown)
         if stripped_line.startswith('|') and stripped_line.endswith('|'):
             if not in_table:
                 in_table = True
             current_table.append(line)
+        # Case 2: Pipe-separated without wrapping (alternative format)
+        elif '|' in stripped_line and not stripped_line.startswith('|') and not stripped_line.endswith('|'):
+            # Check if it has multiple pipe-separated columns
+            parts = stripped_line.split('|')
+            if len(parts) >= 3:  # At least 2 columns (3 parts when split by |)
+                if not in_table:
+                    in_table = True
+                # Convert to wrapped format for consistency
+                wrapped_line = '|' + '|'.join(parts) + '|'
+                current_table.append(wrapped_line)
         elif in_table:
             # Check if this is a separator line (contains dashes and pipes)
             if '|' in stripped_line and any(char in stripped_line for char in ['-', ':']):
@@ -96,16 +107,15 @@ def parse_markdown_table(markdown_table: str) -> Tuple[List[str], List[List[str]
     return headers, data_rows
 
 
-def markdown_table_to_csv(markdown_table: str, csv_string: bool = True) -> str:
+def markdown_table_to_csv(markdown_table: str) -> str:
     """
     Convert a markdown table to CSV format.
     
     Args:
         markdown_table: A markdown table string
-        csv_string: If True, return CSV as string. If False, return as bytes.
         
     Returns:
-        CSV formatted string or bytes
+        CSV formatted string
         
     Example:
         >>> table = "| Name | Age | City |\n|------|-----|------|\n| John | 25  | NYC  |"
@@ -133,10 +143,7 @@ def markdown_table_to_csv(markdown_table: str, csv_string: bool = True) -> str:
     # Normalize line endings to Unix style
     csv_content = csv_content.replace('\r\n', '\n')
     
-    if csv_string:
-        return csv_content
-    else:
-        return csv_content.encode('utf-8')
+    return csv_content
 
 
 def extract_and_convert_tables_to_csv(text: str) -> List[str]:
