@@ -89,4 +89,4 @@ class ChatAccessPermissions(permissions.BasePermission):
     
 
     def has_object_permission(self, request, view, obj: Chat):
-        return request.user.is_member_of_project(obj.project) and obj.user == request.user
+        return request.user.is_member_of_project(obj.project)
