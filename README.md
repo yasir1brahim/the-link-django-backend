@@ -55,6 +55,16 @@ aws ecs execute-command --cluster=deliverables-dev --task=273366047ed44f62827f78
 ``` 
 
 
+## Set up local configuration to work with spec parsing lambdas
+In order for document parsing to work locally, you must configure a callback URL that the lambda function can post the parsing results back to. A good option is to set up a tunnel to your local machine using ngrok
+```
+ngrok http 8000
+```
+This will give you a public URL that will tunnel traffic to your local machine at port 8000, allowing the local application to receive the requests.
+
+When you get the ngrok URL, paste it into the `BACKEND_BASE_URL` variable (without a trailing slash), and then restart the app. Now when a file is uploaded it should be sent on to the lambda with this as the callback URL, and data should make it back to the local application
+
+
 ## Set up database
 
 *If you are using Docker you can skip these steps.*
