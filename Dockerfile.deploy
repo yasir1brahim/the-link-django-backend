@@ -74,6 +74,9 @@ ARG PINECONE_API_KEY
 ENV PINECONE_API_KEY=$PINECONE_API_KEY
 ARG OPENAI_API_KEY
 ENV OPENAI_API_KEY=$OPENAI_API_KEY
+ARG BACKEND_BASE_URL
+ENV BACKEND_BASE_URL=$BACKEND_BASE_URL
+
 # install node/npm
 RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     --mount=target=/var/cache/apt,type=cache,sharing=locked \

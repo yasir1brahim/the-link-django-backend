@@ -75,6 +75,7 @@ jobs:
             --build-arg PROMPTLAYER_API_KEY="${{ secrets.PROMPTLAYER_API_KEY }}" \
             --build-arg PINECONE_API_KEY="${{ secrets.PINECONE_API_KEY }}" \
             --build-arg OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            --build-arg BACKEND_BASE_URL="${{ vars.BACKEND_BASE_URL }}" \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f ./Dockerfile.deploy .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
