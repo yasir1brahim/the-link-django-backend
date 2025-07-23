@@ -263,7 +263,8 @@ class SemanticallyProcessedSpecItemSerializer(serializers.ModelSerializer):
     section_title = serializers.SerializerMethodField()
 
     def get_section_title(self, obj):
-        return obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(
+        title_override = obj.spec_section.custom_section_title if obj.spec_section else None
+        return title_override or obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(
             obj.masterformat_section.masterformat_number, 'Custom Title')
     
     def get_document_section_link(self, obj):
@@ -303,7 +304,7 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
     parsing_method = serializers.CharField()
 
     def get_section_title(self, obj):
-        return obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(
+        return obj.spec_section.custom_section_title or obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(
             obj.masterformat_section.masterformat_number, 'Custom Title')
 
     def get_doc_link(self, obj):

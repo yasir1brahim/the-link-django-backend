@@ -16,6 +16,7 @@ from apps.deliverables.models import (Project, ProjectMembership, SubmittalItemL
     SpecSection, DocProcessingStatus, UploadedFile, ProjectVersion)
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from ..constants import masterformat_to_section_title_map
 
 class ProjectViewSetQuerySetTests(APITestCase):
     def setUp(self):
@@ -1692,8 +1693,8 @@ class SubmittalItemViewSetTests(APITestCase):
     def set_up_test_data(self, include_illegal_characters=False):
         # Create MasterFormatSections
         mf1 = MasterFormatSection.objects.create(masterformat_number="033001")
-        mf2 = MasterFormatSection.objects.create(masterformat_number="033002")
-        mf3 = MasterFormatSection.objects.create(masterformat_number="033003")
+        mf2 = MasterFormatSection.objects.create(masterformat_number="033002", masterformat_description="Custom MF Title")
+        mf3 = MasterFormatSection.objects.create(masterformat_number="033003", masterformat_description="Custom MF Title 3")
         mf4 = MasterFormatSection.objects.create(masterformat_number="033004")
         
         # Create SpecSections with different processing methods
@@ -1710,7 +1711,8 @@ class SubmittalItemViewSetTests(APITestCase):
         spec3 = SpecSection.objects.create(
             masterformat_section=mf3,
             document=self.document,
-            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS
+            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS,
+            custom_section_title="Custom Spec Section Title 3"
         )
         spec4 = SpecSection.objects.create(
             masterformat_section=mf4,
@@ -2308,6 +2310,22 @@ class SubmittalItemViewSetTests(APITestCase):
         worksheet = workbook.active
         self.assertEqual(worksheet.dimensions, 'A1:G4') # 3 rows of data plus header
         
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
+    def test_export_to_xlsx_with_versioning_active_and_custom_section_title_in_spec_section(self, mock_is_versioning_feature_flag_active):
+        self.set_up_test_data()
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-export', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_1.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        workbook = load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+        self.assertEqual(worksheet.dimensions, 'A1:G6') # 5 rows of data plus header
+        self.assertEqual(worksheet.cell(row=2, column=3).value, masterformat_to_section_title_map.get("033000", "Custom Title"))
+        self.assertEqual(worksheet.cell(row=3, column=3).value, "Custom MF Title")
+        self.assertEqual(worksheet.cell(row=4, column=3).value, "Custom Spec Section Title 3")
+        self.assertEqual(worksheet.cell(row=5, column=3).value, masterformat_to_section_title_map.get("033001", "Custom Title"))
+        self.assertEqual(worksheet.cell(row=6, column=3).value, masterformat_to_section_title_map.get("033001", "Custom Title"))
+
 
 
     @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)

@@ -733,11 +733,13 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         # Write data to the worksheet
         row_idx = 2
         for item in queryset:
+            title_override = item.spec_section.custom_section_title if item.spec_section else None
+
             if len(header_options) == 0:
                 row = [
                     item.submittal_number,
                     item.masterformat_section.masterformat_number,
-                    item.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(item.masterformat_section.masterformat_number, 'Custom Title'),
+                    title_override or item.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(item.masterformat_section.masterformat_number, 'Custom Title'),
                     item.paragraph_number,
                     item.submittal_type,
                     item.submittal_description,
@@ -755,7 +757,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
                     elif header_option['name'] == 'Spec Section':
                         field_value = item.masterformat_section.masterformat_number
                     elif header_option['name'] == 'Section Title':
-                        field_value = item.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(item.masterformat_section.masterformat_number, 'Custom Title')
+                        field_value = title_override or item.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(item.masterformat_section.masterformat_number, 'Custom Title')
                     elif header_option['name'] == 'Paragraph':
                         field_value = item.paragraph_number
                     elif header_option['name'] == 'Submittal Type':

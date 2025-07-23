@@ -13,6 +13,8 @@ from rest_framework.exceptions import ValidationError
 from apps.users.models import CustomUser
 from apps.teams.models import Team
 from rest_framework.test import APIRequestFactory
+from ..constants import masterformat_to_section_title_map
+
 class ProjectReadSerializerTest(TestCase):
     def setUp(self):
         self.user = CustomUser.objects.create(
@@ -434,7 +436,8 @@ class TestSubmittalItemReadSerializer(TestCase):
         self.team = Team.objects.create(name="Test Team")
         self.project = Project.objects.create(name="Test Project", team=self.team)
         self.project_version = ProjectVersion.objects.get(project=self.project)
-        self.masterformat_section = MasterFormatSection.objects.create(masterformat_number="01000")
+        self.masterformat_section = MasterFormatSection.objects.create(masterformat_number="330100")
+        self.masterformat_section_with_custom_title = MasterFormatSection.objects.create(masterformat_number="01000", masterformat_description="Custom Title From MasterFormat")
         self.document = UploadedFile.objects.create(name="Test Document", project=self.project, project_version=self.project_version, document_path="test/path")
         self.spec_section = SpecSection.objects.create(
             masterformat_section=self.masterformat_section,
@@ -442,6 +445,14 @@ class TestSubmittalItemReadSerializer(TestCase):
             processing_status="PROCESSED",
             processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS,
             file_s3_key="test_key"
+        )
+        self.spec_section_with_custom_title = SpecSection.objects.create(
+            masterformat_section=self.masterformat_section,
+            document=self.document,
+            processing_status="PROCESSED",
+            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS,
+            file_s3_key="test_key",
+            custom_section_title="Custom Spec Section Title"
         )
 
         self.submittal_item = SubmittalItem.objects.create(
@@ -456,6 +467,13 @@ class TestSubmittalItemReadSerializer(TestCase):
             masterformat_section=self.masterformat_section,
             document=self.document,
             spec_section=self.spec_section,
+        )
+        self.submittal_item_with_custom_title = SubmittalItem.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            masterformat_section=self.masterformat_section,
+            document=self.document,
+            spec_section=self.spec_section_with_custom_title,
         )
 
     def test_serializer_contains_expected_fields(self):
@@ -516,6 +534,37 @@ class TestSubmittalItemReadSerializer(TestCase):
         
         # Verify the returned URL
         self.assertEqual(doc_link, "https://mocked-url.com")
+
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_section_title_is_sourced_from_spec_section_if_available(self, mock_generate_presigned_url):
+        # Call serializer and access doc_link to trigger the URL generation
+        serializer = SubmittalItemReadSerializer(instance=self.submittal_item_with_custom_title)
+        section_title = serializer.data['section_title']
+        
+        # Verify the returned URL
+        self.assertEqual(section_title, "Custom Spec Section Title")
+
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_section_title_is_sourced_from_masterformat_section_if_no_spec_section_custom_title(self, mock_generate_presigned_url):
+        # Call serializer and access doc_link to trigger the URL generation
+        self.submittal_item.masterformat_section = self.masterformat_section_with_custom_title
+        self.submittal_item.save()
+        serializer = SubmittalItemReadSerializer(instance=self.submittal_item)
+        section_title = serializer.data['section_title']
+        
+        # Verify the returned URL
+        self.assertEqual(section_title, "Custom Title From MasterFormat")
+
+    @patch('apps.deliverables.serializers.s3.generate_presigned_url')
+    def test_section_title_is_sourced_from_map_if_no_masterformat_section_custom_title(self, mock_generate_presigned_url):
+        # Call serializer and access doc_link to trigger the URL generation
+        self.submittal_item.masterformat_section = self.masterformat_section
+        self.submittal_item.save()
+        serializer = SubmittalItemReadSerializer(instance=self.submittal_item)
+        section_title = serializer.data['section_title']
+        
+        # Verify the returned URL
+        self.assertEqual(section_title, masterformat_to_section_title_map["330100"])
 
 
 

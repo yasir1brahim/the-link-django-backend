@@ -170,6 +170,7 @@ class SpecSection(BaseModel):
                 cls.REGEX_UNABLE_TO_DETECT: 2,
             }
     masterformat_section = models.ForeignKey("MasterFormatSection", on_delete=models.CASCADE)
+    custom_section_title = models.CharField(max_length=256, blank=True, null=True)
     document = models.ForeignKey("UploadedFile", on_delete=models.CASCADE)
     processing_status = models.CharField(max_length=256, blank=True, null=True)
     processing_method = models.CharField(max_length=256, blank=True, null=True, choices=ProcessingMethod.choices)
