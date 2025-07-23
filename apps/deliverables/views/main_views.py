@@ -501,6 +501,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         project = get_object_or_404(Project, id=project_id)
         project_version = serializer.validated_data.get('project_version')
         print(f"project_version: {project_version}")
+        print(f"is_versioning_feature_flag_active: {is_versioning_feature_flag_active(self.request.user, project.team)}")
         if is_versioning_feature_flag_active(self.request.user, project.team):
             if not project_version:
                 raise DRFValidationError("project_version_id is required when versioning is active")
@@ -514,17 +515,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         project_id = self.kwargs.get('project_id')
         project = get_object_or_404(Project, id=project_id)
-        project_version = serializer.validated_data.get('project_version')
-        print(f"project_version: {project_version}")
-        if is_versioning_feature_flag_active(self.request.user, project.team):
-            if not project_version:
-                raise DRFValidationError("project_version_id is required when versioning is active")
-            if not project_version.project == project:
-                raise DRFValidationError("project_version_id does not match project_id")
-            serializer.save(updated_by=self.request.user, project_id=self.kwargs.get('project_id'), project_version=project_version)
-        else:
-            project_version = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first()
-            serializer.save(updated_by=self.request.user, project_id=self.kwargs.get('project_id'), project_version=project_version)
+        serializer.save(updated_by=self.request.user, project_id=self.kwargs.get('project_id'))
 
     def _get_sel_filter_vals(self, result_queryset):
         return {
