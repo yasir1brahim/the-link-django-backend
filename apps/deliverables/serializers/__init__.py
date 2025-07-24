@@ -384,11 +384,15 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
                 if added_under_submittal.project_id != validated_data.get('project_id'):
                     raise SubmittalItem.DoesNotExist
                 document = added_under_submittal.document
-                spec_section, created = SpecSection.objects.get_or_create(
-                    masterformat_section=mf_section,
-                    document=document,
-                    custom_section_title=validated_data.get('spec_section_title'),
-                )
+                spec_sections = SpecSection.objects.filter(masterformat_section=mf_section, document=document)
+                if spec_sections.count() > 0:
+                    spec_section = spec_sections.first()
+                else:
+                    spec_section = SpecSection.objects.create(
+                        masterformat_section=mf_section,
+                        document=document,
+                        custom_section_title=validated_data.get('spec_section_title'),
+                    )
             except SubmittalItem.DoesNotExist:
                 added_under_submittal = None
                 document = None
@@ -406,11 +410,15 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
                 document_path=validated_data.get('spec_section'),
             )
             document = sentinel_document
-            spec_section, created = SpecSection.objects.get_or_create(
-                masterformat_section=mf_section,
-                document=document,
-                custom_section_title=validated_data.get('spec_section_title'),
-            )
+            spec_sections = SpecSection.objects.filter(masterformat_section=mf_section, document=document)
+            if spec_sections.count() > 0:
+                spec_section = spec_sections.first()
+            else:
+                spec_section = SpecSection.objects.create(
+                    masterformat_section=mf_section,
+                    document=document,
+                    custom_section_title=validated_data.get('spec_section_title'),
+                )
         
         return SubmittalItem.objects.create(
             project_id=validated_data.get('project_id'),
@@ -440,10 +448,15 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
                     document_path=validated_data.get('spec_section'),
                 )
                 instance.document = sentinel_document
-            spec_section, created = SpecSection.objects.get_or_create(
-                masterformat_section=mf_section,
-                document=instance.document,
-            )
+            spec_sections = SpecSection.objects.filter(masterformat_section=mf_section, document=instance.document)
+            if spec_sections.count() > 0:
+                spec_section = spec_sections.first()
+            else:
+                spec_section = SpecSection.objects.create(
+                    masterformat_section=mf_section,
+                    document=instance.document,
+                    custom_section_title=validated_data.get('spec_section_title'),
+                )
             instance.masterformat_section = mf_section
             instance.spec_section = spec_section
         if validated_data.get('spec_section_title'):
@@ -451,6 +464,8 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
                 instance.spec_section.custom_section_title = validated_data.get('spec_section_title')
                 instance.spec_section.save()
             else:
+                mf_section, created = MasterFormatSection.objects.get_or_create(
+                    masterformat_number=validated_data.get('spec_section'))
                 if not instance.document:
                     sentinel_document = UploadedFile.objects.create(
                         project=instance.project,
@@ -459,11 +474,15 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
                         document_path=validated_data.get('spec_section_title'),
                     )
                     instance.document = sentinel_document
-                spec_section, created = SpecSection.objects.get_or_create(
-                    masterformat_section=instance.masterformat_section,
-                    document=instance.document,
-                    custom_section_title=validated_data.get('spec_section_title'),
-                )
+                spec_sections = SpecSection.objects.filter(masterformat_section=mf_section, document=instance.document)
+                if spec_sections.count() > 0:
+                    spec_section = spec_sections.first()
+                else:
+                    spec_section = SpecSection.objects.create(
+                        masterformat_section=mf_section,
+                        document=instance.document,
+                        custom_section_title=validated_data.get('spec_section_title'),
+                    )
                 instance.spec_section = spec_section
         if validated_data.get('item_desc'):
             instance.submittal_description = validated_data.get('item_desc')
