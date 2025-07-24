@@ -2314,17 +2314,17 @@ class SubmittalItemViewSetTests(APITestCase):
     @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_export_to_xlsx_with_versioning_active_and_custom_section_title_in_spec_section(self, mock_is_versioning_feature_flag_active):
         self.set_up_test_data()
-        self.spec_section = SpecSection.objects.create(
+        spec_section = SpecSection.objects.create(
             masterformat_section=self.masterformat_section,
             document=self.document,
             processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS,
             custom_section_title="Custom Spec Section Title",
         )
-        self.submittal_item_with_document_and_spec_section = SubmittalItem.objects.create(
+        submittal_item_with_document_and_spec_section = SubmittalItem.objects.create(
             project=self.project,
             document=self.document,
             masterformat_section=self.masterformat_section,
-            spec_section=self.spec_section,
+            spec_section=spec_section,
             project_version=self.project_version_1,
         )
 
@@ -2532,13 +2532,14 @@ class SubmittalItemViewSetTests(APITestCase):
         }
         response = self.client.put(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': submittal_item_with_document_and_spec_section.id}), post_payload)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        submittal_item = SubmittalItem.objects.get(id=self.submittal_item_with_document_and_spec_section.id)
+        submittal_item = SubmittalItem.objects.get(id=submittal_item_with_document_and_spec_section.id)
         self.assertEqual(submittal_item.spec_section.custom_section_title, "Updated spec section title")
 
     @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_update_submittal_section_title_on_submittal_without_spec_section_creates_spec_section(self, mock_is_versioning_feature_flag_active):
         self.client.force_authenticate(user=self.user)
         post_payload = {
+            'spec_section': "111111",
             'spec_section_title': "Updated spec section title",
             'item_desc': "Updated item description",
             'para_context': "Updated para context",
