@@ -16,6 +16,7 @@ from apps.deliverables.models import (Project, ProjectMembership, SubmittalItemL
     SpecSection, DocProcessingStatus, UploadedFile, ProjectVersion)
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from ..constants import masterformat_to_section_title_map
 
 class ProjectViewSetQuerySetTests(APITestCase):
     def setUp(self):
@@ -1658,6 +1659,7 @@ class SubmittalItemViewSetTests(APITestCase):
             md5='1234567890',
             processing_status=DocProcessingStatus.PROCESSED,
         )
+        
 
     def test_user_can_see_submittal_items_for_their_project(self):
         """Test that users can see submittal items for their project"""
@@ -1692,8 +1694,8 @@ class SubmittalItemViewSetTests(APITestCase):
     def set_up_test_data(self, include_illegal_characters=False):
         # Create MasterFormatSections
         mf1 = MasterFormatSection.objects.create(masterformat_number="033001")
-        mf2 = MasterFormatSection.objects.create(masterformat_number="033002")
-        mf3 = MasterFormatSection.objects.create(masterformat_number="033003")
+        mf2 = MasterFormatSection.objects.create(masterformat_number="033002", masterformat_description="Custom MF Title")
+        mf3 = MasterFormatSection.objects.create(masterformat_number="033003", masterformat_description="Custom MF Title 3")
         mf4 = MasterFormatSection.objects.create(masterformat_number="033004")
         
         # Create SpecSections with different processing methods
@@ -1710,7 +1712,8 @@ class SubmittalItemViewSetTests(APITestCase):
         spec3 = SpecSection.objects.create(
             masterformat_section=mf3,
             document=self.document,
-            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS
+            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS,
+            custom_section_title="Custom Spec Section Title 3"
         )
         spec4 = SpecSection.objects.create(
             masterformat_section=mf4,
@@ -2308,21 +2311,50 @@ class SubmittalItemViewSetTests(APITestCase):
         worksheet = workbook.active
         self.assertEqual(worksheet.dimensions, 'A1:G4') # 3 rows of data plus header
         
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
+    def test_export_to_xlsx_with_versioning_active_and_custom_section_title_in_spec_section(self, mock_is_versioning_feature_flag_active):
+        self.set_up_test_data()
+        self.spec_section = SpecSection.objects.create(
+            masterformat_section=self.masterformat_section,
+            document=self.document,
+            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS,
+            custom_section_title="Custom Spec Section Title",
+        )
+        self.submittal_item_with_document_and_spec_section = SubmittalItem.objects.create(
+            project=self.project,
+            document=self.document,
+            masterformat_section=self.masterformat_section,
+            spec_section=self.spec_section,
+            project_version=self.project_version_1,
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('submittal-item-export', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_1.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        workbook = load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+        self.assertEqual(worksheet.dimensions, 'A1:G6') # 5 rows of data plus header
+        self.assertEqual(worksheet.cell(row=2, column=3).value, masterformat_to_section_title_map.get("033000", "Custom Title"))
+        self.assertEqual(worksheet.cell(row=3, column=3).value, "Custom MF Title")
+        self.assertEqual(worksheet.cell(row=4, column=3).value, "Custom Spec Section Title 3")
+        self.assertEqual(worksheet.cell(row=5, column=3).value, masterformat_to_section_title_map.get("033001", "Custom Title"))
+        self.assertEqual(worksheet.cell(row=6, column=3).value, masterformat_to_section_title_map.get("033001", "Custom Title"))
 
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_export_to_xlsx_with_versioning_active_and_no_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
         self.client.force_authenticate(user=self.user)
         response = self.client.get(reverse('submittal-item-export', kwargs={'project_id': self.project.id}))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_export_to_xlsx_with_versioning_active_and_mismatched_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
         self.client.force_authenticate(user=self.user)
         response = self.client.get(reverse('submittal-item-export', kwargs={'project_id': self.project.id}) + '?project_version_id=9999')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=False)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=False)
     def test_export_to_xlsx_with_versioning_inactive(self, mock_is_versioning_feature_flag_active):
         self.set_up_test_data()
         self.client.force_authenticate(user=self.user)
@@ -2332,7 +2364,7 @@ class SubmittalItemViewSetTests(APITestCase):
         worksheet = workbook.active
         self.assertEqual(worksheet.dimensions, 'A1:G8') # 7 rows of data plus header
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_export_to_jet_build_with_versioning_active(self, mock_is_versioning_feature_flag_active):
         self.set_up_test_data()
         self.client.force_authenticate(user=self.user)
@@ -2349,19 +2381,19 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(worksheet.dimensions, 'A1:C5') # 5 rows of data plus header
 
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_export_to_jet_build_with_versioning_active_and_no_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
         self.client.force_authenticate(user=self.user)
         response = self.client.get(reverse('submittal-item-export-jet-build', kwargs={'project_id': self.project.id}))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_export_to_jet_build_with_versioning_active_and_mismatched_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
         self.client.force_authenticate(user=self.user)
         response = self.client.get(reverse('submittal-item-export-jet-build', kwargs={'project_id': self.project.id}) + '?project_version_id=9999')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=False)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=False)
     def test_export_to_jet_build_with_versioning_inactive(self, mock_is_versioning_feature_flag_active):
         self.set_up_test_data()
         self.client.force_authenticate(user=self.user)
@@ -2386,7 +2418,7 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(1, len(SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111")))
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=False)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=False)
     def test_create_submittal_with_versioning_inactive_uses_default_project_version(self, mock_is_versioning_feature_flag_active):
         self.client.force_authenticate(user=self.user)
         post_payload = {
@@ -2404,26 +2436,32 @@ class SubmittalItemViewSetTests(APITestCase):
         default_project_version = ProjectVersion.objects.filter(project=self.project).order_by('-created_at').first()
         self.assertEqual(default_project_version, SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111").first().project_version)
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_create_submittal_with_versioning_active_uses_provided_project_version(self, mock_is_versioning_feature_flag_active):
         self.client.force_authenticate(user=self.user)
         project_version_3 = ProjectVersion.objects.create(project=self.project, version_number=3, version_name="Version 3")
         post_payload = {
-            'document': self.document.id,
             'spec_section': "111111",  # new spec section
             'item_desc': "Test",
             'para_context': "Test context",
             'para_no': "1.1",
             'type': "Test type",
             'project_version': self.project_version_2.id,
+            'spec_section_title': "Test spec section title",
         }
         self.assertEqual(0, len(SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111")))
         response = self.client.post(reverse('submittal-item-list', kwargs={'project_id': self.project.id}), post_payload)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(1, len(SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111")))
-        self.assertEqual(self.project_version_2, SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111").first().project_version)
+        submittal_item = SubmittalItem.objects.filter(masterformat_section__masterformat_number="111111").first()
+        self.assertEqual(self.project_version_2, submittal_item.project_version)
+        # Test sentinel document is created
+        self.assertEqual(submittal_item.document.name, "111111")
+        self.assertEqual(submittal_item.document.document_path, "111111")
+        self.assertEqual(submittal_item.spec_section.document, submittal_item.document)
+        self.assertEqual(submittal_item.spec_section.custom_section_title, "Test spec section title")
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_create_submittal_with_versioning_active_and_no_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
         self.client.force_authenticate(user=self.user)
         post_payload = {
@@ -2437,21 +2475,7 @@ class SubmittalItemViewSetTests(APITestCase):
         response = self.client.post(reverse('submittal-item-list', kwargs={'project_id': self.project.id}), post_payload)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
-    def test_update_submittal_with_versioning_active_and_no_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
-        self.client.force_authenticate(user=self.user)
-        post_payload = {
-            'document': self.document.id,
-            'spec_section': "111111",  # new spec section
-            'item_desc': "Test",
-            'para_context': "Test context",
-            'para_no': "1.1",
-            'type': "Test type",
-        }
-        response = self.client.put(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': self.submittal_item.id}), post_payload)
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_update_submittal_with_versioning_active_and_project_version_id_does_not_match_project_id_raises_400(self, mock_is_versioning_feature_flag_active):
         self.client.force_authenticate(user=self.user)
         post_payload = {
@@ -2466,25 +2490,65 @@ class SubmittalItemViewSetTests(APITestCase):
         response = self.client.put(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': self.submittal_item.id}), post_payload)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch('apps.deliverables.views.is_versioning_feature_flag_active', return_value=True)
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_update_submittal_with_versioning_active_and_project_version_id_matches_project_id_updates_submittal(self, mock_is_versioning_feature_flag_active):
         self.client.force_authenticate(user=self.user)
         post_payload = {
-            'document': self.document.id,
             'spec_section': "111111",  # new spec section
             'item_desc': "Updated item description",
             'para_context': "Updated para context",
             'para_no': "1.1",
             'type': "Updated type",
-            'project_version': self.project_version_2.id,
         }
         response = self.client.put(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': self.submittal_item.id}), post_payload)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(SubmittalItem.objects.get(id=self.submittal_item.id).submittal_description, "Updated item description")
         self.assertEqual(SubmittalItem.objects.get(id=self.submittal_item.id).submittal_content, "Updated para context")
         self.assertEqual(SubmittalItem.objects.get(id=self.submittal_item.id).submittal_type, "Updated type")
-        self.assertEqual(self.project_version_2, SubmittalItem.objects.get(id=self.submittal_item.id).project_version)
         self.assertEqual(self.user, SubmittalItem.objects.get(id=self.submittal_item.id).updated_by)
+
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
+    def test_update_submittal_section_title_propagates_to_spec_section(self, mock_is_versioning_feature_flag_active):
+        spec_section = SpecSection.objects.create(
+            masterformat_section=self.masterformat_section,
+            document=self.document,
+            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS,
+            custom_section_title="Custom Spec Section Title",
+        )
+        submittal_item_with_document_and_spec_section = SubmittalItem.objects.create(
+            project=self.project,
+            document=self.document,
+            masterformat_section=self.masterformat_section,
+            spec_section=spec_section,
+            project_version=self.project_version_1,
+        )
+        self.client.force_authenticate(user=self.user)
+        post_payload = {
+            'spec_section_title': "Updated spec section title",
+            'item_desc': "Updated item description",
+            'para_context': "Updated para context",
+            'para_no': "1.1",
+            'type': "Updated type",
+        }
+        response = self.client.put(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': submittal_item_with_document_and_spec_section.id}), post_payload)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        submittal_item = SubmittalItem.objects.get(id=self.submittal_item_with_document_and_spec_section.id)
+        self.assertEqual(submittal_item.spec_section.custom_section_title, "Updated spec section title")
+
+    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
+    def test_update_submittal_section_title_on_submittal_without_spec_section_creates_spec_section(self, mock_is_versioning_feature_flag_active):
+        self.client.force_authenticate(user=self.user)
+        post_payload = {
+            'spec_section_title': "Updated spec section title",
+            'item_desc': "Updated item description",
+            'para_context': "Updated para context",
+            'para_no': "1.1",
+            'type': "Updated type",
+        }
+        response = self.client.put(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': self.submittal_item.id}), post_payload)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        submittal_item = SubmittalItem.objects.get(id=self.submittal_item.id)
+        self.assertEqual(submittal_item.spec_section.custom_section_title, "Updated spec section title")
 
     def test_delete_submittal_item(self):
         self.client.force_authenticate(user=self.user)
@@ -2502,7 +2566,6 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(SubmittalItem.objects.count(), 1)
         self.assertEqual(SubmittalItem.objects.get(id=child_item.id).added_under_submittal, None)
-        
 
 
 class ProjectArchiveTests(APITestCase):

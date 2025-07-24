@@ -263,7 +263,8 @@ class SemanticallyProcessedSpecItemSerializer(serializers.ModelSerializer):
     section_title = serializers.SerializerMethodField()
 
     def get_section_title(self, obj):
-        return obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(
+        title_override = obj.spec_section.custom_section_title if obj.spec_section else None
+        return title_override or obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(
             obj.masterformat_section.masterformat_number, 'Custom Title')
     
     def get_document_section_link(self, obj):
@@ -303,7 +304,8 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
     parsing_method = serializers.CharField()
 
     def get_section_title(self, obj):
-        return obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(
+        title_override = obj.spec_section.custom_section_title if obj.spec_section else None
+        return title_override or obj.masterformat_section.masterformat_description or masterformat_to_section_title_map.get(
             obj.masterformat_section.masterformat_number, 'Custom Title')
 
     def get_doc_link(self, obj):
@@ -351,6 +353,7 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
                                                     required=False)
 
     spec_section = serializers.CharField(required=False)
+    spec_section_title = serializers.CharField(required=False)
     item_desc = serializers.CharField(required=False)
     para_context = serializers.CharField(required=False)
     para_no = serializers.CharField(required=False)
@@ -381,7 +384,11 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
                 if added_under_submittal.project_id != validated_data.get('project_id'):
                     raise SubmittalItem.DoesNotExist
                 document = added_under_submittal.document
-                spec_section = added_under_submittal.spec_section
+                spec_section, created = SpecSection.objects.get_or_create(
+                    masterformat_section=mf_section,
+                    document=document,
+                    custom_section_title=validated_data.get('spec_section_title'),
+                )
             except SubmittalItem.DoesNotExist:
                 added_under_submittal = None
                 document = None
@@ -390,6 +397,21 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             added_under_submittal = None
             document = None
             spec_section = None
+
+        if not document:
+            sentinel_document = UploadedFile.objects.create(
+                project_id=validated_data.get('project_id'),
+                project_version=validated_data.get('project_version'),
+                name=validated_data.get('spec_section'),
+                document_path=validated_data.get('spec_section'),
+            )
+            document = sentinel_document
+            spec_section, created = SpecSection.objects.get_or_create(
+                masterformat_section=mf_section,
+                document=document,
+                custom_section_title=validated_data.get('spec_section_title'),
+            )
+        
         return SubmittalItem.objects.create(
             project_id=validated_data.get('project_id'),
             project_version=validated_data.get('project_version'),
@@ -410,7 +432,39 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
         if validated_data.get('spec_section'):
             mf_section, created = MasterFormatSection.objects.get_or_create(
                 masterformat_number=validated_data.get('spec_section'))
-        instance.masterformat_section = mf_section
+            if not instance.document:
+                sentinel_document = UploadedFile.objects.create(
+                    project_id=instance.project_id,
+                    project_version=instance.project_version,
+                    name=validated_data.get('spec_section'),
+                    document_path=validated_data.get('spec_section'),
+                )
+                instance.document = sentinel_document
+            spec_section, created = SpecSection.objects.get_or_create(
+                masterformat_section=mf_section,
+                document=instance.document,
+            )
+            instance.masterformat_section = mf_section
+            instance.spec_section = spec_section
+        if validated_data.get('spec_section_title'):
+            if instance.spec_section:
+                instance.spec_section.custom_section_title = validated_data.get('spec_section_title')
+                instance.spec_section.save()
+            else:
+                if not instance.document:
+                    sentinel_document = UploadedFile.objects.create(
+                        project=instance.project,
+                        project_version=instance.project_version,
+                        name=validated_data.get('spec_section_title'),
+                        document_path=validated_data.get('spec_section_title'),
+                    )
+                    instance.document = sentinel_document
+                spec_section, created = SpecSection.objects.get_or_create(
+                    masterformat_section=instance.masterformat_section,
+                    document=instance.document,
+                    custom_section_title=validated_data.get('spec_section_title'),
+                )
+                instance.spec_section = spec_section
         if validated_data.get('item_desc'):
             instance.submittal_description = validated_data.get('item_desc')
         if validated_data.get('para_context'):
@@ -419,8 +473,6 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             instance.paragraph_number = validated_data.get('para_no')
         if validated_data.get('type'):
             instance.submittal_type = validated_data.get('type')
-        if validated_data.get('project_version'):
-            instance.project_version = validated_data.get('project_version')
         instance.updated_by = validated_data.get('updated_by')
         instance.save()
         return instance
@@ -431,6 +483,7 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             'document',
             'updated_by',
             'spec_section',
+            'spec_section_title',
             'item_desc',
             'para_context',
             'project_version',
