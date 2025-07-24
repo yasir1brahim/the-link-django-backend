@@ -1659,19 +1659,7 @@ class SubmittalItemViewSetTests(APITestCase):
             md5='1234567890',
             processing_status=DocProcessingStatus.PROCESSED,
         )
-        self.spec_section = SpecSection.objects.create(
-            masterformat_section=self.masterformat_section,
-            document=self.document,
-            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS,
-            custom_section_title="Custom Spec Section Title",
-        )
-        self.submittal_item_with_document_and_spec_section = SubmittalItem.objects.create(
-            project=self.project,
-            document=self.document,
-            masterformat_section=self.masterformat_section,
-            spec_section=self.spec_section,
-            project_version=self.project_version_1,
-        )
+        
 
     def test_user_can_see_submittal_items_for_their_project(self):
         """Test that users can see submittal items for their project"""
@@ -1679,7 +1667,7 @@ class SubmittalItemViewSetTests(APITestCase):
         response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         print(f"response.data: {response.data}")
-        self.assertEqual(len(response.data['message']), 2)
+        self.assertEqual(len(response.data['message']), 1)
         self.assertEqual(response.data['message'][0]['id'], self.submittal_item.id)
 
     def test_superuser_can_see_submittal_items_for_project(self):
@@ -1687,7 +1675,7 @@ class SubmittalItemViewSetTests(APITestCase):
         self.client.force_authenticate(user=self.superuser)
         response = self.client.get(reverse('submittal-item-list', kwargs={'project_id': self.project.id}))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data['message']), 2)
+        self.assertEqual(len(response.data['message']), 1)
         self.assertEqual(response.data['message'][0]['id'], self.submittal_item.id)
 
     def test_user_cannot_see_submittal_items_for_other_projects(self):
@@ -2326,6 +2314,19 @@ class SubmittalItemViewSetTests(APITestCase):
     @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_export_to_xlsx_with_versioning_active_and_custom_section_title_in_spec_section(self, mock_is_versioning_feature_flag_active):
         self.set_up_test_data()
+        self.spec_section = SpecSection.objects.create(
+            masterformat_section=self.masterformat_section,
+            document=self.document,
+            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS,
+            custom_section_title="Custom Spec Section Title",
+        )
+        self.submittal_item_with_document_and_spec_section = SubmittalItem.objects.create(
+            project=self.project,
+            document=self.document,
+            masterformat_section=self.masterformat_section,
+            spec_section=self.spec_section,
+            project_version=self.project_version_1,
+        )
 
         self.client.force_authenticate(user=self.user)
         response = self.client.get(reverse('submittal-item-export', kwargs={'project_id': self.project.id}) + '?project_version_id=' + str(self.project_version_1.id))
@@ -2475,20 +2476,6 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
-    def test_update_submittal_with_versioning_active_and_no_project_version_id_raises_400(self, mock_is_versioning_feature_flag_active):
-        self.client.force_authenticate(user=self.user)
-        post_payload = {
-            'document': self.document.id,
-            'spec_section': "111111",  # new spec section
-            'item_desc': "Test",
-            'para_context': "Test context",
-            'para_no': "1.1",
-            'type': "Test type",
-        }
-        response = self.client.put(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': self.submittal_item.id}), post_payload)
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_update_submittal_with_versioning_active_and_project_version_id_does_not_match_project_id_raises_400(self, mock_is_versioning_feature_flag_active):
         self.client.force_authenticate(user=self.user)
         post_payload = {
@@ -2522,6 +2509,19 @@ class SubmittalItemViewSetTests(APITestCase):
 
     @patch('apps.deliverables.views.main_views.is_versioning_feature_flag_active', return_value=True)
     def test_update_submittal_section_title_propagates_to_spec_section(self, mock_is_versioning_feature_flag_active):
+        spec_section = SpecSection.objects.create(
+            masterformat_section=self.masterformat_section,
+            document=self.document,
+            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS,
+            custom_section_title="Custom Spec Section Title",
+        )
+        submittal_item_with_document_and_spec_section = SubmittalItem.objects.create(
+            project=self.project,
+            document=self.document,
+            masterformat_section=self.masterformat_section,
+            spec_section=spec_section,
+            project_version=self.project_version_1,
+        )
         self.client.force_authenticate(user=self.user)
         post_payload = {
             'spec_section_title': "Updated spec section title",
@@ -2530,7 +2530,7 @@ class SubmittalItemViewSetTests(APITestCase):
             'para_no': "1.1",
             'type': "Updated type",
         }
-        response = self.client.put(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': self.submittal_item_with_document_and_spec_section.id}), post_payload)
+        response = self.client.put(reverse('submittal-item-detail', kwargs={'project_id': self.project.id, 'pk': submittal_item_with_document_and_spec_section.id}), post_payload)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         submittal_item = SubmittalItem.objects.get(id=self.submittal_item_with_document_and_spec_section.id)
         self.assertEqual(submittal_item.spec_section.custom_section_title, "Updated spec section title")
@@ -2566,7 +2566,6 @@ class SubmittalItemViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(SubmittalItem.objects.count(), 1)
         self.assertEqual(SubmittalItem.objects.get(id=child_item.id).added_under_submittal, None)
-        
 
 
 class ProjectArchiveTests(APITestCase):

@@ -384,7 +384,11 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
                 if added_under_submittal.project_id != validated_data.get('project_id'):
                     raise SubmittalItem.DoesNotExist
                 document = added_under_submittal.document
-                spec_section = added_under_submittal.spec_section
+                spec_section, created = SpecSection.objects.get_or_create(
+                    masterformat_section=mf_section,
+                    document=document,
+                    custom_section_title=validated_data.get('spec_section_title'),
+                )
             except SubmittalItem.DoesNotExist:
                 added_under_submittal = None
                 document = None
