@@ -330,6 +330,8 @@ class ProjectVersionViewSet(viewsets.ModelViewSet):
         queryset = self.queryset.filter(project_id=project_id)
         if self.action == 'list':
             queryset = queryset.exclude(is_archived=True)
+        elif self.action == 'archived':
+            queryset = queryset.filter(is_archived=True)
         return queryset
 
     def perform_create(self, serializer):
@@ -349,6 +351,13 @@ class ProjectVersionViewSet(viewsets.ModelViewSet):
             {"detail": "Cannot delete project versions, use archive instead"},
             status=status.HTTP_405_METHOD_NOT_ALLOWED
         )
+
+    @action(detail=False, methods=['get'], url_path='archived')
+    def archived(self, request, project_id=None):
+        """Retrieve all archived project versions for a given project."""
+        queryset = self.get_queryset().filter(is_archived=True)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
     
     @action(detail=True, methods=['post'], url_path='archive')
     def archive(self, request, pk=None, project_id=None):
