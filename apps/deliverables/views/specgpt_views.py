@@ -49,7 +49,7 @@ from apps.deliverables.models import (
 )
 
 from langchain.memory import ConversationBufferMemory
-from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv
+from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv, merge_tables_from_text
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
@@ -544,22 +544,23 @@ class ChatViewSet(viewsets.ModelViewSet):
                 )
                 chunk_results.append(chunk_completion.choices[0].message.content)
             
-            # Stitch results together
+            # Stitch results together deterministically
             print("Separate agent responses")
             print(chunk_results)
-            print("Rejoin prompt")
-            print(developer_prompt_to_rejoin_separate_logs)
-            rejoin_prompt = developer_prompt_to_rejoin_separate_logs.format(separate_agent_responses="\n\n".join(chunk_results))
-            rejoin_completion = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": rejoin_prompt
-                    }
-                ]
-            )
-            final_answer = rejoin_completion.choices[0].message.content
+            print("Merging tables deterministically...")
+            
+            # Combine all chunk results
+            combined_text = "\n\n".join(chunk_results)
+            
+            # Extract and merge all tables from the combined text
+            merged_table = merge_tables_from_text(combined_text)
+            
+            if merged_table:
+                # If we found and merged tables, return the merged table
+                final_answer = merged_table
+            else:
+                # If no tables found, just join the responses with newlines
+                final_answer = "\n\n".join(chunk_results)
         else:
             # Process normally with single request
             completion = client.chat.completions.create(
