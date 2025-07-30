@@ -7,7 +7,9 @@ from apps.deliverables.utils import (
     extract_and_convert_tables_to_csv,
     extract_first_table_to_csv,
     format_anchor_repr,
-    ANCHOR_REPR_DELIMITER
+    ANCHOR_REPR_DELIMITER,
+    merge_markdown_tables,
+    merge_tables_from_text
 )
 
 
@@ -412,6 +414,94 @@ class TestEdgeCases(TestCase):
         self.assertIn("!@#$%^&*()", csv_content)
         self.assertIn("ñáéíóú", csv_content)
 
+    def test_merge_markdown_tables_single_table(self):
+        """Test merging a single table returns the same table."""
+        table = "| Name | Age |\n|------|-----|\n| John | 25  |"
+        merged = merge_markdown_tables([table])
+        self.assertEqual(merged.strip(), table.strip())
+
+    def test_merge_markdown_tables_multiple_tables_same_headers(self):
+        """Test merging multiple tables with the same headers."""
+        table1 = "| Name | Age |\n|------|-----|\n| John | 25 |"
+        table2 = "| Name | Age |\n|------|-----|\n| Jane | 30 |"
+        merged = merge_markdown_tables([table1, table2])
+        
+        expected = "| Name | Age |\n|------|-----|\n| John | 25 |\n| Jane | 30 |"
+        self.assertEqual(merged.strip(), expected.strip())
+
+    def test_merge_markdown_tables_empty_list(self):
+        """Test merging empty list returns empty string."""
+        merged = merge_markdown_tables([])
+        self.assertEqual(merged, "")
+
+    def test_merge_tables_from_text(self):
+        """Test merging tables from text content."""
+        text = "Table 1:\n| A | B |\n|---|---|\n| 1 | 2 |\n\nTable 2:\n| A | B |\n|---|---|\n| 3 | 4 |"
+        merged = merge_tables_from_text(text)
+        
+        expected = "| A | B |\n|-----|-----|\n| 1 | 2 |\n| 3 | 4 |"
+        self.assertEqual(merged.strip(), expected.strip())
+
+    def test_merge_tables_from_text_no_tables(self):
+        """Test merging text with no tables returns empty string."""
+        text = "This is just some text without any tables."
+        merged = merge_tables_from_text(text)
+        self.assertEqual(merged, "")
+    
+#     def test_merge_tables_from_text_with_qa_example(self):
+#         """Test merging tables from text content."""
+#         text1 = """Spec Section # | Spec Section Name | Deliverable Type | When Due | Responsible Party | Exact Requirement Text
+# --- | --- | --- | --- | --- | ---
+# 01 2600 | CONTRACT MODIFICATION PROCEDURES | Survey Data | If requested | Contractor | If requested, furnish survey data to substantiate quantities.
+# 01 3100 | PROJECT MANAGEMENT AND COORDINATION | Field Report Log | Submit log weekly | Contractor | Field Report Log: Prepare, maintain, and submit a tabular log of Architect’s Field Report items organized by each item number. Submit log weekly. Include the following: [list omitted for brevity].
+# 01 3200 | CONSTRUCTION PROGRESS DOCUMENTATION | Daily Construction Report | Submit at monthly intervals | Contractor | Daily Construction Reports: Submit at monthly intervals.
+# 01 3200 | CONSTRUCTION PROGRESS DOCUMENTATION | Field Condition Reports | Submit at time of discovery of differing conditions | Contractor | Field Condition Reports: Submit at time of discovery of differing conditions.
+# 01 3200 | CONSTRUCTION PROGRESS DOCUMENTATION | Special Reports | Submit at time of unusual event | Contractor | Special Reports: Submit at time of unusual event.
+# 01 3200 | CONSTRUCTION PROGRESS DOCUMENTATION | Contractor's Construction Schedule Updating | At monthly intervals | Contractor | Contractor's Construction Schedule Updating: At monthly intervals, update schedule to reflect actual construction progress and activities.
+# 01 3233 | PHOTOGRAPHIC DOCUMENTATION | Key Plan | Submit with photographic documentation | Contractor | Key Plan: Submit key plan of Project site and building with notation of vantage points marked for location and direction of each photograph and video recording.
+# 01 3233 | PHOTOGRAPHIC DOCUMENTATION | Digital Photographs | Submit image files within three days of taking photographs | Contractor | Digital Photographs: Submit image files within three days of taking photographs.
+# 01 3233 | PHOTOGRAPHIC DOCUMENTATION | Construction Photographs | Submit two prints of each photographic view within seven days of taking photographs | Contractor | Construction Photographs: Submit two prints of each photographic view within seven days of taking photographs.
+# 01 3233 | PHOTOGRAPHIC DOCUMENTATION | Video Recordings | Submit video recordings within seven days of recording | Contractor | Video Recordings: Submit video recordings within seven days of recording.
+# 01 4000 | QUALITY REQUIREMENTS | Contractor's Quality-Control Plan | Within 10 days of Notice to Proceed, and not less than five days prior to preconstruction conference | Contractor | Quality-Control Plan, General: Submit quality-control plan within 10 days of Notice to Proceed, and not less than five days prior to preconstruction conference.
+# 01 4000 | QUALITY REQUIREMENTS | Schedule of Tests and Inspections | Submit in tabular form concurrent with Contractor's construction schedule | Contractor | Schedule of Tests and Inspections: Prepare in tabular form and include the following: [list omitted for brevity].
+# """
+#         text2 = """Spec Section # | Spec Section Name | Deliverable Type | When Due | Responsible Party | Exact Requirement Text
+# --- | --- | --- | --- | --- | ---
+# 09 3000 | TILING | Field Report: Results of In-Place Waterproof Testing | Not stated | Not stated | Field Report: Results of in-place waterproof testing.
+# 09 6300 | STONE FLOORING | Shop Drawings | Not stated | Contractor | Shop Drawings: Submit cutting and setting drawings indicating sizes, dimensions, sections and profiles of stone units, arrangement and provisions for jointing, supporting, anchoring and bonding stonework; and other details showing relationships with, attachment to related work.
+# 09 7814 | METAL ACOUSTICAL PANEL WALLS | Extra Stock Material | At closeout | Contractor | Extra Stock Material: Furnish for each size, pattern and color installed in the Work. Deliver in manufacturer’s original packaging and store at the project site where directed by the Owner.
+# 09 7814 | METAL ACOUSTICAL PANEL WALLS | Record documents | At closeout | Contractor | Record documents
+# 09 5113 | ACOUSTICAL PANEL CEILINGS | Extra Stock Material | At closeout | Contractor | Extra Stock Material: Furnish for each size, pattern and color installed in the Work. Deliver in manufacturer’s original packaging and store at the project site where directed by the Owner.
+# 09 5113 | ACOUSTICAL PANEL CEILINGS | Maintenance Manual | At closeout | Contractor | Maintenance Manual: Assemble into binder. Maintenance Practices: Manufacturer's recommended maintenance practices describing the materials, devices and procedures to be followed in cleaning and maintaining the Work.
+# 09 5113 | ACOUSTICAL PANEL CEILINGS | Field Test Reports | Not stated | Testing Laboratory | Field Test: Testing laboratory, engaged at the Owner’s expense, will perform the following activities at the Owner’s discretion. Work not meeting specified requirements and other units having similar deficiencies shall be corrected at no cost to the Owner. Perform the following tests and inspections of completed installations of acoustical panel ceiling hangers and anchors and fasteners in successive stages.
+
+# (Note: Only the first 50 distinct deliverables were listed above. For brevity, repetitive, non-deliverable, or plainly referenced items without explicit submission instructions have been omitted, as required. If all report requirements from every section, including all recurring submittals across sections, are needed, more rows will be provided per the source text.)"""
+
+#         expected = """Spec Section # | Spec Section Name | Deliverable Type | When Due | Responsible Party | Exact Requirement Text|
+# --- | --- | --- | --- | --- | ---|
+# 01 2600 | CONTRACT MODIFICATION PROCEDURES | Survey Data | If requested | Contractor | If requested, furnish survey data to substantiate quantities.|
+# 01 3100 | PROJECT MANAGEMENT AND COORDINATION | Field Report Log | Submit log weekly | Contractor | Field Report Log: Prepare, maintain, and submit a tabular log of Architect’s Field Report items organized by each item number. Submit log weekly. Include the following: [list omitted for brevity].|
+# 01 3200 | CONSTRUCTION PROGRESS DOCUMENTATION | Daily Construction Report | Submit at monthly intervals | Contractor | Daily Construction Reports: Submit at monthly intervals.|
+# 01 3200 | CONSTRUCTION PROGRESS DOCUMENTATION | Field Condition Reports | Submit at time of discovery of differing conditions | Contractor | Field Condition Reports: Submit at time of discovery of differing conditions.|
+# 01 3200 | CONSTRUCTION PROGRESS DOCUMENTATION | Special Reports | Submit at time of unusual event | Contractor | Special Reports: Submit at time of unusual event.|
+# 01 3200 | CONSTRUCTION PROGRESS DOCUMENTATION | Contractor's Construction Schedule Updating | At monthly intervals | Contractor | Contractor's Construction Schedule Updating: At monthly intervals, update schedule to reflect actual construction progress and activities.|
+# 01 3233 | PHOTOGRAPHIC DOCUMENTATION | Key Plan | Submit with photographic documentation | Contractor | Key Plan: Submit key plan of Project site and building with notation of vantage points marked for location and direction of each photograph and video recording.|
+# 01 3233 | PHOTOGRAPHIC DOCUMENTATION | Digital Photographs | Submit image files within three days of taking photographs | Contractor | Digital Photographs: Submit image files within three days of taking photographs.|
+# 01 3233 | PHOTOGRAPHIC DOCUMENTATION | Construction Photographs | Submit two prints of each photographic view within seven days of taking photographs | Contractor | Construction Photographs: Submit two prints of each photographic view within seven days of taking photographs.|
+# 01 3233 | PHOTOGRAPHIC DOCUMENTATION | Video Recordings | Submit video recordings within seven days of recording | Contractor | Video Recordings: Submit video recordings within seven days of recording.|
+# 01 4000 | QUALITY REQUIREMENTS | Contractor's Quality-Control Plan | Within 10 days of Notice to Proceed, and not less than five days prior to preconstruction conference | Contractor | Quality-Control Plan, General: Submit quality-control plan within 10 days of Notice to Proceed, and not less than five days prior to preconstruction conference.|
+# 01 4000 | QUALITY REQUIREMENTS | Schedule of Tests and Inspections | Submit in tabular form concurrent with Contractor's construction schedule | Contractor | Schedule of Tests and Inspections: Prepare in tabular form and include the following: [list omitted for brevity].|
+# 09 3000 | TILING | Field Report: Results of In-Place Waterproof Testing | Not stated | Not stated | Field Report: Results of in-place waterproof testing.|
+# 09 6300 | STONE FLOORING | Shop Drawings | Not stated | Contractor | Shop Drawings: Submit cutting and setting drawings indicating sizes, dimensions, sections and profiles of stone units, arrangement and provisions for jointing, supporting, anchoring and bonding stonework; and other details showing relationships with, attachment to related work.|
+# 09 7814 | METAL ACOUSTICAL PANEL WALLS | Extra Stock Material | At closeout | Contractor | Extra Stock Material: Furnish for each size, pattern and color installed in the Work. Deliver in manufacturer’s original packaging and store at the project site where directed by the Owner.|
+# 09 7814 | METAL ACOUSTICAL PANEL WALLS | Record documents | At closeout | Contractor | Record documents|
+# 09 5113 | ACOUSTICAL PANEL CEILINGS | Extra Stock Material | At closeout | Contractor | Extra Stock Material: Furnish for each size, pattern and color installed in the Work. Deliver in manufacturer’s original packaging and store at the project site where directed by the Owner.|
+# 09 5113 | ACOUSTICAL PANEL CEILINGS | Maintenance Manual | At closeout | Contractor | Maintenance Manual: Assemble into binder. Maintenance Practices: Manufacturer's recommended maintenance practices describing the materials, devices and procedures to be followed in cleaning and maintaining the Work.|
+# 09 5113 | ACOUSTICAL PANEL CEILINGS | Field Test Reports | Not stated | Testing Laboratory | Field Test: Testing laboratory, engaged at the Owner’s expense, will perform the following activities at the Owner’s discretion. Work not meeting specified requirements and other units having similar deficiencies shall be corrected at no cost to the Owner. Perform the following tests and inspections of completed installations of acoustical panel ceiling hangers and anchors and fasteners in successive stages.|"""
+
+#         merged = merge_tables_from_text(text1 + "\n\n" + text2)
+#         print(merged)
+#         self.assertEqual(merged, expected)
 
 if __name__ == '__main__':
     unittest.main() 
