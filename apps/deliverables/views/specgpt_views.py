@@ -1,6 +1,7 @@
 import datetime
 import json
 import csv
+import re
 from uuid import UUID
 from typing import Any, List, Optional
 from enum import Enum
@@ -67,7 +68,9 @@ def split_file_content_into_chunks(
         file_content: str,
         max_tokens_per_chunk: int = settings.OPENAI_MODEL_MAX_CONTEXT_SIZE, 
         model: str = "gpt-4o",
-        preferred_separator: str = f'\n\n{"-"*100}\n'
+        preferred_separator: str = f'\n\n{"-"*100}\n',
+        split_by_regex: bool = False,
+        regex_pattern: str = r"^\s*END OF SECTION\b.*$"
     ) -> List[str]:
     """
     Split large content into chunks that fit within the model's context limit.
@@ -88,20 +91,34 @@ def split_file_content_into_chunks(
     current_chunk = ""
     current_tokens = 0
     
-    # Split by separator to maintain some structure
-    pieces = file_content.split(preferred_separator)
+    # Handle empty content
+    if not file_content.strip():
+        return []
     
-    for piece in pieces:
+    # Split by separator to maintain some structure
+    if split_by_regex:
+        pieces = re.split(regex_pattern, file_content, flags=re.MULTILINE | re.IGNORECASE)
+    else:
+        pieces = file_content.split(preferred_separator)
+    
+    for i, piece in enumerate(pieces):
         piece_tokens = count_tokens(piece, model)
         
+        # If adding this piece would exceed the limit, save current chunk and start new one
         if current_tokens + piece_tokens > max_tokens_per_chunk:
-            chunks.append(current_chunk.strip())
+            if current_chunk.strip():
+                chunks.append(current_chunk.strip())
             current_chunk = piece
             current_tokens = piece_tokens
-            
         else:
-            current_chunk += preferred_separator + piece
-            current_tokens += piece_tokens
+            # Always add separator to maintain consistency with original behavior
+            if current_chunk:
+                current_chunk += preferred_separator + piece
+                current_tokens += piece_tokens
+            else:
+                # For the first piece, add the separator to match expected behavior
+                current_chunk = preferred_separator + piece
+                current_tokens = piece_tokens
     
     # Add the last chunk if it has content
     if current_chunk.strip():
@@ -462,7 +479,7 @@ class ChatViewSet(viewsets.ModelViewSet):
         developer_prompt_to_rejoin_separate_logs = self.get_promptlayer_developer_prompt(promptlayer_template)
         promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
 
-        project_version_files = UploadedFile.objects.filter(project_version_id=project_version_id)
+        project_version_files = UploadedFile.objects.filter(project_version_id=project_version_id).order_by('id')
         file_content = ""
         for file in project_version_files:
             try:
@@ -483,6 +500,7 @@ class ChatViewSet(viewsets.ModelViewSet):
                     page = pdf_document[page_num]
                     pdf_text += page.get_text() + "\n"
                 pdf_document.close()
+
                 
                 file_content += f"\n\n{'-'*100}\n"
                 file_content += pdf_text
@@ -505,17 +523,19 @@ class ChatViewSet(viewsets.ModelViewSet):
                 file_content, 
                 settings.OPENAI_MODEL_MAX_CONTEXT_SIZE,
                 model_name,
-                preferred_separator="\n\n"
+                # TODO: fix regex splitting
+                split_by_regex=False,
             )
             
             chunk_results = []
             for i, chunk in enumerate(chunks):
                 print(f"GENERATE GENERAL LOG: Processing chunk {i+1} of {len(chunks)}")
+                print(f"GENERATE GENERAL LOG: chunk length: {len(chunk)}")
+
                 print("-"*100)
                 lines = chunk.split('\n')
-                print(f"GENERATE GENERAL LOG: first 10 lines of chunk: {lines[:10]}")
-                print(f"GENERATE GENERAL LOG: last 10 lines of chunk: {lines[-10:]}")
-                print("-"*100)
+                print(f"GENERATE GENERAL LOG: first 100 lines of chunk: {lines[:100]}")
+                print(f"GENERATE GENERAL LOG: last 100 lines of chunk: {lines[-100:]}")
                 chunk_user_prompt = user_prompt.format(file_content=chunk)
                 chunk_completion = client.chat.completions.create(
                     model=model_name,

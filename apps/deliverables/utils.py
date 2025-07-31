@@ -314,4 +314,13 @@ def merge_tables_from_text(text: str) -> str:
         | 3 |   | 4  |
     """
     tables = extract_markdown_tables(text)
-    return merge_markdown_tables(tables)
+    for i, table in enumerate(tables):
+        print(f"MERGE TABLES: TABLE {i + 1}: {table}")
+        headers, data_rows = parse_markdown_table(table)
+        print(f"MERGE TABLES: HEADERS: {headers}")
+        print(f"MERGE TABLES: NUMBER OF DATA ROWS: {len(data_rows)}")
+    merged_table = merge_markdown_tables(tables)
+    headers, data_rows = parse_markdown_table(merged_table)
+    print(f"MERGE TABLES: MERGED TABLE HEADERS: {headers}")
+    print(f"MERGE TABLES: MERGED TABLE NUMBER OF DATA ROWS: {len(data_rows)}")
+    return merged_table
