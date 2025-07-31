@@ -478,6 +478,9 @@ class ChatViewSet(viewsets.ModelViewSet):
         user_prompt = self.get_promptlayer_user_prompt(promptlayer_template)
         developer_prompt_to_rejoin_separate_logs = self.get_promptlayer_developer_prompt(promptlayer_template)
         promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
+        temperature = promptlayer_model_metadata['parameters']['temperature']
+        top_p = promptlayer_model_metadata['parameters'].get('top_p')
+        print("GENERATE GENERAL LOG: top_p: ", top_p)
 
         project_version_files = UploadedFile.objects.filter(project_version_id=project_version_id).order_by('id')
         file_content = ""
@@ -573,6 +576,8 @@ class ChatViewSet(viewsets.ModelViewSet):
             # Process normally with single request
             completion = client.chat.completions.create(
                 model=model_name,
+                temperature=temperature,
+                top_p=top_p,
                 messages=[
                     {
                         "role": "system",
