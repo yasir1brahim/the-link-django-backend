@@ -512,8 +512,9 @@ class ChatViewSet(viewsets.ModelViewSet):
             for i, chunk in enumerate(chunks):
                 print(f"GENERATE GENERAL LOG: Processing chunk {i+1} of {len(chunks)}")
                 print("-"*100)
-                print(f"GENERATE GENERAL LOG: first 10 lines of chunk: {chunk.split('\n')[:10]}")
-                print(f"GENERATE GENERAL LOG: last 10 lines of chunk: {chunk.split('\n')[-10:]}")
+                lines = chunk.split('\n')
+                print(f"GENERATE GENERAL LOG: first 10 lines of chunk: {lines[:10]}")
+                print(f"GENERATE GENERAL LOG: last 10 lines of chunk: {lines[-10:]}")
                 print("-"*100)
                 chunk_user_prompt = user_prompt.format(file_content=chunk)
                 chunk_completion = client.chat.completions.create(
