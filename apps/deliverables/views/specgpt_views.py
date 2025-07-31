@@ -95,28 +95,10 @@ def split_file_content_into_chunks(
         piece_tokens = count_tokens(piece, model)
         
         if current_tokens + piece_tokens > max_tokens_per_chunk:
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-                current_chunk = piece
-                current_tokens = piece_tokens
-            else:
-                # Single line is too long, split it further
-                lines = piece.split("\n")
-                for line in lines:
-                    line_tokens = count_tokens(line + '\n', model)
-                    if current_tokens + line_tokens > max_tokens_per_chunk:
-                        if current_chunk:
-                            chunks.append(current_chunk.strip())
-                            current_chunk = line + '\n'
-                            current_tokens = line_tokens
-                        else:
-                            # Single line is too long, truncate
-                            chunks.append(line[:max_tokens_per_chunk//4] + "...")
-                            current_chunk = ""
-                            current_tokens = 0
-                    else:
-                        current_chunk += line + '\n'
-                        current_tokens += line_tokens
+            chunks.append(current_chunk.strip())
+            current_chunk = piece
+            current_tokens = piece_tokens
+            
         else:
             current_chunk += preferred_separator + piece
             current_tokens += piece_tokens
@@ -528,6 +510,11 @@ class ChatViewSet(viewsets.ModelViewSet):
             
             chunk_results = []
             for i, chunk in enumerate(chunks):
+                print(f"GENERATE GENERAL LOG: Processing chunk {i+1} of {len(chunks)}")
+                print("-"*100)
+                print(f"GENERATE GENERAL LOG: first 10 lines of chunk: {chunk.split('\n')[:10]}")
+                print(f"GENERATE GENERAL LOG: last 10 lines of chunk: {chunk.split('\n')[-10:]}")
+                print("-"*100)
                 chunk_user_prompt = user_prompt.format(file_content=chunk)
                 chunk_completion = client.chat.completions.create(
                     model=model_name,
