@@ -556,20 +556,36 @@ class ChatViewSet(viewsets.ModelViewSet):
             # Stitch results together deterministically
             print("Separate agent responses")
             print(chunk_results)
-            print("Merging tables deterministically...")
+
+            print("Rejoin prompt")
+            print(developer_prompt_to_rejoin_separate_logs)
+            rejoin_prompt = developer_prompt_to_rejoin_separate_logs.format(separate_agent_responses="\n\n".join(chunk_results))
+            rejoin_completion = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": rejoin_prompt
+                    }
+                ]
+            )
+            final_answer = rejoin_completion.choices[0].message.content
+
             
-            # Combine all chunk results
-            combined_text = "\n\n".join(chunk_results)
+            # print("Merging tables deterministically...")
             
-            # Extract and merge all tables from the combined text
-            merged_table = merge_tables_from_text(combined_text, sort_by_column="Section")
+            # # Combine all chunk results
+            # combined_text = "\n\n".join(chunk_results)
             
-            if merged_table:
-                # If we found and merged tables, return the merged table
-                final_answer = merged_table
-            else:
-                # If no tables found, just join the responses with newlines
-                final_answer = "\n\n".join(chunk_results)
+            # # Extract and merge all tables from the combined text
+            # merged_table = merge_tables_from_text(combined_text, sort_by_column="Section")
+            
+            # if merged_table:
+            #     # If we found and merged tables, return the merged table
+            #     final_answer = merged_table
+            # else:
+            #     # If no tables found, just join the responses with newlines
+            #     final_answer = "\n\n".join(chunk_results)
         else:
             # Process normally with single request
             completion = client.chat.completions.create(
