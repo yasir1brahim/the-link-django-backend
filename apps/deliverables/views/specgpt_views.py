@@ -397,9 +397,8 @@ class ChatViewSet(viewsets.ModelViewSet):
         try:
             promptlayer_template = self.get_promptlayer_template(settings.SPEC_GPT_PROMPTLAYER_PROMPT_NAME)
         except Exception as e:
-            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR, data={
-                'error': f'Failed to retrieve PromptLayer template: {str(e)}'
-            })
+            print(f"Failed to retrieve PromptLayer template: {str(e)}")
+            raise e
 
         vectorstore = PineconeVectorStore(
             pinecone_api_key=settings.PINECONE_API_KEY,
@@ -470,9 +469,8 @@ class ChatViewSet(viewsets.ModelViewSet):
         try:
             promptlayer_template = self.get_promptlayer_template(promptlayer_template_name)
         except Exception as e:
-            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR, data={
-                'error': f'Failed to retrieve PromptLayer template: {str(e)}'
-            })
+            print(f"Failed to retrieve PromptLayer template: {str(e)}")
+            raise e
         
         system_prompt = self.get_promptlayer_system_prompt(promptlayer_template)
         user_prompt = self.get_promptlayer_user_prompt(promptlayer_template)
