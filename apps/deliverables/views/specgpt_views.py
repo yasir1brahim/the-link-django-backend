@@ -564,7 +564,7 @@ class ChatViewSet(viewsets.ModelViewSet):
             combined_text = "\n\n".join(chunk_results)
             
             # Extract and merge all tables from the combined text
-            merged_table = merge_tables_from_text(combined_text)
+            merged_table = merge_tables_from_text(combined_text, sort_by_column="Section")
             
             if merged_table:
                 # If we found and merged tables, return the merged table
