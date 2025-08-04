@@ -1,6 +1,7 @@
 import datetime
 import json
 import csv
+import re
 from uuid import UUID
 from typing import Any, List, Optional
 from enum import Enum
@@ -49,7 +50,7 @@ from apps.deliverables.models import (
 )
 
 from langchain.memory import ConversationBufferMemory
-from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv
+from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv, merge_tables_from_text
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
@@ -67,7 +68,9 @@ def split_file_content_into_chunks(
         file_content: str,
         max_tokens_per_chunk: int = settings.OPENAI_MODEL_MAX_CONTEXT_SIZE, 
         model: str = "gpt-4o",
-        preferred_separator: str = f'\n\n{"-"*100}\n'
+        preferred_separator: str = f'\n\n{"-"*100}\n',
+        split_by_regex: bool = False,
+        regex_pattern: str = r"^\s*END OF SECTION\b.*$"
     ) -> List[str]:
     """
     Split large content into chunks that fit within the model's context limit.
@@ -88,38 +91,34 @@ def split_file_content_into_chunks(
     current_chunk = ""
     current_tokens = 0
     
-    # Split by separator to maintain some structure
-    pieces = file_content.split(preferred_separator)
+    # Handle empty content
+    if not file_content.strip():
+        return []
     
-    for piece in pieces:
+    # Split by separator to maintain some structure
+    if split_by_regex:
+        pieces = re.split(regex_pattern, file_content, flags=re.MULTILINE | re.IGNORECASE)
+    else:
+        pieces = file_content.split(preferred_separator)
+    
+    for i, piece in enumerate(pieces):
         piece_tokens = count_tokens(piece, model)
         
+        # If adding this piece would exceed the limit, save current chunk and start new one
         if current_tokens + piece_tokens > max_tokens_per_chunk:
-            if current_chunk:
+            if current_chunk.strip():
                 chunks.append(current_chunk.strip())
-                current_chunk = piece
-                current_tokens = piece_tokens
-            else:
-                # Single line is too long, split it further
-                lines = piece.split("\n")
-                for line in lines:
-                    line_tokens = count_tokens(line + '\n', model)
-                    if current_tokens + line_tokens > max_tokens_per_chunk:
-                        if current_chunk:
-                            chunks.append(current_chunk.strip())
-                            current_chunk = line + '\n'
-                            current_tokens = line_tokens
-                        else:
-                            # Single line is too long, truncate
-                            chunks.append(line[:max_tokens_per_chunk//4] + "...")
-                            current_chunk = ""
-                            current_tokens = 0
-                    else:
-                        current_chunk += line + '\n'
-                        current_tokens += line_tokens
+            current_chunk = piece
+            current_tokens = piece_tokens
         else:
-            current_chunk += preferred_separator + piece
-            current_tokens += piece_tokens
+            # Always add separator to maintain consistency with original behavior
+            if current_chunk:
+                current_chunk += preferred_separator + piece
+                current_tokens += piece_tokens
+            else:
+                # For the first piece, add the separator to match expected behavior
+                current_chunk = preferred_separator + piece
+                current_tokens = piece_tokens
     
     # Add the last chunk if it has content
     if current_chunk.strip():
@@ -398,9 +397,8 @@ class ChatViewSet(viewsets.ModelViewSet):
         try:
             promptlayer_template = self.get_promptlayer_template(settings.SPEC_GPT_PROMPTLAYER_PROMPT_NAME)
         except Exception as e:
-            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR, data={
-                'error': f'Failed to retrieve PromptLayer template: {str(e)}'
-            })
+            print(f"Failed to retrieve PromptLayer template: {str(e)}")
+            raise e
 
         vectorstore = PineconeVectorStore(
             pinecone_api_key=settings.PINECONE_API_KEY,
@@ -471,16 +469,18 @@ class ChatViewSet(viewsets.ModelViewSet):
         try:
             promptlayer_template = self.get_promptlayer_template(promptlayer_template_name)
         except Exception as e:
-            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR, data={
-                'error': f'Failed to retrieve PromptLayer template: {str(e)}'
-            })
+            print(f"Failed to retrieve PromptLayer template: {str(e)}")
+            raise e
         
         system_prompt = self.get_promptlayer_system_prompt(promptlayer_template)
         user_prompt = self.get_promptlayer_user_prompt(promptlayer_template)
         developer_prompt_to_rejoin_separate_logs = self.get_promptlayer_developer_prompt(promptlayer_template)
         promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
+        temperature = promptlayer_model_metadata['parameters']['temperature']
+        top_p = promptlayer_model_metadata['parameters'].get('top_p')
+        print("GENERATE GENERAL LOG: top_p: ", top_p)
 
-        project_version_files = UploadedFile.objects.filter(project_version_id=project_version_id)
+        project_version_files = UploadedFile.objects.filter(project_version_id=project_version_id).order_by('id')
         file_content = ""
         for file in project_version_files:
             try:
@@ -501,6 +501,7 @@ class ChatViewSet(viewsets.ModelViewSet):
                     page = pdf_document[page_num]
                     pdf_text += page.get_text() + "\n"
                 pdf_document.close()
+
                 
                 file_content += f"\n\n{'-'*100}\n"
                 file_content += pdf_text
@@ -523,11 +524,19 @@ class ChatViewSet(viewsets.ModelViewSet):
                 file_content, 
                 settings.OPENAI_MODEL_MAX_CONTEXT_SIZE,
                 model_name,
-                preferred_separator="\n\n"
+                # TODO: fix regex splitting
+                split_by_regex=False,
             )
             
             chunk_results = []
             for i, chunk in enumerate(chunks):
+                print(f"GENERATE GENERAL LOG: Processing chunk {i+1} of {len(chunks)}")
+                print(f"GENERATE GENERAL LOG: chunk length: {len(chunk)}")
+
+                print("-"*100)
+                lines = chunk.split('\n')
+                print(f"GENERATE GENERAL LOG: first 100 lines of chunk: {lines[:100]}")
+                print(f"GENERATE GENERAL LOG: last 100 lines of chunk: {lines[-100:]}")
                 chunk_user_prompt = user_prompt.format(file_content=chunk)
                 chunk_completion = client.chat.completions.create(
                     model=model_name,
@@ -544,9 +553,10 @@ class ChatViewSet(viewsets.ModelViewSet):
                 )
                 chunk_results.append(chunk_completion.choices[0].message.content)
             
-            # Stitch results together
+            # Stitch results together deterministically
             print("Separate agent responses")
             print(chunk_results)
+
             print("Rejoin prompt")
             print(developer_prompt_to_rejoin_separate_logs)
             rejoin_prompt = developer_prompt_to_rejoin_separate_logs.format(separate_agent_responses="\n\n".join(chunk_results))
@@ -560,10 +570,28 @@ class ChatViewSet(viewsets.ModelViewSet):
                 ]
             )
             final_answer = rejoin_completion.choices[0].message.content
+
+            
+            # print("Merging tables deterministically...")
+            
+            # # Combine all chunk results
+            # combined_text = "\n\n".join(chunk_results)
+            
+            # # Extract and merge all tables from the combined text
+            # merged_table = merge_tables_from_text(combined_text, sort_by_column="Section")
+            
+            # if merged_table:
+            #     # If we found and merged tables, return the merged table
+            #     final_answer = merged_table
+            # else:
+            #     # If no tables found, just join the responses with newlines
+            #     final_answer = "\n\n".join(chunk_results)
         else:
             # Process normally with single request
             completion = client.chat.completions.create(
                 model=model_name,
+                temperature=temperature,
+                top_p=top_p,
                 messages=[
                     {
                         "role": "system",

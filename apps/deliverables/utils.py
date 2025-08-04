@@ -69,13 +69,13 @@ def extract_markdown_tables(text: str) -> List[str]:
     return [table.strip() for table in tables]
 
 
-def parse_markdown_table(markdown_table: str) -> Tuple[List[str], List[List[str]]]:
+def parse_markdown_table(markdown_table: str, sort_by_column: str = None) -> Tuple[List[str], List[List[str]]]:
     """
     Parse a markdown table string into headers and data rows.
     
     Args:
         markdown_table: A markdown table string
-        
+        sort_by_column: The column to sort the data by
     Returns:
         Tuple of (headers, data_rows) where headers is a list of strings
         and data_rows is a list of lists of strings
@@ -103,6 +103,13 @@ def parse_markdown_table(markdown_table: str) -> Tuple[List[str], List[List[str]
         if line.strip() and '|' in line:
             cells = [cell.strip() for cell in line.split('|')[1:-1]]
             data_rows.append(cells)
+    
+    if sort_by_column:
+        try:
+            headers.index(sort_by_column)
+            data_rows.sort(key=lambda x: x[headers.index(sort_by_column)])
+        except ValueError:
+            print(f"Sort by column {sort_by_column} not found in headers {headers}")
     
     return headers, data_rows
 
@@ -197,3 +204,152 @@ def extract_first_table_to_csv(text: str) -> Optional[str]:
         return None
     
     return markdown_table_to_csv(tables[0])
+
+
+def merge_markdown_tables(tables: List[str], sort_by_column: str = None) -> str:
+    """
+    Merge multiple markdown tables into a single table.
+    
+    This function takes a list of markdown tables and merges them into a single table.
+    It handles tables with different headers by creating a union of all headers.
+    
+    Args:
+        tables: List of markdown table strings
+        sort_by_column: The column to sort the data by
+    Returns:
+        A single markdown table string
+        
+    Example:
+        >>> table1 = "| Name | Age |\n|------|-----|\n| John | 25  |"
+        >>> table2 = "| Name | City |\n|------|------|\n| Jane | NYC  |"
+        >>> merged = merge_markdown_tables([table1, table2])
+        >>> print(merged)
+        | Name | Age | City |
+        |------|-----|------|
+        | John | 25  |      |
+        | Jane |     | NYC  |
+    """
+    if not tables:
+        return ""
+    
+    if len(tables) == 1:
+        return tables[0]
+    
+    # Parse all tables to get headers and data
+    all_headers = set()
+    all_data = []
+    header_order = []  # Track the order headers appear
+    
+    for table in tables:
+        headers, data_rows = parse_markdown_table(table)
+        all_headers.update(headers)
+        all_data.append((headers, data_rows))
+        
+        # Track header order as they appear
+        for header in headers:
+            if header not in header_order:
+                header_order.append(header)
+    
+    # Create ordered list of all headers (preserve order of appearance)
+    ordered_headers = header_order
+    
+    # Create the merged table
+    merged_rows = []
+    
+    # Add header row
+    header_parts = []
+    for header in ordered_headers:
+        header_parts.append(f" {header} ")
+    header_row = "|" + "|".join(header_parts) + "|"
+    merged_rows.append(header_row)
+    
+    
+    # Add separator row (match original table format)
+    separator_parts = []
+    for header in ordered_headers:
+        # Create separator that matches the header length + 2 (standard markdown format)
+        separator_length = max(len(header) + 2, 5)
+        separator_parts.append("-" * separator_length)
+    separator_row = "|" + "|".join(separator_parts) + "|"
+    merged_rows.append(separator_row)
+
+    all_data_rows_with_headers = []
+    for headers, data_rows in all_data:
+        for row in data_rows:
+            all_data_rows_with_headers.append((row, headers))
+    
+    # Add data rows
+    merged_data_rows = []
+    for row, headers in all_data_rows_with_headers:
+        # Create a row with all headers, filling missing values with empty strings
+        merged_row = []
+        for header in ordered_headers:
+            if header in headers:
+                index = headers.index(header)
+                if index < len(row):
+                    cell_value = row[index]
+                    # Pad the cell value to match expected format
+                    if cell_value.strip():
+                        # For non-empty values, add padding with trailing space
+                        merged_row.append(str(cell_value))
+                    else:
+                        # For empty values, add 5 spaces
+                        merged_row.append("")
+                else:
+                    merged_row.append("")
+            else:
+                merged_row.append("")
+        merged_data_rows.append(merged_row)
+
+    if sort_by_column:
+        try:
+            merged_data_rows.sort(key=lambda x: x[ordered_headers.index(sort_by_column)])
+        except ValueError:
+            print(f"Sort by column {sort_by_column} not found in headers {headers}")
+    
+    for row in merged_data_rows:
+        row_strs = []
+        for cell in row:
+            if cell.strip():
+                row_strs.append(f" {cell} ")
+            else:
+                row_strs.append(" " * 5)
+        
+        # Format the row
+        formatted_row = "|" + "|".join(row_strs) + "|"
+        merged_rows.append(formatted_row)
+        
+    return "\n".join(merged_rows)
+
+
+def merge_tables_from_text(text: str, sort_by_column: str = None) -> str:
+    """
+    Extract all markdown tables from text and merge them into a single table.
+    
+    Args:
+        text: The text content that may contain markdown tables
+        sort_by_column: The column to sort the data by
+        
+    Returns:
+        A single markdown table string, or empty string if no tables found
+        
+    Example:
+        >>> text = "Table 1:\n| A | B |\n|---|---|\n| 1 | 2 |\n\nTable 2:\n| A | C |\n|---|---|\n| 3 | 4 |"
+        >>> merged = merge_tables_from_text(text)
+        >>> print(merged)
+        | A | B | C |
+        |---|---|----|
+        | 1 | 2 |    |
+        | 3 |   | 4  |
+    """
+    tables = extract_markdown_tables(text)
+    for i, table in enumerate(tables):
+        print(f"MERGE TABLES: TABLE {i + 1}: {table}")
+        headers, data_rows = parse_markdown_table(table, sort_by_column)
+        print(f"MERGE TABLES: HEADERS: {headers}")
+        print(f"MERGE TABLES: NUMBER OF DATA ROWS: {len(data_rows)}")
+    merged_table = merge_markdown_tables(tables, sort_by_column)
+    headers, data_rows = parse_markdown_table(merged_table)
+    print(f"MERGE TABLES: MERGED TABLE HEADERS: {headers}")
+    print(f"MERGE TABLES: MERGED TABLE NUMBER OF DATA ROWS: {len(data_rows)}")
+    return merged_table
