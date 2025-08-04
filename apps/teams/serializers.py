@@ -90,7 +90,20 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
         return super().create(validated_data)
     
     def get_projects(self, obj):
-        return BaseProjectSerializer(obj.project_set.all(), many=True).data
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return []
+        
+        user = request.user
+        
+        if user.is_superuser:
+            projects = obj.project_set.all()
+        elif user.is_admin_for_team(obj):
+            projects = obj.project_set.all()
+        else:
+            projects = obj.project_set.filter(members=user)
+        
+        return BaseProjectSerializer(projects, many=True).data
     
     def get_active_flags(self, obj):
         return get_active_flags_for_team(obj)
