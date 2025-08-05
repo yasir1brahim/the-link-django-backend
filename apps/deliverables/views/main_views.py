@@ -1690,6 +1690,8 @@ def spec_status_webhook(request):
         print(f"SPEC STATUS WEBHOOK: getting unprocessed section count for document {request_data['document_id']}")
         unprocessed_spec_section_count = SpecSection.objects.filter(document_id=request_data['document_id']).exclude(
             processing_status=DocProcessingStatus.PROCESSED
+        ).exclude(
+            masterformat_section__masterformat_number__regex='^0[012]' # exclude divisions 00,01,02
         ).count()
         print(f"SPEC STATUS WEBHOOK: unprocessed_spec_section_count: {unprocessed_spec_section_count}")
         if unprocessed_spec_section_count == 0:
