@@ -55,7 +55,6 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
     subscription = SubscriptionSerializer(source="wrapped_subscription", read_only=True)
     projects = serializers.SerializerMethodField()
     active_flags = serializers.SerializerMethodField(read_only=True)
-    active_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Team
@@ -72,7 +71,6 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
             "legacy_logo_url",
             "projects",
             "active_flags",
-            "active_count"
         )
 
     def get_members(self, obj) -> list[Membership]:
@@ -94,9 +92,6 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
     
     def get_active_flags(self, obj):
         return get_active_flags_for_team(obj)
-
-    def get_active_count(self, obj):
-        return obj.project_set.filter(is_archived=False).count()
 
 class InvitedUserResetPasswordSerializer(serializers.Serializer):
     email = serializers.EmailField()
