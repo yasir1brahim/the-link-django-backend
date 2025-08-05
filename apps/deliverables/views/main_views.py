@@ -2490,3 +2490,78 @@ class ProcoreSubmittalMappingsView(generics.ListCreateAPIView):
     
         
 # endregion Procore
+
+@extend_schema(
+    responses={200: {'description': 'Document reprocessing started successfully'}},
+    description="Reprocess an existing uploaded document.",
+    methods=["POST"]
+)
+@api_view(['POST'])
+def reprocess_document(request):
+    if not request.user.is_authenticated:
+        return Response({'detail': 'User is not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    document_id = request.data.get('document_id')
+    if not document_id:
+        return Response({'detail': 'document_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        uploaded_file = UploadedFile.objects.get(id=document_id)
+    except UploadedFile.DoesNotExist:
+        return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    project = uploaded_file.project
+    project_version = uploaded_file.project_version
+    
+    # Check if user has access to the project
+    if not request.user.is_member_of_project(project):
+        return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
+    
+    # Get feature flags for the project
+    is_v2_process_deliverables_flag_active = is_v2_process_deliverables_feature_flag_active(request.user, project.team, project)
+    is_full_spec_processing_flag_active = is_full_spec_processing_feature_flag_active(request.user, project.team, project)
+    is_specgpt_flag_active = is_specgpt_feature_flag_active(request.user, project.team, project)
+    
+    try:
+        # Check if it's full spec processing
+        if is_full_spec_processing_flag_active:
+            call_full_spec_processing_lambda(
+                callback_url=settings.BACKEND_CALLBACK_URL,
+                document_id=str(uploaded_file.id),
+                project_id=str(project.id),
+                project_version_id=str(project_version.id),
+                object_key=uploaded_file.document_path,
+                filename=uploaded_file.name,
+                user_id=str(request.user.id),
+            )
+        else:
+            # Use regular parse_spec function
+            parse_spec(
+                callback_url=settings.BACKEND_CALLBACK_URL,
+                document_id=str(uploaded_file.id),
+                project_id=str(project.id),
+                project_version_id=str(project_version.id),
+                object_key=uploaded_file.document_path,
+                filename=uploaded_file.name,
+                user_id=str(request.user.id),
+                is_v2_process_deliverables_flag_active=is_v2_process_deliverables_flag_active,
+                is_specgpt_flag_active=is_specgpt_flag_active,
+                specgpt_callback_url=settings.BACKEND_SPECGPT_CALLBACK_URL
+            )
+        
+        # Update document status to indicate reprocessing has started
+        uploaded_file.processing_status = 'PENDING_PROCESSING'
+        uploaded_file.last_retry = datetime.now()
+        uploaded_file.save()
+        
+        return Response({
+            'message': 'Document reprocessing started successfully',
+            'document_id': document_id,
+            'document_name': uploaded_file.name
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logging.error(f"Error reprocessing document {uploaded_file.name}: {e}")
+        return Response({
+            'detail': f'Error starting document reprocessing: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
