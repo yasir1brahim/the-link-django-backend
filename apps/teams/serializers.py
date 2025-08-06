@@ -79,24 +79,41 @@ class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer)
         return MembershipSerializer(obj.sorted_memberships, many=True).data
 
     def get_project_count(self, obj) -> int:
-        return obj.project_set.count()
+        user = self.context["request"].user
+        if user.is_superuser:
+            return obj.project_set.count()
+        if obj.members.filter(id=user.id).exists():
+            if user.is_admin_for_team(obj):
+                return obj.project_set.filter(is_archived=False).count()
+            return obj.project_set.filter(is_archived=False, members=user).count()
+        return 0  
 
     def get_is_admin(self, obj) -> bool:
         return is_admin(self.context["request"].user, obj)
+
+    def get_projects(self, obj):
+        user = self.context["request"].user
+        if user.is_superuser:
+            projects = obj.project_set.all()
+        elif obj.members.filter(id=user.id).exists():
+            if user.is_admin_for_team(obj):
+                projects = obj.project_set.filter(is_archived=False)    
+            else:
+                projects = obj.project_set.filter(is_archived=False, members=user)
+        else:
+            projects = obj.project_set.none()
+        return BaseProjectSerializer(projects, many=True).data
+
+    def get_active_count(self, obj):
+        return self.get_project_count(obj)
+
+    def get_active_flags(self, obj):
+        return get_active_flags_for_team(obj)
 
     def create(self, validated_data):
         team_name = validated_data.get("name", None)
         validated_data["slug"] = validated_data.get("slug", get_next_unique_team_slug(team_name))
         return super().create(validated_data)
-    
-    def get_projects(self, obj):
-        return BaseProjectSerializer(obj.project_set.all(), many=True).data
-    
-    def get_active_flags(self, obj):
-        return get_active_flags_for_team(obj)
-
-    def get_active_count(self, obj):
-        return obj.project_set.filter(is_archived=False).count()
 
 class InvitedUserResetPasswordSerializer(serializers.Serializer):
     email = serializers.EmailField()
