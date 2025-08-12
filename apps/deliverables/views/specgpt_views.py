@@ -1,3 +1,4 @@
+from __future__ import annotations
 import datetime
 import json
 import csv
@@ -17,6 +18,7 @@ from django.conf import settings
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 from promptlayer.templates import TemplateManager
+from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain_community.callbacks.promptlayer_callback import PromptLayerCallbackHandler
@@ -50,7 +52,7 @@ from apps.deliverables.models import (
 )
 
 from langchain.memory import ConversationBufferMemory
-from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv, merge_tables_from_text
+from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv, merge_tables_from_text, convert_to_markdown_table
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
@@ -465,7 +467,28 @@ class ChatViewSet(viewsets.ModelViewSet):
         return results['answer'], message_sources
     
 
-    def generate_general_log(self, chat, project_id, project_version_id, user, promptlayer_template_name):
+    class InspectionLogRow(BaseModel):
+        spec_section_number: str = Field(alias="Spec Section #", description="The section this item was found in")
+        spec_section_name: str = Field(alias="Spec Section Name", description="The name of the section")
+        inspection_type_and_requirements: str = Field(alias="Inspection Type And Requirements", description="The type and requirements of the inspection")
+        inspection_frequency: str = Field(alias="Inspection Frequency", description="The frequency of the inspection")
+        responsible_party: str = Field(alias="Responsible Party", description="The responsible party for the inspection")
+
+    class InspectionLog(BaseModel):
+        results: List['InspectionLogRow'] = Field(description="List of inspection log rows")
+
+    class OwnerDeliverablesRow(BaseModel):
+        spec_section_number: str = Field(alias="Spec Section #", description="The section this item was found in")
+        spec_section_name: str = Field(alias="Spec Section Name", description="The name of the section")
+        deliverable_type: str = Field(alias="Deliverable Type", description="The type of deliverable")
+        when_due: str = Field(alias="When Due", description="The date the deliverable is due")
+        responsible_party: str = Field(alias="Responsible Party", description="The responsible party for the deliverable")
+        exact_requirement_text: str = Field(alias="Exact Requirement Text", description="The exact requirement text")
+
+    class OwnerDeliverablesLog(BaseModel):
+        results: List['OwnerDeliverablesRow'] = Field(description="List of owner deliverables rows")
+
+    def generate_general_log(self, chat, project_id, project_version_id, user, promptlayer_template_name, full_log_model, log_row_model):
         try:
             promptlayer_template = self.get_promptlayer_template(promptlayer_template_name)
         except Exception as e:
@@ -474,7 +497,6 @@ class ChatViewSet(viewsets.ModelViewSet):
         
         system_prompt = self.get_promptlayer_system_prompt(promptlayer_template)
         user_prompt = self.get_promptlayer_user_prompt(promptlayer_template)
-        developer_prompt_to_rejoin_separate_logs = self.get_promptlayer_developer_prompt(promptlayer_template)
         promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
         temperature = promptlayer_model_metadata['parameters']['temperature']
         top_p = promptlayer_model_metadata['parameters'].get('top_p')
@@ -517,81 +539,28 @@ class ChatViewSet(viewsets.ModelViewSet):
         full_user_prompt = user_prompt.format(file_content=file_content)
         total_tokens = count_tokens(system_prompt + full_user_prompt, model_name)
         
-        if total_tokens > settings.OPENAI_MODEL_MAX_CONTEXT_SIZE:
-            # Split content into chunks
-            print(f"Content too large ({total_tokens} tokens), splitting into chunks...")
-            chunks = split_file_content_into_chunks(
-                file_content, 
-                settings.OPENAI_MODEL_MAX_CONTEXT_SIZE,
-                model_name,
-                # TODO: fix regex splitting
-                split_by_regex=False,
-            )
-            
-            chunk_results = []
-            for i, chunk in enumerate(chunks):
-                print(f"GENERATE GENERAL LOG: Processing chunk {i+1} of {len(chunks)}")
-                print(f"GENERATE GENERAL LOG: chunk length: {len(chunk)}")
+        # Split content into chunks
+        print(f"Content length ({total_tokens} tokens), splitting into chunks...")
+        chunks = split_file_content_into_chunks(
+            file_content, 
+            settings.OPENAI_MODEL_MAX_CONTEXT_SIZE,
+            model_name,
+            # TODO: fix regex splitting
+            split_by_regex=False,
+        )
+        
+        chunk_results = []
+        for i, chunk in enumerate(chunks):
+            print(f"GENERATE GENERAL LOG: Processing chunk {i+1} of {len(chunks)}")
+            print(f"GENERATE GENERAL LOG: chunk length: {len(chunk)}")
 
-                print("-"*100)
-                lines = chunk.split('\n')
-                print(f"GENERATE GENERAL LOG: first 100 lines of chunk: {lines[:100]}")
-                print(f"GENERATE GENERAL LOG: last 100 lines of chunk: {lines[-100:]}")
-                chunk_user_prompt = user_prompt.format(file_content=chunk)
-                chunk_completion = client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": system_prompt
-                        },
-                        {
-                            "role": "user",
-                            "content": chunk_user_prompt
-                        }
-                    ]
-                )
-                chunk_results.append(chunk_completion.choices[0].message.content)
-            
-            # Stitch results together deterministically
-            print("Separate agent responses")
-            print(chunk_results)
-
-            print("Rejoin prompt")
-            print(developer_prompt_to_rejoin_separate_logs)
-            rejoin_prompt = developer_prompt_to_rejoin_separate_logs.format(separate_agent_responses="\n\n".join(chunk_results))
-            rejoin_completion = client.chat.completions.create(
+            print("-"*100)
+            lines = chunk.split('\n')
+            print(f"GENERATE GENERAL LOG: first 100 lines of chunk: {lines[:100]}")
+            print(f"GENERATE GENERAL LOG: last 100 lines of chunk: {lines[-100:]}")
+            chunk_user_prompt = user_prompt.format(file_content=chunk)
+            chunk_completion = client.chat.completions.create(
                 model=model_name,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": rejoin_prompt
-                    }
-                ]
-            )
-            final_answer = rejoin_completion.choices[0].message.content
-
-            
-            # print("Merging tables deterministically...")
-            
-            # # Combine all chunk results
-            # combined_text = "\n\n".join(chunk_results)
-            
-            # # Extract and merge all tables from the combined text
-            # merged_table = merge_tables_from_text(combined_text, sort_by_column="Section")
-            
-            # if merged_table:
-            #     # If we found and merged tables, return the merged table
-            #     final_answer = merged_table
-            # else:
-            #     # If no tables found, just join the responses with newlines
-            #     final_answer = "\n\n".join(chunk_results)
-        else:
-            # Process normally with single request
-            completion = client.chat.completions.create(
-                model=model_name,
-                temperature=temperature,
-                top_p=top_p,
                 messages=[
                     {
                         "role": "system",
@@ -599,16 +568,41 @@ class ChatViewSet(viewsets.ModelViewSet):
                     },
                     {
                         "role": "user",
-                        "content": full_user_prompt
+                        "content": chunk_user_prompt
                     }
-                ]
+                ],
+                temperature=temperature,
+                top_p=top_p,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": full_log_model.__name__,
+                        "schema": full_log_model.model_json_schema()
+                    },
+                },
             )
-            final_answer = completion.choices[0].message.content
+            print(chunk_completion.choices[0].message.content)
+            chunk_results.extend(json.loads(chunk_completion.choices[0].message.content)['results'])
+        
+        print("Table rows as JSON")
+        print(json.dumps(chunk_results, indent=4))
+        chunk_results.sort(key=lambda x: x['Spec Section #'])
+        
 
-        return final_answer
+        # Convert row objects to markdown table
+        markdown_table = convert_to_markdown_table(chunk_results, log_row_model)
+        
+        return markdown_table
 
     def generate_inspection_log(self, chat, project_id, project_version_id, user):
-        final_answer = self.generate_general_log(chat, project_id, project_version_id, user, settings.INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME)
+        final_answer = self.generate_general_log(
+            chat, project_id, 
+            project_version_id, 
+            user, 
+            settings.INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME, 
+            self.InspectionLog,
+            self.InspectionLogRow
+        )
 
         # save chat messages
         human_chat_message = ChatMessage.objects.create(
@@ -627,7 +621,15 @@ class ChatViewSet(viewsets.ModelViewSet):
         return final_answer, []
     
     def generate_owner_deliverables_log(self, chat, project_id, project_version_id, user):
-        final_answer = self.generate_general_log(chat, project_id, project_version_id, user, settings.OWNER_DELIVERABLES_PROMPTLAYER_PROMPT_NAME)
+        final_answer = self.generate_general_log(
+            chat, 
+            project_id, 
+            project_version_id, 
+            user, 
+            settings.OWNER_DELIVERABLES_PROMPTLAYER_PROMPT_NAME, 
+            self.OwnerDeliverablesLog,
+            self.OwnerDeliverablesRow
+        )
 
         # save chat messages
         human_chat_message = ChatMessage.objects.create(
