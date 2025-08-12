@@ -2493,6 +2493,16 @@ class ProcoreSubmittalMappingsView(generics.ListCreateAPIView):
         
 # endregion Procore
 
+def delete_submittals_for_document(document_id: int) -> int:
+    """
+    Delete all SubmittalItem rows linked to the specified document_id.
+
+    Returns the number of deleted SubmittalItem records.
+    """
+    deleted_count, _ = SubmittalItem.objects.filter(document_id=document_id).delete()
+    print(f"\n\n\n\n Deleted {deleted_count} submittal(s) for document_id={document_id}")
+    return deleted_count
+
 @extend_schema(
     responses={200: {'description': 'Document reprocessing started successfully'}},
     description="Reprocess an existing uploaded document.",
@@ -2519,16 +2529,41 @@ def reprocess_document(request):
     if not request.user.is_member_of_project(project):
         return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
     
+    # Remove all existing submittals tied to this document before reprocessing
+    delete_submittals_for_document(uploaded_file.id)
+    
     # Get feature flags for the project
+    is_notices_flag_active = is_notices_feature_flag_active(request.user, project.team)
     is_v2_process_deliverables_flag_active = is_v2_process_deliverables_feature_flag_active(request.user, project.team, project)
     is_full_spec_processing_flag_active = is_full_spec_processing_feature_flag_active(request.user, project.team, project)
     is_specgpt_flag_active = is_specgpt_feature_flag_active(request.user, project.team, project)
     
+
+    def _to_bool(val, default=False):
+        if val is None:
+            return default
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, (int, float)):
+            return bool(val)
+        if isinstance(val, str):
+            return val.strip().lower() in ['1', 'true', 't', 'yes', 'y', 'on']
+        return default
+
+    extract_notices = _to_bool(request.data.get('extract_notices'), False)
+    full_spec_processing = _to_bool(request.data.get('full_spec_processing'), False)
+    
     try:
-        # Check if it's full spec processing
-        if is_full_spec_processing_flag_active:
+        if is_notices_flag_active and extract_notices:
+            call_extract_notices_lambda(
+                callback_url=settings.BACKEND_NOTICES_CALLBACK_URL,
+                document_id=str(uploaded_file.id),
+                object_key=uploaded_file.document_path,
+                project_version_id=str(project_version.id),
+            )
+        elif is_full_spec_processing_flag_active and full_spec_processing:
             call_full_spec_processing_lambda(
-                callback_url=settings.BACKEND_CALLBACK_URL,
+                callback_url=settings.BACKEND_FULL_SPEC_PROCESSING_CALLBACK_URL,
                 document_id=str(uploaded_file.id),
                 project_id=str(project.id),
                 project_version_id=str(project_version.id),
@@ -2537,7 +2572,6 @@ def reprocess_document(request):
                 user_id=str(request.user.id),
             )
         else:
-            # Use regular parse_spec function
             parse_spec(
                 callback_url=settings.BACKEND_CALLBACK_URL,
                 document_id=str(uploaded_file.id),
@@ -2551,7 +2585,6 @@ def reprocess_document(request):
                 specgpt_callback_url=settings.BACKEND_SPECGPT_CALLBACK_URL
             )
         
-        # Update document status to indicate reprocessing has started
         uploaded_file.processing_status = 'PENDING_PROCESSING'
         uploaded_file.last_retry = datetime.now()
         uploaded_file.save()
