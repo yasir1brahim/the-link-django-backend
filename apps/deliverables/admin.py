@@ -289,7 +289,7 @@ Parser Item Classification: {result.get('item', '')}
             client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
             
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-5-mini",
                 messages=[
                     {
                         "role": "system",
