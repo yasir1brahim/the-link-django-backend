@@ -642,9 +642,11 @@ PROMPTLAYER_API_KEY = os.environ.get("PROMPTLAYER_API_KEY", default="")
 SPEC_GPT_PROMPTLAYER_PROMPT_NAME = "specgpt"
 INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME = "inspection_log"
 OWNER_DELIVERABLES_PROMPTLAYER_PROMPT_NAME = "owner_deliverables"
+GENERATE_LOG_LAMBDA_FUNCTION_URL = os.environ.get("GENERATE_LOG_LAMBDA_FUNCTION_URL", default="https://v4aiai3ftopjpvbdtonytus3c40wbojq.lambda-url.us-east-1.on.aws/")
 
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", default="")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", default="")
 
 # OpenAI model context settings
 OPENAI_MODEL_MAX_CONTEXT_SIZE = 1000000 # in tokens
+BACKEND_AI_LOG_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/webhooks/ai-log-generation/"

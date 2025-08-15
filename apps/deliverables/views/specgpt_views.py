@@ -3,6 +3,7 @@ import datetime
 import json
 import csv
 import re
+import requests
 from uuid import UUID
 from typing import Any, List, Optional
 from enum import Enum
@@ -39,8 +40,8 @@ from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
 import io
 
-from apps.deliverables.serializers.specgpt import ChatDetailSerializer
-from apps.deliverables.permissions import ChatAccessPermissions
+from apps.deliverables.serializers.specgpt import ChatDetailSerializer, AiGeneratedLogSerializer
+from apps.deliverables.permissions import ChatAccessPermissions, AiGeneratedLogAccessPermissions
 from apps.deliverables.models import Project, ProjectVersion
 from typing import TypedDict, List
 
@@ -48,7 +49,8 @@ from apps.deliverables.models import (
     UploadedFile, MasterFormatSection, 
     SpecSection, DocProcessingStatus, 
     Chat, ChatMessage, 
-    CustomPostgresChatMessageHistory
+    CustomPostgresChatMessageHistory,
+    AiGeneratedLog
 )
 
 from langchain.memory import ConversationBufferMemory
@@ -186,6 +188,100 @@ def specgpt_embedding_webhook(request):
 
     return Response(status=status.HTTP_200_OK)
 
+
+class AiLogGenerationRequest(TypedDict):
+    log_type: str
+    project_id: str
+    project_version_id: str
+    new_status: str
+    table: str
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def ai_log_generation_webhook(request):
+    request_payload = request.data
+    print(f"AI LOG GENERATION WEBHOOK received request: {request_payload}")
+
+    request_data = AiLogGenerationRequest(**request_payload)
+
+
+    if request_data['new_status'] == 'SUCCESS':
+        AiGeneratedLog.objects.create(
+            project_id=request_data['project_id'],
+            project_version_id=request_data['project_version_id'],
+            log_type=request_data['log_type'],
+            log_table=request_data['table'],
+            log_status='SUCCESS'
+        )
+    elif request_data['new_status'] == 'FAILURE':
+        print(f"AI LOG GENERATION WEBHOOK: Failure for {request_data['log_type']} log for project {request_data['project_id']} project version {request_data['project_version_id']}")
+        AiGeneratedLog.objects.create(
+            project_id=request_data['project_id'],
+            project_version_id=request_data['project_version_id'],
+            log_type=request_data['log_type'],
+            log_table=request_data.get('table'),
+            log_status='FAILURE'
+        )
+
+    return Response(status=status.HTTP_200_OK)
+
+
+class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet for AiGeneratedLog objects providing list and detail views.
+    
+    Required query parameters:
+    - project_id: ID of the project
+    - project_version_id: ID of the project version  
+    - log_type: Type of log to filter by
+    
+    The view filters logs by project, project version, and log type,
+    and ensures users have access to the project.
+    """
+    queryset = AiGeneratedLog.objects.all()
+    permission_classes = [IsAuthenticated, AiGeneratedLogAccessPermissions]
+    serializer_class = AiGeneratedLogSerializer
+
+    def get_queryset(self):
+        """
+        Filter queryset by project_id from URL parameters and project_version_id, log_type from query parameters.
+        For detail views, only filter by project_id.
+        """
+        queryset = super().get_queryset()
+        
+        # Get project_id from URL parameters
+        project_id = self.kwargs.get('project_id')
+        
+        # Validate required project_id
+        if not project_id:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({'error': 'project_id is required'})
+        
+        # For list views, also filter by project_version_id and log_type
+        if self.action == 'list':
+            project_version_id = self.request.query_params.get('project_version_id')
+            log_type = self.request.query_params.get('log_type')
+            
+            if not project_version_id:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({'error': 'project_version_id is required'})
+            if not log_type:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({'error': 'log_type is required'})
+            
+            # Filter by all required parameters
+            queryset = queryset.filter(
+                project_id=project_id,
+                project_version_id=project_version_id,
+                log_type=log_type
+            )
+        else:
+            # For detail views, only filter by project_id
+            queryset = queryset.filter(project_id=project_id)
+        
+        # Order by creation date (newest first)
+        return queryset.order_by('-created_at')
 
 
 class CustomPromptLayerCallbackHandler(PromptLayerCallbackHandler):
@@ -498,101 +594,37 @@ class ChatViewSet(viewsets.ModelViewSet):
         system_prompt = self.get_promptlayer_system_prompt(promptlayer_template)
         user_prompt = self.get_promptlayer_user_prompt(promptlayer_template)
         promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
-        temperature = promptlayer_model_metadata['parameters']['temperature']
-        top_p = promptlayer_model_metadata['parameters'].get('top_p')
+        temperature = promptlayer_model_metadata['parameters'].get('temperature', 0.1)
+        top_p = promptlayer_model_metadata['parameters'].get('top_p', 1)
         print("GENERATE GENERAL LOG: top_p: ", top_p)
 
         project_version_files = UploadedFile.objects.filter(project_version_id=project_version_id).order_by('id')
-        file_content = ""
-        for file in project_version_files:
-            try:
-                # Get the file content from S3
-                s3_client = boto3.client('s3')
-                response = s3_client.get_object(
-                    Bucket=settings.S3_BUCKET,
-                    Key=file.document_path
-                )
-                
-                # Read the PDF content
-                pdf_bytes = response['Body'].read()
-                
-                # Extract text from PDF using PyMuPDF
-                pdf_document = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-                pdf_text = ""
-                for page_num in range(pdf_document.page_count):
-                    page = pdf_document[page_num]
-                    pdf_text += page.get_text() + "\n"
-                pdf_document.close()
+        project_version_specs = SpecSection.objects.filter(document__in=project_version_files).order_by('id')
+        spec_sections = [{
+            'master_format_section_number': spec_section.masterformat_section.masterformat_number,
+            'file_s3_key': spec_section.file_s3_key
+        } for spec_section in project_version_specs if spec_section.file_s3_key]
+        s3_bucket = settings.S3_BUCKET
 
-                
-                file_content += f"\n\n{'-'*100}\n"
-                file_content += pdf_text
-                
-            except Exception as e:
-                print(f"Error reading file {file.name}: {str(e)}")
-                file_content += f"\n\n{'-'*100}\n"
-
-        client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        
-        # Check if content is too large for a single request
-        model_name = promptlayer_model_metadata['name']
-        full_user_prompt = user_prompt.format(file_content=file_content)
-        total_tokens = count_tokens(system_prompt + full_user_prompt, model_name)
-        
-        # Split content into chunks
-        print(f"Content length ({total_tokens} tokens), splitting into chunks...")
-        chunks = split_file_content_into_chunks(
-            file_content, 
-            settings.OPENAI_MODEL_MAX_CONTEXT_SIZE,
-            model_name,
-            # TODO: fix regex splitting
-            split_by_regex=False,
+        requests.post(
+            settings.GENERATE_LOG_LAMBDA_FUNCTION_URL,
+            json={
+                'project_id': project_id,
+                'project_version_id': project_version_id,
+                'log_type': promptlayer_template_name,
+                'bucket': s3_bucket,
+                'spec_sections': spec_sections,
+                'callback_url': settings.BACKEND_AI_LOG_CALLBACK_URL,
+                'promptlayer_system_prompt': system_prompt,
+                'promptlayer_user_prompt': user_prompt,
+                'promptlayer_model_metadata': promptlayer_model_metadata,
+                'temperature': temperature,
+                'top_p': top_p,
+                'chunk_size': settings.OPENAI_MODEL_MAX_CONTEXT_SIZE,
+            }
         )
-        
-        chunk_results = []
-        for i, chunk in enumerate(chunks):
-            print(f"GENERATE GENERAL LOG: Processing chunk {i+1} of {len(chunks)}")
-            print(f"GENERATE GENERAL LOG: chunk length: {len(chunk)}")
+        return "Log generation started"
 
-            print("-"*100)
-            lines = chunk.split('\n')
-            print(f"GENERATE GENERAL LOG: first 100 lines of chunk: {lines[:100]}")
-            print(f"GENERATE GENERAL LOG: last 100 lines of chunk: {lines[-100:]}")
-            chunk_user_prompt = user_prompt.format(file_content=chunk)
-            chunk_completion = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt
-                    },
-                    {
-                        "role": "user",
-                        "content": chunk_user_prompt
-                    }
-                ],
-                temperature=temperature,
-                top_p=top_p,
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": full_log_model.__name__,
-                        "schema": full_log_model.model_json_schema()
-                    },
-                },
-            )
-            print(chunk_completion.choices[0].message.content)
-            chunk_results.extend(json.loads(chunk_completion.choices[0].message.content)['results'])
-        
-        print("Table rows as JSON")
-        print(json.dumps(chunk_results, indent=4))
-        chunk_results.sort(key=lambda x: x['Spec Section #'])
-        
-
-        # Convert row objects to markdown table
-        markdown_table = convert_to_markdown_table(chunk_results, log_row_model)
-        
-        return markdown_table
 
     def generate_inspection_log(self, chat, project_id, project_version_id, user):
         final_answer = self.generate_general_log(
@@ -605,18 +637,19 @@ class ChatViewSet(viewsets.ModelViewSet):
         )
 
         # save chat messages
-        human_chat_message = ChatMessage.objects.create(
-            chat=chat,
-            message="Generate inspection log",
-            type=ChatMessage.ChatMessageType.SYSTEM,
-            raw_message=self.create_raw_message("Generate inspection log", "human")
-        )
-        ai_chat_message = ChatMessage.objects.create(
-            chat=chat,
-            message=final_answer,
-            type=ChatMessage.ChatMessageType.AI_INSPECTION_LOG,
-            raw_message=self.create_raw_message(final_answer, "ai")
-        )
+        # Note: this has been removed now that we're doing this async and storing the logs in a separate model
+        # human_chat_message = ChatMessage.objects.create(
+        #     chat=chat,
+        #     message="Generate inspection log",
+        #     type=ChatMessage.ChatMessageType.SYSTEM,
+        #     raw_message=self.create_raw_message("Generate inspection log", "human")
+        # )
+        # ai_chat_message = ChatMessage.objects.create(
+        #     chat=chat,
+        #     message=final_answer,
+        #     type=ChatMessage.ChatMessageType.AI_INSPECTION_LOG,
+        #     raw_message=self.create_raw_message(final_answer, "ai")
+        # )
 
         return final_answer, []
     
@@ -631,19 +664,20 @@ class ChatViewSet(viewsets.ModelViewSet):
             self.OwnerDeliverablesRow
         )
 
-        # save chat messages
-        human_chat_message = ChatMessage.objects.create(
-            chat=chat,
-            message="Generate owner deliverables log",
-            type=ChatMessage.ChatMessageType.SYSTEM,
-            raw_message=self.create_raw_message("Generate owner deliverables log", "human")
-        )
-        ai_chat_message = ChatMessage.objects.create(
-            chat=chat,
-            message=final_answer,
-            type=ChatMessage.ChatMessageType.AI_OWNER_DELIVERABLES_LOG,
-            raw_message=self.create_raw_message(final_answer, "ai")
-        )
+        # # save chat messages
+        # Note: this has been removed now that we're doing this async and storing the logs in a separate model
+        # human_chat_message = ChatMessage.objects.create(
+        #     chat=chat,
+        #     message="Generate owner deliverables log",
+        #     type=ChatMessage.ChatMessageType.SYSTEM,
+        #     raw_message=self.create_raw_message("Generate owner deliverables log", "human")
+        # )
+        # ai_chat_message = ChatMessage.objects.create(
+        #     chat=chat,
+        #     message=final_answer,
+        #     type=ChatMessage.ChatMessageType.AI_OWNER_DELIVERABLES_LOG,
+        #     raw_message=self.create_raw_message(final_answer, "ai")
+        # )
 
         return final_answer, []
 

@@ -417,7 +417,16 @@ class CustomPostgresChatMessageHistory(BaseChatMessageHistory):
     def clear(self):
         ChatMessage.objects.filter(chat=self.chat).delete()
 
-    
+
+class AiGeneratedLog(BaseModel):
+    project = models.ForeignKey("Project", on_delete=models.CASCADE)
+    project_version = models.ForeignKey("ProjectVersion", on_delete=models.CASCADE)
+    log_type = models.CharField(max_length=256)
+    log_status = models.CharField(max_length=256)
+    log_table = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.project.name} - {self.project_version.version_number} - {self.log_type} - {self.log_status}"
     
 
 # endregion SpecGPT
