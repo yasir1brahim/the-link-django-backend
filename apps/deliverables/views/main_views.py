@@ -2600,3 +2600,53 @@ def reprocess_document(request):
         return Response({
             'detail': f'Error starting document reprocessing: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    responses={200: {'description': 'Document download URL generated successfully'}},
+    description="Generate a presigned URL to download an uploaded document.",
+    methods=["GET"]
+)
+@api_view(['GET'])
+def download_document(request):
+    if not request.user.is_authenticated:
+        return Response({'detail': 'User is not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    document_id = request.query_params.get('document_id')
+    if not document_id:
+        return Response({'detail': 'document_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        uploaded_file = UploadedFile.objects.get(id=document_id)
+    except UploadedFile.DoesNotExist:
+        return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    project = uploaded_file.project
+    
+    # Check if user has access to the project
+    if not request.user.is_member_of_project(project):
+        return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        # Generate presigned URL for download
+        presigned_url = s3.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': settings.S3_BUCKET,
+                'Key': uploaded_file.document_path,
+                'ResponseContentDisposition': f'attachment; filename="{uploaded_file.name}"'
+            },
+            ExpiresIn=3600  # URL expires in 1 hour
+        )
+        
+        return Response({
+            'download_url': presigned_url,
+            'document_name': uploaded_file.name,
+            'document_id': document_id
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logging.error(f"Error generating download URL for document {uploaded_file.name}: {e}")
+        return Response({
+            'detail': f'Error generating download URL: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
