@@ -1467,6 +1467,7 @@ def upload_file(request):
     
     files_to_process = []
     already_existing_files = []
+    duplicate_files_for_confirmation = []
     async_processing = []
     not_parsed = []
 
@@ -1501,7 +1502,14 @@ def upload_file(request):
             # check if file already exists
             matching_files = UploadedFile.objects.filter(md5=file_md5, name=file.name, project_id=project_id, project_version_id=project_version_id)
             if matching_files.exists():
-                already_existing_files.append(file.name)
+                # Instead of skipping, add to confirmation list with existing file info
+                existing_file = matching_files.first()
+                duplicate_files_for_confirmation.append({
+                    'filename': file.name,
+                    'existing_file_id': existing_file.id,
+                    'existing_file_name': existing_file.name,
+                    'upload_date': existing_file.created_at.isoformat() if existing_file.created_at else None
+                })
                 continue
 
             processing_method = UploadedFile.ProcessingMethodChoices.V1 if not is_v2_process_deliverables_flag_active else UploadedFile.ProcessingMethodChoices.V2
@@ -1559,6 +1567,7 @@ def upload_file(request):
     return Response({
         'error_parsing': not_parsed,
         'already_exist': already_existing_files,
+        'duplicate_files_for_confirmation': duplicate_files_for_confirmation,
         'async_processing': async_processing,
         'message': 'Files uploaded successfully'
     }, status=status.HTTP_200_OK)
