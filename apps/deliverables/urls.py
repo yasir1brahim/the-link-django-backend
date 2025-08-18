@@ -56,6 +56,7 @@ urlpatterns = [
     path('', include(router.urls)),
     path('upload-file/', views.upload_file, name='upload_file'),
     path('reprocess-document/', views.reprocess_document, name='reprocess_document'),
+    path('download-document/', views.download_document, name='download_document'),
     path('spec-status-webhook/', views.spec_status_webhook, name='spec_status_webhook'),
     path('excel-export-header/upsert/', views.UpsertExcelExportHeaderView.as_view(), name='upsert_excel_export_header'),
     path('excel-export-header/', views.GetExcelExportHeaderView.as_view(), name='get_excel_export_header'),
