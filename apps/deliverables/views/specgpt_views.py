@@ -205,24 +205,71 @@ def ai_log_generation_webhook(request):
 
     request_data = AiLogGenerationRequest(**request_payload)
 
+    new_status = request_data['new_status']
+    ai_generated_log_id = request_payload.get('ai_generated_log_id') or request_data.get('ai_generated_log_id')
 
-    if request_data['new_status'] == 'SUCCESS':
-        AiGeneratedLog.objects.create(
-            project_id=request_data['project_id'],
-            project_version_id=request_data['project_version_id'],
-            log_type=request_data['log_type'],
-            log_table=request_data['table'],
-            log_status='SUCCESS'
-        )
-    elif request_data['new_status'] == 'FAILURE':
-        print(f"AI LOG GENERATION WEBHOOK: Failure for {request_data['log_type']} log for project {request_data['project_id']} project version {request_data['project_version_id']}")
-        AiGeneratedLog.objects.create(
-            project_id=request_data['project_id'],
-            project_version_id=request_data['project_version_id'],
-            log_type=request_data['log_type'],
-            log_table=request_data.get('table'),
-            log_status='FAILURE'
-        )
+    if new_status in ['SUCCESS', 'FAILURE']:
+        # Prefer updating by explicit log id if provided
+        log_obj = None
+        if ai_generated_log_id:
+            try:
+                log_obj = AiGeneratedLog.objects.get(id=int(ai_generated_log_id))
+            except Exception:
+                log_obj = None
+        if not log_obj:
+            # Fallback: try to update the latest PROCESSING record for this context
+            log_obj = AiGeneratedLog.objects.filter(
+                project_id=request_data['project_id'],
+                project_version_id=request_data['project_version_id'],
+                log_type=request_data['log_type'],
+                log_status='PROCESSING',
+            ).order_by('-created_at').first()
+
+        if log_obj:
+            log_obj.log_status = new_status
+            if request_data.get('table') is not None:
+                log_obj.log_table = request_data['table']
+            log_obj.save()
+        else:
+            AiGeneratedLog.objects.create(
+                project_id=request_data['project_id'],
+                project_version_id=request_data['project_version_id'],
+                log_type=request_data['log_type'],
+                log_table=request_data.get('table'),
+                log_status=new_status,
+            )
+        if new_status == 'FAILURE':
+            print(f"AI LOG GENERATION WEBHOOK: Failure for {request_data['log_type']} log for project {request_data['project_id']} project version {request_data['project_version_id']}")
+    elif new_status == 'PROCESSING':
+        # Ensure there is a PROCESSING record referencing this id if provided
+        if ai_generated_log_id:
+            try:
+                log_obj = AiGeneratedLog.objects.get(id=int(ai_generated_log_id))
+                if log_obj.log_status != 'PROCESSING':
+                    log_obj.log_status = 'PROCESSING'
+                    log_obj.save()
+            except AiGeneratedLog.DoesNotExist:
+                AiGeneratedLog.objects.create(
+                    id=int(ai_generated_log_id),
+                    project_id=request_data['project_id'],
+                    project_version_id=request_data['project_version_id'],
+                    log_type=request_data['log_type'],
+                    log_status='PROCESSING',
+                )
+        else:
+            exists = AiGeneratedLog.objects.filter(
+                project_id=request_data['project_id'],
+                project_version_id=request_data['project_version_id'],
+                log_type=request_data['log_type'],
+                log_status='PROCESSING',
+            ).exists()
+            if not exists:
+                AiGeneratedLog.objects.create(
+                    project_id=request_data['project_id'],
+                    project_version_id=request_data['project_version_id'],
+                    log_type=request_data['log_type'],
+                    log_status='PROCESSING',
+                )
 
     return Response(status=status.HTTP_200_OK)
 
@@ -584,7 +631,7 @@ class ChatViewSet(viewsets.ModelViewSet):
     class OwnerDeliverablesLog(BaseModel):
         results: List['OwnerDeliverablesRow'] = Field(description="List of owner deliverables rows")
 
-    def generate_general_log(self, chat, project_id, project_version_id, user, promptlayer_template_name, full_log_model, log_row_model):
+    def generate_general_log(self, project_id, project_version_id, promptlayer_template_name, full_log_model, log_row_model):
         try:
             promptlayer_template = self.get_promptlayer_template(promptlayer_template_name)
         except Exception as e:
@@ -606,6 +653,20 @@ class ChatViewSet(viewsets.ModelViewSet):
         } for spec_section in project_version_specs if spec_section.file_s3_key]
         s3_bucket = settings.S3_BUCKET
 
+        # Create a processing record so the UI can reflect loading state immediately
+        processing_log = None
+        try:
+            processing_log = AiGeneratedLog.objects.create(
+                project_id=project_id,
+                project_version_id=project_version_id,
+                log_type=promptlayer_template_name,
+                log_status='PROCESSING',
+                log_table='',
+            )
+        except Exception as e:
+            # Non-fatal; logging only
+            print(f"Failed to create PROCESSING AiGeneratedLog: {str(e)}")
+
         requests.post(
             settings.GENERATE_LOG_LAMBDA_FUNCTION_URL,
             json={
@@ -615,6 +676,7 @@ class ChatViewSet(viewsets.ModelViewSet):
                 'bucket': s3_bucket,
                 'spec_sections': spec_sections,
                 'callback_url': settings.BACKEND_AI_LOG_CALLBACK_URL,
+                'ai_generated_log_id': str(processing_log.id) if processing_log else None,
                 'promptlayer_system_prompt': system_prompt,
                 'promptlayer_user_prompt': user_prompt,
                 'promptlayer_model_metadata': promptlayer_model_metadata,
@@ -623,14 +685,13 @@ class ChatViewSet(viewsets.ModelViewSet):
                 'chunk_size': settings.OPENAI_MODEL_MAX_CONTEXT_SIZE,
             }
         )
-        return "Log generation started"
+        return processing_log
 
 
-    def generate_inspection_log(self, chat, project_id, project_version_id, user):
-        final_answer = self.generate_general_log(
-            chat, project_id, 
+    def generate_inspection_log(self, project_id, project_version_id):
+        processing_log = self.generate_general_log(
+            project_id, 
             project_version_id, 
-            user, 
             settings.INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME, 
             self.InspectionLog,
             self.InspectionLogRow
@@ -651,10 +712,10 @@ class ChatViewSet(viewsets.ModelViewSet):
         #     raw_message=self.create_raw_message(final_answer, "ai")
         # )
 
-        return final_answer, []
+        return processing_log
     
     def generate_owner_deliverables_log(self, chat, project_id, project_version_id, user):
-        final_answer = self.generate_general_log(
+        processing_log = self.generate_general_log(
             chat, 
             project_id, 
             project_version_id, 
@@ -679,7 +740,39 @@ class ChatViewSet(viewsets.ModelViewSet):
         #     raw_message=self.create_raw_message(final_answer, "ai")
         # )
 
-        return final_answer, []
+        return processing_log
+
+    @action(detail=False, methods=['post'], url_path='generate-ai-log')
+    def generate_ai_log(self, request, project_id=None):
+        print("Generate AI log")
+        print(request.data)
+        project_id = request.data.get('project_id', None)
+        project_version_id = request.data.get('project_version_id', None)
+        log_type = request.data.get('log_type', None)
+        if not project_id:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'Project ID is required'
+            })
+        if not project_version_id:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'Project version ID is required'
+            })
+        if not log_type:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'Log type is required'
+            })
+        
+        processing_log_object = None
+        if log_type == 'inspection_log':
+            processing_log_object = self.generate_inspection_log(project_id, project_version_id)
+        elif log_type == 'owner_deliverables_log':
+            processing_log_object = self.generate_owner_deliverables_log(project_id, project_version_id)
+        else:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'Invalid log type'
+            })
+        serializer = AiGeneratedLogSerializer(processing_log_object)
+        return Response(status=status.HTTP_200_OK, data=serializer.data)
 
 
     @action(detail=False, methods=['post'], url_path='generate-response')
@@ -744,10 +837,6 @@ class ChatViewSet(viewsets.ModelViewSet):
 
         if response_type == self.RESPONSE_TYPES.STANDARD:
             answer, message_sources = self.generate_standard_chat_response(chat, project_id, project_version_id, request.user.email, user_input, num_documents_to_return)
-        elif response_type == self.RESPONSE_TYPES.INSPECTION_LOG:
-            answer, message_sources = self.generate_inspection_log(chat, project_id, project_version_id, request.user)
-        elif response_type == self.RESPONSE_TYPES.OWNER_DELIVERABLES_LOG:
-            answer, message_sources = self.generate_owner_deliverables_log(chat, project_id, project_version_id, request.user)
         else:
             return Response(status=status.HTTP_400_BAD_REQUEST, data={
                 'error': 'Invalid response type'
