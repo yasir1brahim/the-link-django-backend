@@ -601,12 +601,12 @@ class ChatViewSet(viewsets.ModelViewSet):
 
         source_documents = results['source_documents']
         chat_message = chat_memory.message_db_object
-        chat_message.sources = [
+        message_sources = [
             {'metadata': x.metadata, 'page_content': x.page_content}
             for x in source_documents
         ]
+        chat_message.sources = message_sources
         chat_message.save()
-        message_sources = self._build_message_sources(source_documents)
         return results['answer'], message_sources
     
 
