@@ -239,7 +239,7 @@ def ai_log_generation_webhook(request):
                 log_status=new_status,
             )
         if new_status == 'FAILURE':
-            print(f"AI LOG GENERATION WEBHOOK: Failure for {request_data['log_type']} log for project {request_data['project_id']} project version {request_data['project_version_id']}")
+            print(f"AI LOG GENERATION WEBHOOK: Failure for {request_data.get('log_type', 'unknown')} log for project {request_data.get('project_id', 'unknown')} project version {request_data.get('project_version_id', 'unknown')}")
     elif new_status == 'PROCESSING':
         # Ensure there is a PROCESSING record referencing this id if provided
         if ai_generated_log_id:
@@ -714,12 +714,10 @@ class ChatViewSet(viewsets.ModelViewSet):
 
         return processing_log
     
-    def generate_owner_deliverables_log(self, chat, project_id, project_version_id, user):
+    def generate_owner_deliverables_log(self, project_id, project_version_id):
         processing_log = self.generate_general_log(
-            chat, 
             project_id, 
             project_version_id, 
-            user, 
             settings.OWNER_DELIVERABLES_PROMPTLAYER_PROMPT_NAME, 
             self.OwnerDeliverablesLog,
             self.OwnerDeliverablesRow
