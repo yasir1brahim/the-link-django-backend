@@ -319,7 +319,6 @@ Parser Item Classification: {result.get('item', '')}
                         "schema": BatchValidationResult.model_json_schema()
                     },
                 },
-                temperature=0.1
             )
             print("Batch validation result:")
             print(response.choices[0].message.content)
