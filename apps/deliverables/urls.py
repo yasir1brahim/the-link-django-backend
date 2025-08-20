@@ -33,6 +33,11 @@ single_project_router.register(
     views.ChatViewSet,
     basename='specgpt-chat',
 )
+single_project_router.register(
+    'ai-generated-logs',
+    views.AiGeneratedLogViewSet,
+    basename='ai-generated-log',
+)
 # notices
 single_project_router.register(
     'notices',
@@ -51,6 +56,7 @@ urlpatterns = [
     path('', include(router.urls)),
     path('upload-file/', views.upload_file, name='upload_file'),
     path('reprocess-document/', views.reprocess_document, name='reprocess_document'),
+    path('download-document/', views.download_document, name='download_document'),
     path('spec-status-webhook/', views.spec_status_webhook, name='spec_status_webhook'),
     path('excel-export-header/upsert/', views.UpsertExcelExportHeaderView.as_view(), name='upsert_excel_export_header'),
     path('excel-export-header/', views.GetExcelExportHeaderView.as_view(), name='get_excel_export_header'),
@@ -80,6 +86,7 @@ urlpatterns = [
 
     path('webhooks/full-spec-processing/', views.full_spec_processing_webhook, name='webhook-full-spec-processing'),
     path('webhooks/specgpt-embedding/', views.specgpt_embedding_webhook, name='webhook-specgpt-embedding'),
+    path('webhooks/ai-log-generation/', views.ai_log_generation_webhook, name='webhook-ai-log-generation'),
 ]
 
 

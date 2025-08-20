@@ -1,5 +1,6 @@
 import unittest
 from django.test import TestCase
+from pydantic import BaseModel, Field
 from apps.deliverables.utils import (
     extract_markdown_tables,
     parse_markdown_table,
@@ -9,7 +10,8 @@ from apps.deliverables.utils import (
     format_anchor_repr,
     ANCHOR_REPR_DELIMITER,
     merge_markdown_tables,
-    merge_tables_from_text
+    merge_tables_from_text,
+    convert_to_markdown_table
 )
 
 
@@ -685,6 +687,171 @@ class TestEdgeCases(TestCase):
         text = "This is just regular text with no tables."
         merged = merge_tables_from_text(text)
         self.assertEqual(merged, "")
+
+
+class TestConvertToMarkdownTable(TestCase):
+    """Test cases for convert_to_markdown_table function."""
+
+    def setUp(self):
+        """Set up test Pydantic models."""
+        class TestInspectionLogRow(BaseModel):
+            spec_section_number: str = Field(alias="Spec Section #", description="The section this item was found in")
+            spec_section_name: str = Field(alias="Spec Section Name", description="The name of the section")
+            inspection_type_and_requirements: str = Field(alias="Inspection Type and Requirements", description="The type and requirements of the inspection")
+            inspection_frequency: str = Field(alias="Inspection Frequency", description="The frequency of the inspection")
+            responsible_party: str = Field(alias="Responsible Party", description="The responsible party for the inspection")
+
+        class TestOwnerDeliverablesRow(BaseModel):
+            spec_section_number: str = Field(alias="Spec Section #", description="The section this item was found in")
+            spec_section_name: str = Field(alias="Spec Section Name", description="The name of the section")
+            deliverable_type: str = Field(alias="Deliverable Type", description="The type of deliverable")
+            when_due: str = Field(alias="When Due", description="The date the deliverable is due")
+            responsible_party: str = Field(alias="Responsible Party", description="The responsible party for the deliverable")
+            exact_requirement_text: str = Field(alias="Exact Requirement Text", description="The exact requirement text")
+
+        self.InspectionLogRow = TestInspectionLogRow
+        self.OwnerDeliverablesRow = TestOwnerDeliverablesRow
+
+    def test_convert_to_markdown_table_inspection_log(self):
+        """Test converting inspection log data to markdown table."""
+        test_data = [
+            {
+                "spec_section_number": "03 30 00",
+                "spec_section_name": "Cast-in-Place Concrete",
+                "inspection_type_and_requirements": "Concrete placement inspection",
+                "inspection_frequency": "Before each pour",
+                "responsible_party": "General Contractor"
+            },
+            {
+                "spec_section_number": "04 20 00",
+                "spec_section_name": "Masonry",
+                "inspection_type_and_requirements": "Mortar joint inspection",
+                "inspection_frequency": "Daily",
+                "responsible_party": "Masonry Contractor"
+            }
+        ]
+        
+        result = convert_to_markdown_table(test_data, self.InspectionLogRow)
+        
+        # Check that headers are correct
+        self.assertIn("| Spec Section # | Spec Section Name | Inspection Type and Requirements | Inspection Frequency | Responsible Party |", result)
+        
+        # Check that data rows are present
+        self.assertIn("| 03 30 00 | Cast-in-Place Concrete | Concrete placement inspection | Before each pour | General Contractor |", result)
+        self.assertIn("| 04 20 00 | Masonry | Mortar joint inspection | Daily | Masonry Contractor |", result)
+        
+        # Check that separator row is present
+        self.assertIn("| --- | --- | --- | --- | --- |", result)
+
+    def test_convert_to_markdown_table_owner_deliverables(self):
+        """Test converting owner deliverables data to markdown table."""
+        test_data = [
+            {
+                "spec_section_number": "01 30 00",
+                "spec_section_name": "Administrative Requirements",
+                "deliverable_type": "Submittal Procedures",
+                "when_due": "Before construction",
+                "responsible_party": "General Contractor",
+                "exact_requirement_text": "Submit shop drawings for review"
+            },
+            {
+                "spec_section_number": "02 20 00",
+                "spec_section_name": "Demolition",
+                "deliverable_type": "Demolition Plan",
+                "when_due": "2 weeks before demolition",
+                "responsible_party": "Demolition Contractor",
+                "exact_requirement_text": "Submit detailed demolition sequence"
+            }
+        ]
+        
+        result = convert_to_markdown_table(test_data, self.OwnerDeliverablesRow)
+        
+        # Check that headers are correct
+        self.assertIn("| Spec Section # | Spec Section Name | Deliverable Type | When Due | Responsible Party | Exact Requirement Text |", result)
+        
+        # Check that data rows are present
+        self.assertIn("| 01 30 00 | Administrative Requirements | Submittal Procedures | Before construction | General Contractor | Submit shop drawings for review |", result)
+        self.assertIn("| 02 20 00 | Demolition | Demolition Plan | 2 weeks before demolition | Demolition Contractor | Submit detailed demolition sequence |", result)
+
+    def test_convert_to_markdown_table_empty_data(self):
+        """Test converting empty data list."""
+        result = convert_to_markdown_table([], self.InspectionLogRow)
+        self.assertEqual(result, "")
+
+    def test_convert_to_markdown_table_missing_fields(self):
+        """Test converting data with missing fields."""
+        test_data = [
+            {
+                "spec_section_number": "03 30 00",
+                "spec_section_name": "Cast-in-Place Concrete",
+                # Missing inspection_type_and_requirements
+                "inspection_frequency": "Before each pour",
+                # Missing responsible_party
+            }
+        ]
+        
+        result = convert_to_markdown_table(test_data, self.InspectionLogRow)
+        
+        # Check that missing fields are handled as empty strings
+        self.assertIn("| 03 30 00 | Cast-in-Place Concrete |  | Before each pour |  |", result)
+
+    def test_convert_to_markdown_table_pipe_escaping(self):
+        """Test converting data with pipe characters that need escaping."""
+        test_data = [
+            {
+                "spec_section_number": "03 30 00",
+                "spec_section_name": "Cast-in-Place Concrete",
+                "inspection_type_and_requirements": "Concrete placement | Formwork inspection",
+                "inspection_frequency": "Before each pour",
+                "responsible_party": "General Contractor"
+            }
+        ]
+        
+        result = convert_to_markdown_table(test_data, self.InspectionLogRow)
+        
+        # Check that pipe characters are escaped
+        self.assertIn("Concrete placement \\| Formwork inspection", result)
+
+    def test_convert_to_markdown_table_field_order(self):
+        """Test that fields appear in the correct order as defined in the model."""
+        test_data = [
+            {
+                "spec_section_number": "03 30 00",
+                "spec_section_name": "Cast-in-Place Concrete",
+                "inspection_type_and_requirements": "Concrete placement inspection",
+                "inspection_frequency": "Before each pour",
+                "responsible_party": "General Contractor"
+            }
+        ]
+        
+        result = convert_to_markdown_table(test_data, self.InspectionLogRow)
+        lines = result.split('\n')
+        
+        # Check header order
+        header_line = lines[0]
+        expected_order = ["Spec Section #", "Spec Section Name", "Inspection Type and Requirements", "Inspection Frequency", "Responsible Party"]
+        
+        for i, expected_header in enumerate(expected_order):
+            self.assertIn(expected_header, header_line)
+
+    def test_convert_to_markdown_table_non_string_values(self):
+        """Test converting data with non-string values."""
+        test_data = [
+            {
+                "spec_section_number": "03 30 00",
+                "spec_section_name": "Cast-in-Place Concrete",
+                "inspection_type_and_requirements": "Concrete placement inspection",
+                "inspection_frequency": 5,  # Integer
+                "responsible_party": None  # None value
+            }
+        ]
+        
+        result = convert_to_markdown_table(test_data, self.InspectionLogRow)
+        
+        # Check that non-string values are converted to strings
+        self.assertIn("| 5 |", result)
+        self.assertIn("| None |", result)
+
 
 if __name__ == '__main__':
     unittest.main() 

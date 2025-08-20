@@ -353,3 +353,54 @@ def merge_tables_from_text(text: str, sort_by_column: str = None) -> str:
     print(f"MERGE TABLES: MERGED TABLE HEADERS: {headers}")
     print(f"MERGE TABLES: MERGED TABLE NUMBER OF DATA ROWS: {len(data_rows)}")
     return merged_table
+
+
+def convert_to_markdown_table(data: List[dict], model_class) -> str:
+    """
+    Convert a list of dictionaries to a markdown table using Pydantic model field aliases as headers.
+    
+    Args:
+        data: List of dictionaries containing the data
+        model_class: Pydantic model class that defines the structure and field aliases
+    
+    Returns:
+        Markdown table string
+    """
+    if not data:
+        return ""
+    
+    # Get field aliases from the Pydantic model
+    field_aliases = {}
+    for field_name, field_info in model_class.model_fields.items():
+        alias = field_info.alias or field_name
+        field_aliases[field_name] = alias
+    
+    # Get all field names in the order they appear in the model
+    field_names = list(model_class.model_fields.keys())
+    
+    # Create header row
+    headers = [field_aliases[field_name] for field_name in field_names]
+    header_row = "| " + " | ".join(headers) + " |"
+    
+    # Create separator row
+    separator_row = "| " + " | ".join(["---"] * len(headers)) + " |"
+    
+    # Create data rows
+    data_rows = []
+    for row_data in data:
+        # Extract values in the correct order, handling missing keys
+        row_values = []
+        for field_name in field_names:
+            field_alias = field_aliases[field_name]
+            value = row_data.get(field_alias, "")
+            # Convert to string and escape pipe characters
+            value_str = str(value).replace("|", "\\|")
+            row_values.append(value_str)
+        
+        data_row = "| " + " | ".join(row_values) + " |"
+        data_rows.append(data_row)
+    
+    # Combine all parts
+    markdown_table = "\n".join([header_row, separator_row] + data_rows)
+    
+    return markdown_table

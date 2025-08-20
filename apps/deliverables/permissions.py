@@ -1,7 +1,7 @@
 from rest_framework import permissions
 from rest_framework.request import Request
 from django.urls import reverse
-from .models import Project, ProjectVersion, SubmittalItem, Chat
+from .models import Project, ProjectVersion, SubmittalItem, Chat, AiGeneratedLog
 from apps.utils.feature_flags import is_versioning_feature_flag_active
 
 
@@ -89,4 +89,20 @@ class ChatAccessPermissions(permissions.BasePermission):
     
 
     def has_object_permission(self, request, view, obj: Chat):
+        return request.user.is_member_of_project(obj.project)
+
+
+class AiGeneratedLogAccessPermissions(permissions.BasePermission):
+    """
+    Permission to only allow members of a project to access AI generated logs.
+    """
+
+    def has_permission(self, request, view):
+        project_id = view.kwargs.get('project_id')
+        if project_id:
+            return request.user.is_member_of_project(project_id)
+        return True
+    
+
+    def has_object_permission(self, request, view, obj: AiGeneratedLog):
         return request.user.is_member_of_project(obj.project)

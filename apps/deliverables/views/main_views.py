@@ -1467,6 +1467,7 @@ def upload_file(request):
     
     files_to_process = []
     already_existing_files = []
+    duplicate_files_for_confirmation = []
     async_processing = []
     not_parsed = []
 
@@ -1501,7 +1502,14 @@ def upload_file(request):
             # check if file already exists
             matching_files = UploadedFile.objects.filter(md5=file_md5, name=file.name, project_id=project_id, project_version_id=project_version_id)
             if matching_files.exists():
-                already_existing_files.append(file.name)
+                # Instead of skipping, add to confirmation list with existing file info
+                existing_file = matching_files.first()
+                duplicate_files_for_confirmation.append({
+                    'filename': file.name,
+                    'existing_file_id': existing_file.id,
+                    'existing_file_name': existing_file.name,
+                    'upload_date': existing_file.created_at.isoformat() if existing_file.created_at else None
+                })
                 continue
 
             processing_method = UploadedFile.ProcessingMethodChoices.V1 if not is_v2_process_deliverables_flag_active else UploadedFile.ProcessingMethodChoices.V2
@@ -1559,6 +1567,7 @@ def upload_file(request):
     return Response({
         'error_parsing': not_parsed,
         'already_exist': already_existing_files,
+        'duplicate_files_for_confirmation': duplicate_files_for_confirmation,
         'async_processing': async_processing,
         'message': 'Files uploaded successfully'
     }, status=status.HTTP_200_OK)
@@ -2599,4 +2608,54 @@ def reprocess_document(request):
         logging.error(f"Error reprocessing document {uploaded_file.name}: {e}")
         return Response({
             'detail': f'Error starting document reprocessing: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    responses={200: {'description': 'Document download URL generated successfully'}},
+    description="Generate a presigned URL to download an uploaded document.",
+    methods=["GET"]
+)
+@api_view(['GET'])
+def download_document(request):
+    if not request.user.is_authenticated:
+        return Response({'detail': 'User is not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    document_id = request.query_params.get('document_id')
+    if not document_id:
+        return Response({'detail': 'document_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        uploaded_file = UploadedFile.objects.get(id=document_id)
+    except UploadedFile.DoesNotExist:
+        return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    project = uploaded_file.project
+    
+    # Check if user has access to the project
+    if not request.user.is_member_of_project(project):
+        return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        # Generate presigned URL for download
+        presigned_url = s3.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': settings.S3_BUCKET,
+                'Key': uploaded_file.document_path,
+                'ResponseContentDisposition': f'attachment; filename="{uploaded_file.name}"'
+            },
+            ExpiresIn=3600  # URL expires in 1 hour
+        )
+        
+        return Response({
+            'download_url': presigned_url,
+            'document_name': uploaded_file.name,
+            'document_id': document_id
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logging.error(f"Error generating download URL for document {uploaded_file.name}: {e}")
+        return Response({
+            'detail': f'Error generating download URL: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
