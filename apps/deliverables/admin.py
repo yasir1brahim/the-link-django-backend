@@ -12,7 +12,7 @@ from django.shortcuts import redirect
 from django.urls import reverse
 from pydantic import BaseModel, Field
 from promptlayer.templates import TemplateManager
-
+import traceback
 from typing import Literal
 import json
 import csv
@@ -158,6 +158,7 @@ class ParserValidationToolView(View):
             })
                 
         except Exception as e:
+            print(traceback.format_exc())
             return JsonResponse({
                 'success': False,
                 'error': str(e)
@@ -179,12 +180,13 @@ class ParserValidationToolView(View):
         keywords_text = str(keywords)
         
         # Process in batches
-        batch_size = 10  # Process 10 items per API call
+        batch_size = 20  # Process 20 items per API call
         validation_results = []
         
         for i in range(0, len(parser_results), batch_size):
             batch = parser_results[i:i + batch_size]
             batch_results = self._process_batch(batch, spec_pdf.name, pdf_base64, keywords_text)
+            print("Got batch results")
             validation_results.extend(batch_results)
             print(f"Batch {i//batch_size + 1} results: {batch_results}")
         
@@ -194,9 +196,10 @@ class ParserValidationToolView(View):
         """Process a batch of parser results in a single OpenAI call."""
         # Create batch prompt
         batch_prompt = self._create_batch_prompt(batch, keywords_text)
+        model_name = self.get_promptlayer_model_metadata(self.get_promptlayer_template('classification_checker'))['name']
         
         # Call OpenAI
-        llm_response = self._call_openai(batch_prompt, pdf_filename, pdf_base64)
+        llm_response = self._call_openai(batch_prompt, pdf_filename, pdf_base64, model_name)
         
         # Parse batch response
         return self._parse_batch_response(llm_response, batch)
@@ -246,6 +249,7 @@ Parser Item Classification: {result.get('item', '')}
         """Parse the batch response and format it according to the required structure."""
         try:
             parsed_response = json.loads(llm_response)['results']
+            print("Got Parsed response")
             
             # Handle both single object and array responses
             if isinstance(parsed_response, dict):
@@ -259,8 +263,14 @@ Parser Item Classification: {result.get('item', '')}
             
             results = parsed_response
             for i, original_item in enumerate(batch):
-                results[i]['text'] = original_item['text']
-                results[i]['paragraph_number'] = original_item['paragraph_number']
+                try:
+                    results[i]['text'] = original_item['text']
+                    results[i]['paragraph_number'] = original_item['paragraph_number']
+                except Exception as e:
+                    print(traceback.format_exc())
+                    print(f"Error transforming response for item {i}")
+                    print(f"Original item: {original_item}")
+            print("Transformed response to include text and paragraph number")
             return results
             
         except json.JSONDecodeError:
@@ -283,13 +293,13 @@ Parser Item Classification: {result.get('item', '')}
             return fallback_results
 
 
-    def _call_openai(self, prompt: str, pdf_filename: str, pdf_base64: str) -> str:
+    def _call_openai(self, prompt: str, pdf_filename: str, pdf_base64: str, model_name: str) -> str:
         """Call OpenAI API with the prompt and PDF context."""
         try:
             client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
             
             response = client.chat.completions.create(
-                model="gpt-5-mini",
+                model=model_name,
                 messages=[
                     {
                         "role": "system",
