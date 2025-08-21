@@ -270,7 +270,6 @@ Parser Item Classification: {result.get('item', '')}
                     print(traceback.format_exc())
                     print(f"Error transforming response for item {i}")
                     print(f"Original item: {original_item}")
-                    print(f"Results: {results[i]}")
             print("Transformed response to include text and paragraph number")
             return results
             
