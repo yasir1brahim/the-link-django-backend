@@ -17,7 +17,7 @@ from ..invitations import send_invitation, process_invitation
 from ..models import Team, Invitation, Membership
 from ..permissions import TeamAccessPermissions, TeamModelAccessPermissions
 from ..roles import is_admin, is_member, ROLE_ADMIN
-from ..serializers import TeamSerializer, InvitationSerializer, MembershipSerializer, InvitedUserResetPasswordSerializer
+from ..serializers import TeamSerializer, TeamListSerializer, InvitationSerializer, MembershipSerializer, InvitedUserResetPasswordSerializer
 from apps.users.serializers import CustomPasswordResetSerializer
 from rest_framework.viewsets import ViewSet
 from apps.users.models import CustomUser as User
@@ -52,13 +52,23 @@ class TeamViewSet(
     viewsets.GenericViewSet
 ):
     queryset = Team.objects.all().prefetch_related('flag_set')
-    serializer_class = TeamSerializer
     permission_classes = (IsAuthenticatedOrHasUserAPIKey, TeamAccessPermissions)
 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return TeamListSerializer
+        return TeamSerializer
+
     def get_queryset(self):
+        if self.action == 'list':
+            # For list action, use optimized queryset with minimal prefetching
+            if self.request.user.is_superuser:
+                return Team.objects.all().order_by("name")
+            return self.request.user.teams.order_by("name")
+        
+        # For other actions, use the full queryset with prefetching
         if self.request.user.is_superuser:
             return self.queryset.order_by("name")
-        # filter queryset based on logged in user
         return self.request.user.teams.order_by("name")
 
     

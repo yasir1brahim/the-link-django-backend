@@ -42,6 +42,50 @@ class InvitationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Invitation
         fields = ("id", "team", "email", "role", "invited_by", "is_accepted")
+
+
+class TeamListSerializer(serializers.ModelSerializer):
+    """
+    Lightweight serializer for team list view - only returns essential fields
+    to reduce overfetching and improve performance
+    """
+    active_count = serializers.SerializerMethodField()
+    member_count = serializers.SerializerMethodField()
+    user_role = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Team
+        fields = (
+            "id",
+            "name",
+            "active_count",
+            "member_count",
+            "user_role"
+        )
+
+    def get_active_count(self, obj) -> int:
+        user = self.context["request"].user
+        if user.is_superuser:
+            return obj.project_set.filter(is_archived=False).count()
+        if obj.members.filter(id=user.id).exists():
+            if user.is_admin_for_team(obj):
+                return obj.project_set.filter(is_archived=False).count()
+            return obj.project_set.filter(is_archived=False, members=user).count()
+        return 0
+
+    def get_member_count(self, obj) -> int:
+        return obj.members.count()
+
+    def get_user_role(self, obj) -> str:
+        user = self.context["request"].user
+        if user.is_superuser:
+            return 'admin'
+        
+        try:
+            membership = obj.membership_set.get(user=user)
+            return membership.role
+        except obj.membership_set.model.DoesNotExist:
+            return 'member'  # Default role if not found
     
 class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer):
     slug = serializers.SlugField(
