@@ -243,7 +243,7 @@ class InvitedUserResetPasswordViewSet(ViewSet):
             return Response({"error": "Password reset email failed."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
     def _resend_invitation(self, request, email, team, role, first_name, last_name):
-        """Resend invitation by sending a password reset email."""
+        """Add existing user to team and send password reset email."""
         user = User.objects.get(email=email)
         updates = {}
         if user.first_name != first_name:
@@ -259,6 +259,9 @@ class InvitedUserResetPasswordViewSet(ViewSet):
             if membership.role != role:
                 membership.role = role
                 membership.save()
+        else:
+            Membership.objects.create(user=user, team=team, role=role)
+        # Generate new password and send reset email
         new_password = self._generate_password()
         user.set_password(new_password)
         user.save()
