@@ -78,14 +78,14 @@ class TeamListSerializer(serializers.ModelSerializer):
 
     def get_user_role(self, obj) -> str:
         user = self.context["request"].user
-        if user.is_superuser:
-            return 'admin'
         
         try:
+            # Get the user's membership in this specific team
             membership = obj.membership_set.get(user=user)
             return membership.role
         except obj.membership_set.model.DoesNotExist:
-            return 'member'  # Default role if not found
+            # If user is not a member of this team, return 'member' as default
+            return 'member'
     
 class TeamSerializer(WritableNestedModelSerializer, serializers.ModelSerializer):
     slug = serializers.SlugField(
