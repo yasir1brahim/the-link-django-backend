@@ -195,15 +195,15 @@ class InvitedUserResetPasswordViewSet(ViewSet):
             team = self._get_team(team_id)
             user_exists = self._check_user_exists(email)
             if user_exists:
-                self._resend_invitation(request, email, team, role, first_name, last_name)
-                return Response({"message": "User already exists."}, 
+                self._add_existing_user_to_team(request, email, team, role, first_name, last_name)
+                return Response({"message": "User has been added to the company. A notification email has been sent."}, 
                                 status=status.HTTP_200_OK)
             
             default_password = self._generate_password()
             user = self._create_user(data, default_password)
             self._create_membership(user, team, data['role'])
             self._send_password_reset_email(request, email, default_password)
-            return Response({"message": "User created and password reset email sent."}, status=status.HTTP_201_CREATED)
+            return Response({"message": "User created successfully. A password reset email has been sent."}, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -241,9 +241,59 @@ class InvitedUserResetPasswordViewSet(ViewSet):
             password_reset_serializer.save()
         else:
             return Response({"error": "Password reset email failed."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _send_team_added_notification_email(self, request, user, team, role):
+        """Send notification email that user has been added to a team."""
+        import logging
+        from django.core.mail import send_mail
+        from django.template.loader import render_to_string
+        from django.utils.translation import gettext_lazy as _
+        from django.conf import settings
         
-    def _resend_invitation(self, request, email, team, role, first_name, last_name):
-        """Add existing user to team and send password reset email."""
+        logger = logging.getLogger(__name__)
+        
+        subject = _("You've been added to {}").format(team.name)
+        
+        context = {
+            'user': user,
+            'team': team,
+            'role': role,
+            'project_name': settings.PROJECT_METADATA.get("NAME", "The Link"),
+        }
+        
+        # Render email templates
+        message_text = render_to_string("teams/email/team_added_notification.txt", context)
+        message_html = render_to_string("teams/email/team_added_notification.html", context)
+        
+        # Log email details for testing
+        logger.info(f"=== TEAM ADDED NOTIFICATION EMAIL ===")
+        logger.info(f"To: {user.email}")
+        logger.info(f"Subject: {subject}")
+        logger.info(f"Team: {team.name}")
+        logger.info(f"Role: {role}")
+        logger.info(f"User ID: {user.id}")
+        logger.info(f"User First Name: '{user.first_name}'")
+        logger.info(f"User Last Name: '{user.last_name}'")
+        logger.info(f"User Email: '{user.email}'")
+        logger.info(f"Context Data: {context}")
+        logger.info(f"Text Content: {message_text}")
+        logger.info(f"HTML Content: {message_html}")
+        logger.info(f"From Email: {settings.DEFAULT_FROM_EMAIL}")
+        logger.info(f"=====================================")
+        
+        send_mail(
+            subject=subject,
+            message=message_text,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+            html_message=message_html,
+        )
+        
+        logger.info(f"Email sent successfully to {user.email}")
+        
+    def _add_existing_user_to_team(self, request, email, team, role, first_name, last_name):
+        """Add existing user to team and send notification email."""
         user = User.objects.get(email=email)
         updates = {}
         if user.first_name != first_name:
@@ -261,8 +311,5 @@ class InvitedUserResetPasswordViewSet(ViewSet):
                 membership.save()
         else:
             Membership.objects.create(user=user, team=team, role=role)
-        # Generate new password and send reset email
-        new_password = self._generate_password()
-        user.set_password(new_password)
-        user.save()
-        self._send_password_reset_email(request, email, new_password)
+        # Send notification email that user has been added to the team
+        self._send_team_added_notification_email(request, user, team, role)
