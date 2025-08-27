@@ -341,7 +341,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 data['document_details'] = filtered_documents
                 data['doc_parsed'] = len(filtered_documents)
             except ProjectVersion.DoesNotExist:
-                pass
+                data['document_details'] = []
+                data['doc_parsed'] = 0
+                data['error'] = f"ProjectVersion with id {project_version_id} does not exist for this project."
         
         return Response(data)
 
