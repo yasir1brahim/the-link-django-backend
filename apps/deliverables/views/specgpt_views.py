@@ -55,6 +55,7 @@ from apps.deliverables.models import (
 
 from langchain.memory import ConversationBufferMemory
 from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv, merge_tables_from_text, convert_to_markdown_table
+from apps.utils.feature_flags import is_inspection_log_use_data_tables_feature_flag_active
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
@@ -211,6 +212,8 @@ def ai_log_generation_webhook(request):
     if new_status in ['SUCCESS', 'FAILURE']:
         # Prefer updating by explicit log id if provided
         log_obj = None
+        markdown_table = request_data.get('table', '')
+        markdown_table = markdown_table.decode("utf-8", errors="replace").replace("\x00", "\uFFFD")
         if ai_generated_log_id:
             try:
                 log_obj = AiGeneratedLog.objects.get(id=int(ai_generated_log_id))
@@ -228,14 +231,14 @@ def ai_log_generation_webhook(request):
         if log_obj:
             log_obj.log_status = new_status
             if request_data.get('table') is not None:
-                log_obj.log_table = request_data['table']
+                log_obj.log_table = markdown_table
             log_obj.save()
         else:
             AiGeneratedLog.objects.create(
                 project_id=request_data['project_id'],
                 project_version_id=request_data['project_version_id'],
                 log_type=request_data['log_type'],
-                log_table=request_data.get('table'),
+                log_table=markdown_table,
                 log_status=new_status,
             )
         if new_status == 'FAILURE':
@@ -631,7 +634,7 @@ class ChatViewSet(viewsets.ModelViewSet):
     class OwnerDeliverablesLog(BaseModel):
         results: List['OwnerDeliverablesRow'] = Field(description="List of owner deliverables rows")
 
-    def generate_general_log(self, project_id, project_version_id, promptlayer_template_name, full_log_model, log_row_model):
+    def generate_general_log(self, project_id, project_version_id, promptlayer_template_name, full_log_model, log_row_model, request=None):
         try:
             promptlayer_template = self.get_promptlayer_template(promptlayer_template_name)
         except Exception as e:
@@ -652,6 +655,19 @@ class ChatViewSet(viewsets.ModelViewSet):
             'file_s3_key': spec_section.file_s3_key
         } for spec_section in project_version_specs if spec_section.file_s3_key]
         s3_bucket = settings.S3_BUCKET
+
+        # Check if the inspection_log_use_data_tables feature flag is active
+        use_data_tables = False
+        if request and hasattr(request, 'user'):
+            try:
+                project = Project.objects.get(id=project_id)
+                team = project.team
+                user = request.user
+                use_data_tables = is_inspection_log_use_data_tables_feature_flag_active(user, team, project)
+                print(f"Feature flag check - use_data_tables: {use_data_tables}")
+            except Exception as e:
+                print(f"Error checking feature flag: {str(e)}")
+                use_data_tables = False
 
         # Create a processing record so the UI can reflect loading state immediately
         processing_log = None
@@ -683,18 +699,20 @@ class ChatViewSet(viewsets.ModelViewSet):
                 'temperature': temperature,
                 'top_p': top_p,
                 'chunk_size': settings.OPENAI_MODEL_MAX_CONTEXT_SIZE,
+                'use_data_tables': use_data_tables,
             }
         )
         return processing_log
 
 
-    def generate_inspection_log(self, project_id, project_version_id):
+    def generate_inspection_log(self, project_id, project_version_id, request=None):
         processing_log = self.generate_general_log(
             project_id, 
             project_version_id, 
             settings.INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME, 
             self.InspectionLog,
-            self.InspectionLogRow
+            self.InspectionLogRow,
+            request
         )
 
         # save chat messages
@@ -714,13 +732,14 @@ class ChatViewSet(viewsets.ModelViewSet):
 
         return processing_log
     
-    def generate_owner_deliverables_log(self, project_id, project_version_id):
+    def generate_owner_deliverables_log(self, project_id, project_version_id, request=None):
         processing_log = self.generate_general_log(
             project_id, 
             project_version_id, 
             settings.OWNER_DELIVERABLES_PROMPTLAYER_PROMPT_NAME, 
             self.OwnerDeliverablesLog,
-            self.OwnerDeliverablesRow
+            self.OwnerDeliverablesRow,
+            request
         )
 
         # # save chat messages
@@ -762,9 +781,9 @@ class ChatViewSet(viewsets.ModelViewSet):
         
         processing_log_object = None
         if log_type == 'inspection_log':
-            processing_log_object = self.generate_inspection_log(project_id, project_version_id)
+            processing_log_object = self.generate_inspection_log(project_id, project_version_id, request)
         elif log_type == 'owner_deliverables_log':
-            processing_log_object = self.generate_owner_deliverables_log(project_id, project_version_id)
+            processing_log_object = self.generate_owner_deliverables_log(project_id, project_version_id, request)
         else:
             return Response(status=status.HTTP_400_BAD_REQUEST, data={
                 'error': 'Invalid log type'
