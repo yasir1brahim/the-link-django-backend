@@ -35,7 +35,7 @@ Add a new `log_data` JSONField to the existing `AiGeneratedLog` model to store s
    ```python
    log_data = models.JSONField(blank=True, null=True, help_text="Structured data for inspection logs and owner deliverables logs")
    ```
-2. Generate migration: `python manage.py makemigrations deliverables`
+2. Generate migration: `docker-compose exec web python manage.py makemigrations deliverables`
 3. Review generated migration file
 4. Update model's `__str__` method if needed
 5. Add field to model's Meta class if needed
