@@ -417,8 +417,58 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             # For detail views, only filter by project_id
             queryset = queryset.filter(project_id=project_id)
         
-        # Order by creation date (newest first)
+        # Apply sorting
+        queryset = self.apply_sorting(queryset)
+        
+        return queryset
+    
+    def apply_sorting(self, queryset):
+        """
+        Apply sorting to the queryset based on query parameters.
+        For structured data, sorting is done in Python after retrieval.
+        """
+        # Get sorting parameters
+        order_by = self.request.query_params.get('order_by', 'created_at')
+        order_direction = self.request.query_params.get('order', 'desc')
+        
+        # Validate sorting parameters
+        valid_sort_fields = self.get_valid_sort_fields()
+        if order_by not in valid_sort_fields:
+            order_by = 'created_at'  # Default
+        
+        # Apply database sorting for non-structured fields
+        if order_by == 'created_at':
+            if order_direction == 'desc':
+                return queryset.order_by('-created_at')
+            else:
+                return queryset.order_by('created_at')
+        
+        # For structured data fields, we'll sort in Python after retrieval
+        # Store sorting info in request for use in serializer
+        self.request.sort_field = order_by
+        self.request.sort_direction = order_direction
+        
+        # Default to created_at desc for database query
         return queryset.order_by('-created_at')
+    
+    def get_valid_sort_fields(self):
+        """
+        Get valid sort fields based on log type.
+        """
+        log_type = self.request.query_params.get('log_type')
+        
+        if log_type == 'inspection_log':
+            return [
+                'created_at', 'spec_section_number', 'spec_section_name',
+                'inspection_type_and_requirements', 'inspection_frequency', 'responsible_party'
+            ]
+        elif log_type == 'owner_deliverables_log':
+            return [
+                'created_at', 'spec_section_number', 'spec_section_name',
+                'deliverable_type', 'when_due', 'responsible_party', 'exact_requirement_text'
+            ]
+        else:
+            return ['created_at']  # Default
 
 
 class CustomPromptLayerCallbackHandler(PromptLayerCallbackHandler):

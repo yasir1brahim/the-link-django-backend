@@ -61,6 +61,62 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
             # Log error and default to markdown for safety
             print(f"Error determining data format for log {obj.id}: {str(e)}")
             return 'markdown'
+    
+    def to_representation(self, instance):
+        """
+        Override to_representation to apply sorting to structured data.
+        """
+        data = super().to_representation(instance)
+        
+        # Apply sorting to log_data if it exists and sorting parameters are provided
+        if data.get('log_data') and hasattr(self.context.get('request', {}), 'sort_field'):
+            request = self.context.get('request')
+            sort_field = getattr(request, 'sort_field', None)
+            sort_direction = getattr(request, 'sort_direction', 'desc')
+            
+            if sort_field and sort_field != 'created_at':
+                data['log_data'] = self.sort_structured_data(data['log_data'], sort_field, sort_direction)
+        
+        return data
+    
+    def sort_structured_data(self, log_data, sort_field, sort_direction):
+        """
+        Sort structured data by the specified field and direction.
+        """
+        try:
+            # Map field names to the actual keys in the structured data
+            field_mapping = {
+                'spec_section_number': 'Spec Section #',
+                'spec_section_name': 'Spec Section Name',
+                'inspection_type_and_requirements': 'Inspection Type And Requirements',
+                'inspection_frequency': 'Inspection Frequency',
+                'responsible_party': 'Responsible Party',
+                'deliverable_type': 'Deliverable Type',
+                'when_due': 'When Due',
+                'exact_requirement_text': 'Exact Requirement Text'
+            }
+            
+            # Get the actual field key
+            field_key = field_mapping.get(sort_field, sort_field)
+            
+            # Sort the data
+            reverse = sort_direction == 'desc'
+            
+            # Handle None values by placing them at the end
+            def sort_key(item):
+                value = item.get(field_key, '')
+                if value is None:
+                    return '' if reverse else 'zzz'  # Place None at end for desc, beginning for asc
+                return str(value).lower()
+            
+            sorted_data = sorted(log_data, key=sort_key, reverse=reverse)
+            
+            return sorted_data
+            
+        except Exception as e:
+            # Log error and return original data
+            print(f"Error sorting structured data: {str(e)}")
+            return log_data
 
 
 
