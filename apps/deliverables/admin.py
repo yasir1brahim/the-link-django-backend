@@ -23,7 +23,8 @@ import openai
 from django.conf import settings
 from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
     UploadedFile, SpecSection, MasterFormatSection,
-    SubmittalItemList, ExcelExportHeader, ProjectVersion, Chat, ChatMessage
+    SubmittalItemList, ExcelExportHeader, ProjectVersion, Chat, ChatMessage,
+    AiGeneratedLog
 )
 
 
@@ -372,4 +373,39 @@ class ChatMessageAdmin(admin.ModelAdmin):
     list_display = ["id", "chat", "created_at"]
     list_filter = ["chat"]
     search_fields = ["chat__user__email"]
+
+
+@admin.register(AiGeneratedLog)
+class AiGeneratedLogAdmin(admin.ModelAdmin):
+    list_display = ["id", "project", "project_version", "log_type", "log_status", "created_at"]
+    list_filter = ["log_type", "log_status", "created_at", "project", "project_version"]
+    search_fields = ["project__name", "project_version__version_name", "log_type"]
+    readonly_fields = ["created_at"]
+    list_per_page = 50
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('project', 'project_version', 'log_type', 'log_status')
+        }),
+        ('Content', {
+            'fields': ('log_table', 'log_data'),
+            'classes': ('collapse',)
+        }),
+        ('Metadata', {
+            'fields': ('created_at',),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def has_add_permission(self, request):
+        """Disable manual creation of AI generated logs."""
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        """Allow viewing but not editing."""
+        return False
+    
+    def has_delete_permission(self, request, obj=None):
+        """Allow deletion for admin users."""
+        return request.user.is_superuser
 
