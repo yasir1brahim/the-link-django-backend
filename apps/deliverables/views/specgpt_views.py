@@ -195,7 +195,60 @@ class AiLogGenerationRequest(TypedDict):
     project_id: str
     project_version_id: str
     new_status: str
-    table: str
+    table: str | Optional[List[dict]] # markdown table or structured data from Lambda
+
+
+def _process_log_data(log_data, log_type, markdown_table):
+    """
+    Helper function to process log data and convert structured data to markdown.
+    
+    Args:
+        log_data: Structured data list or None
+        log_type: Type of log ('inspection_log' or 'owner_deliverables_log')
+        markdown_table: Fallback markdown string
+    
+    Returns:
+        tuple: (processed_log_data, processed_markdown_table)
+    """
+    if log_data is not None:
+        # Structured data received
+        print(f"Processing structured data: {len(log_data)} items")
+        
+        # Convert structured data to markdown for fallback
+        try:
+            if log_data and len(log_data) > 0:
+                # Determine the appropriate model class based on log_type
+                if log_type == 'inspection_log':
+                    # Access InspectionLogRow from ChatViewSet
+                    viewset = ChatViewSet()
+                    model_class = viewset.InspectionLogRow
+                elif log_type == 'owner_deliverables_log':
+                    # Access OwnerDeliverablesRow from ChatViewSet
+                    viewset = ChatViewSet()
+                    model_class = viewset.OwnerDeliverablesRow
+                else:
+                    model_class = None
+                
+                if model_class:
+                    markdown_from_data = convert_to_markdown_table(log_data, model_class)
+                    print(f"Converted structured data to markdown")
+                    return log_data, markdown_from_data
+                else:
+                    # Fallback to empty string if model class not found
+                    print(f"Model class not found for log_type: {log_type}")
+                    return log_data, ''
+            else:
+                # Empty structured data
+                print("Empty structured data received")
+                return log_data, ''
+        except Exception as e:
+            print(f"Error converting structured data to markdown: {str(e)}")
+            # Fallback to empty string
+            return log_data, ''
+    else:
+        # Markdown data received
+        print(f"Processing markdown data: {len(markdown_table)} characters")
+        return None, markdown_table
 
 
 @api_view(['POST'])
@@ -212,8 +265,23 @@ def ai_log_generation_webhook(request):
     if new_status in ['SUCCESS', 'FAILURE']:
         # Prefer updating by explicit log id if provided
         log_obj = None
-        markdown_table = request_data.get('table', '')
-        markdown_table = markdown_table.decode("utf-8", errors="replace").replace("\x00", "\uFFFD")
+        
+        # Handle data from Lambda (could be markdown string or structured data)
+        table_data = request_data.get('table', '')
+        
+        # Determine if we have structured data or markdown
+        log_data = None
+        markdown_table = ''
+        
+        if isinstance(table_data, list):
+            # Structured data received
+            log_data = table_data
+            print(f"Received structured data: {len(log_data)} items")
+        else:
+            # Markdown string received
+            markdown_table = table_data.decode("utf-8", errors="replace").replace("\x00", "\uFFFD") if isinstance(table_data, bytes) else str(table_data)
+            print(f"Received markdown data: {len(markdown_table)} characters")
+        
         if ai_generated_log_id:
             try:
                 log_obj = AiGeneratedLog.objects.get(id=int(ai_generated_log_id))
@@ -230,17 +298,36 @@ def ai_log_generation_webhook(request):
 
         if log_obj:
             log_obj.log_status = new_status
-            if request_data.get('table') is not None:
-                log_obj.log_table = markdown_table
+            
+            # Process log data using helper function
+            processed_log_data, processed_markdown = _process_log_data(log_data, request_data['log_type'], markdown_table)
+            
+            # Store processed data
+            if processed_log_data is not None:
+                log_obj.log_data = processed_log_data
+                print(f"Stored structured data for log {log_obj.id}: {len(processed_log_data)} items")
+            log_obj.log_table = processed_markdown
+            
             log_obj.save()
         else:
-            AiGeneratedLog.objects.create(
-                project_id=request_data['project_id'],
-                project_version_id=request_data['project_version_id'],
-                log_type=request_data['log_type'],
-                log_table=markdown_table,
-                log_status=new_status,
-            )
+            # Create new log entry
+            log_entry_data = {
+                'project_id': request_data['project_id'],
+                'project_version_id': request_data['project_version_id'],
+                'log_type': request_data['log_type'],
+                'log_status': new_status,
+            }
+            
+            # Process log data using helper function
+            processed_log_data, processed_markdown = _process_log_data(log_data, request_data['log_type'], markdown_table)
+            
+            # Add processed data to log entry
+            if processed_log_data is not None:
+                log_entry_data['log_data'] = processed_log_data
+                print(f"Created new log with structured data: {len(processed_log_data)} items")
+            log_entry_data['log_table'] = processed_markdown
+            
+            AiGeneratedLog.objects.create(**log_entry_data)
         if new_status == 'FAILURE':
             print(f"AI LOG GENERATION WEBHOOK: Failure for {request_data.get('log_type', 'unknown')} log for project {request_data.get('project_id', 'unknown')} project version {request_data.get('project_version_id', 'unknown')}")
     elif new_status == 'PROCESSING':
