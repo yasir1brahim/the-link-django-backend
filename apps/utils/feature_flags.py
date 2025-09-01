@@ -41,3 +41,19 @@ def is_inspection_log_use_data_tables_feature_flag_active(user, team, project):
     return (settings.INSPECTION_LOG_USE_DATA_TABLES_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
             settings.INSPECTION_LOG_USE_DATA_TABLES_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
             settings.INSPECTION_LOG_USE_DATA_TABLES_FEATURE_FLAG_NAME in get_active_flags_for_project(project))
+
+def is_qa_planner_feature_flag_active(user, team, project=None):
+    """
+    Check if the qa_planner feature flag is active for the given user/team/project.
+    
+    Args:
+        user: User object
+        team: Team object
+        project: Optional Project object
+        
+    Returns:
+        bool: True if flag is active, False otherwise
+    """
+    return (settings.QA_PLANNER_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
+            settings.QA_PLANNER_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
+            (project and settings.QA_PLANNER_FEATURE_FLAG_NAME in get_active_flags_for_project(project)))
