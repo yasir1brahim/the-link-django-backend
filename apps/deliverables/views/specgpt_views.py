@@ -12,6 +12,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status, viewsets
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.decorators import action
 import pymupdf
 from openai import OpenAI
@@ -55,6 +56,7 @@ from apps.deliverables.models import (
 
 from langchain.memory import ConversationBufferMemory
 from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv, merge_tables_from_text, convert_to_markdown_table
+from apps.utils.feature_flags import is_inspection_log_use_data_tables_feature_flag_active
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
@@ -194,7 +196,60 @@ class AiLogGenerationRequest(TypedDict):
     project_id: str
     project_version_id: str
     new_status: str
-    table: str
+    table: str | Optional[List[dict]] # markdown table or structured data from Lambda
+
+
+def _process_log_data(log_data, log_type, markdown_table):
+    """
+    Helper function to process log data and convert structured data to markdown.
+    
+    Args:
+        log_data: Structured data list or None
+        log_type: Type of log ('inspection_log' or 'owner_deliverables_log')
+        markdown_table: Fallback markdown string
+    
+    Returns:
+        tuple: (processed_log_data, processed_markdown_table)
+    """
+    if log_data is not None:
+        # Structured data received
+        print(f"Processing structured data: {len(log_data)} items")
+        
+        # Convert structured data to markdown for fallback
+        try:
+            if log_data and len(log_data) > 0:
+                # Determine the appropriate model class based on log_type
+                if log_type == 'inspection_log':
+                    # Access InspectionLogRow from ChatViewSet
+                    viewset = ChatViewSet()
+                    model_class = viewset.InspectionLogRow
+                elif log_type == 'owner_deliverables_log':
+                    # Access OwnerDeliverablesRow from ChatViewSet
+                    viewset = ChatViewSet()
+                    model_class = viewset.OwnerDeliverablesRow
+                else:
+                    model_class = None
+                
+                if model_class:
+                    markdown_from_data = convert_to_markdown_table(log_data, model_class)
+                    print(f"Converted structured data to markdown")
+                    return log_data, markdown_from_data
+                else:
+                    # Fallback to empty string if model class not found
+                    print(f"Model class not found for log_type: {log_type}")
+                    return log_data, ''
+            else:
+                # Empty structured data
+                print("Empty structured data received")
+                return log_data, ''
+        except Exception as e:
+            print(f"Error converting structured data to markdown: {str(e)}")
+            # Fallback to empty string
+            return log_data, ''
+    else:
+        # Markdown data received
+        print(f"Processing markdown data: {len(markdown_table)} characters")
+        return None, markdown_table
 
 
 @api_view(['POST'])
@@ -211,6 +266,23 @@ def ai_log_generation_webhook(request):
     if new_status in ['SUCCESS', 'FAILURE']:
         # Prefer updating by explicit log id if provided
         log_obj = None
+        
+        # Handle data from Lambda (could be markdown string or structured data)
+        table_data = request_data.get('table', '')
+        
+        # Determine if we have structured data or markdown
+        log_data = None
+        markdown_table = ''
+        
+        if isinstance(table_data, list):
+            # Structured data received
+            log_data = table_data
+            print(f"Received structured data: {len(log_data)} items")
+        else:
+            # Markdown string received
+            markdown_table = table_data.decode("utf-8", errors="replace").replace("\x00", "\uFFFD") if isinstance(table_data, bytes) else str(table_data)
+            print(f"Received markdown data: {len(markdown_table)} characters")
+        
         if ai_generated_log_id:
             try:
                 log_obj = AiGeneratedLog.objects.get(id=int(ai_generated_log_id))
@@ -227,17 +299,36 @@ def ai_log_generation_webhook(request):
 
         if log_obj:
             log_obj.log_status = new_status
-            if request_data.get('table') is not None:
-                log_obj.log_table = request_data['table']
+            
+            # Process log data using helper function
+            processed_log_data, processed_markdown = _process_log_data(log_data, request_data['log_type'], markdown_table)
+            
+            # Store processed data
+            if processed_log_data is not None:
+                log_obj.log_data = processed_log_data
+                print(f"Stored structured data for log {log_obj.id}: {len(processed_log_data)} items")
+            log_obj.log_table = processed_markdown
+            
             log_obj.save()
         else:
-            AiGeneratedLog.objects.create(
-                project_id=request_data['project_id'],
-                project_version_id=request_data['project_version_id'],
-                log_type=request_data['log_type'],
-                log_table=request_data.get('table'),
-                log_status=new_status,
-            )
+            # Create new log entry
+            log_entry_data = {
+                'project_id': request_data['project_id'],
+                'project_version_id': request_data['project_version_id'],
+                'log_type': request_data['log_type'],
+                'log_status': new_status,
+            }
+            
+            # Process log data using helper function
+            processed_log_data, processed_markdown = _process_log_data(log_data, request_data['log_type'], markdown_table)
+            
+            # Add processed data to log entry
+            if processed_log_data is not None:
+                log_entry_data['log_data'] = processed_log_data
+                print(f"Created new log with structured data: {len(processed_log_data)} items")
+            log_entry_data['log_table'] = processed_markdown
+            
+            AiGeneratedLog.objects.create(**log_entry_data)
         if new_status == 'FAILURE':
             print(f"AI LOG GENERATION WEBHOOK: Failure for {request_data.get('log_type', 'unknown')} log for project {request_data.get('project_id', 'unknown')} project version {request_data.get('project_version_id', 'unknown')}")
     elif new_status == 'PROCESSING':
@@ -289,6 +380,8 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AiGeneratedLog.objects.all()
     permission_classes = [IsAuthenticated, AiGeneratedLogAccessPermissions]
     serializer_class = AiGeneratedLogSerializer
+    pagination_class = PageNumberPagination
+    page_size = 50  # Default page size for structured data
 
     def get_queryset(self):
         """
@@ -304,6 +397,13 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         if not project_id:
             from rest_framework.exceptions import ValidationError
             raise ValidationError({'error': 'project_id is required'})
+        
+        # Set team context from project for feature flag evaluation
+        try:
+            project = Project.objects.get(id=project_id)
+            self.request.team = project.team
+        except Project.DoesNotExist:
+            pass
         
         # For list views, also filter by project_version_id and log_type
         if self.action == 'list':
@@ -327,8 +427,67 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             # For detail views, only filter by project_id
             queryset = queryset.filter(project_id=project_id)
         
-        # Order by creation date (newest first)
+        # Apply sorting
+        queryset = self.apply_sorting(queryset)
+        
+        return queryset
+    
+    def apply_sorting(self, queryset):
+        """
+        Apply sorting to the queryset based on query parameters.
+        For structured data, sorting is done in Python after retrieval.
+        """
+        # Get sorting parameters
+        order_by = self.request.query_params.get('order_by', 'created_at')
+        order_direction = self.request.query_params.get('order', 'desc')
+        
+        # Validate sorting parameters
+        valid_sort_fields = self.get_valid_sort_fields()
+        if order_by not in valid_sort_fields:
+            order_by = 'created_at'  # Default
+        
+        # Apply database sorting for non-structured fields
+        if order_by == 'created_at':
+            if order_direction == 'desc':
+                return queryset.order_by('-created_at')
+            else:
+                return queryset.order_by('created_at')
+        
+        # For structured data fields, we'll sort in Python after retrieval
+        # Store sorting info in request for use in serializer
+        self.request.sort_field = order_by
+        self.request.sort_direction = order_direction
+        
+        # Default to created_at desc for database query
         return queryset.order_by('-created_at')
+    
+    def get_valid_sort_fields(self):
+        """
+        Get valid sort fields based on log type.
+        """
+        # Get log_type from the URL path (log_id)
+        log_id = self.kwargs.get('pk')
+        log_type = None
+        
+        if log_id:
+            try:
+                log_obj = AiGeneratedLog.objects.get(id=log_id)
+                log_type = log_obj.log_type
+            except AiGeneratedLog.DoesNotExist:
+                pass
+        
+        if log_type == 'inspection_log':
+            return [
+                'created_at', 'spec_section_number', 'spec_section_name',
+                'inspection_type_and_requirements', 'inspection_frequency', 'responsible_party'
+            ]
+        elif log_type == 'owner_deliverables_log':
+            return [
+                'created_at', 'spec_section_number', 'spec_section_name',
+                'deliverable_type', 'when_due', 'responsible_party', 'exact_requirement_text'
+            ]
+        else:
+            return ['created_at']  # Default
 
 
 class CustomPromptLayerCallbackHandler(PromptLayerCallbackHandler):
@@ -631,7 +790,7 @@ class ChatViewSet(viewsets.ModelViewSet):
     class OwnerDeliverablesLog(BaseModel):
         results: List['OwnerDeliverablesRow'] = Field(description="List of owner deliverables rows")
 
-    def generate_general_log(self, project_id, project_version_id, promptlayer_template_name, full_log_model, log_row_model):
+    def generate_general_log(self, project_id, project_version_id, promptlayer_template_name, full_log_model, log_row_model, request=None):
         try:
             promptlayer_template = self.get_promptlayer_template(promptlayer_template_name)
         except Exception as e:
@@ -652,6 +811,19 @@ class ChatViewSet(viewsets.ModelViewSet):
             'file_s3_key': spec_section.file_s3_key
         } for spec_section in project_version_specs if spec_section.file_s3_key]
         s3_bucket = settings.S3_BUCKET
+
+        # Check if the inspection_log_use_data_tables feature flag is active
+        use_data_tables = False
+        if request and hasattr(request, 'user'):
+            try:
+                project = Project.objects.get(id=project_id)
+                team = project.team
+                user = request.user
+                use_data_tables = is_inspection_log_use_data_tables_feature_flag_active(user, team, project)
+                print(f"Feature flag check - use_data_tables: {use_data_tables}")
+            except Exception as e:
+                print(f"Error checking feature flag: {str(e)}")
+                use_data_tables = False
 
         # Create a processing record so the UI can reflect loading state immediately
         processing_log = None
@@ -683,18 +855,20 @@ class ChatViewSet(viewsets.ModelViewSet):
                 'temperature': temperature,
                 'top_p': top_p,
                 'chunk_size': settings.OPENAI_MODEL_MAX_CONTEXT_SIZE,
+                'use_data_tables': use_data_tables,
             }
         )
         return processing_log
 
 
-    def generate_inspection_log(self, project_id, project_version_id):
+    def generate_inspection_log(self, project_id, project_version_id, request=None):
         processing_log = self.generate_general_log(
             project_id, 
             project_version_id, 
             settings.INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME, 
             self.InspectionLog,
-            self.InspectionLogRow
+            self.InspectionLogRow,
+            request
         )
 
         # save chat messages
@@ -714,13 +888,14 @@ class ChatViewSet(viewsets.ModelViewSet):
 
         return processing_log
     
-    def generate_owner_deliverables_log(self, project_id, project_version_id):
+    def generate_owner_deliverables_log(self, project_id, project_version_id, request=None):
         processing_log = self.generate_general_log(
             project_id, 
             project_version_id, 
             settings.OWNER_DELIVERABLES_PROMPTLAYER_PROMPT_NAME, 
             self.OwnerDeliverablesLog,
-            self.OwnerDeliverablesRow
+            self.OwnerDeliverablesRow,
+            request
         )
 
         # # save chat messages
@@ -762,9 +937,9 @@ class ChatViewSet(viewsets.ModelViewSet):
         
         processing_log_object = None
         if log_type == 'inspection_log':
-            processing_log_object = self.generate_inspection_log(project_id, project_version_id)
+            processing_log_object = self.generate_inspection_log(project_id, project_version_id, request)
         elif log_type == 'owner_deliverables_log':
-            processing_log_object = self.generate_owner_deliverables_log(project_id, project_version_id)
+            processing_log_object = self.generate_owner_deliverables_log(project_id, project_version_id, request)
         else:
             return Response(status=status.HTTP_400_BAD_REQUEST, data={
                 'error': 'Invalid log type'

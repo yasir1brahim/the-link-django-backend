@@ -36,3 +36,8 @@ def is_specgpt_feature_flag_active(user, team, project):
     return (settings.SPECGPT_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
             settings.SPECGPT_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
             settings.SPECGPT_FEATURE_FLAG_NAME in get_active_flags_for_project(project))
+
+def is_inspection_log_use_data_tables_feature_flag_active(user, team, project):
+    return (settings.INSPECTION_LOG_USE_DATA_TABLES_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
+            settings.INSPECTION_LOG_USE_DATA_TABLES_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
+            settings.INSPECTION_LOG_USE_DATA_TABLES_FEATURE_FLAG_NAME in get_active_flags_for_project(project))
