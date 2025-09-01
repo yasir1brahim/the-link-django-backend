@@ -320,6 +320,33 @@ class ProjectViewSet(viewsets.ModelViewSet):
         except ValueError:
             return Response({"error": "Invalid submittal_id. Must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
 
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Retrieve project details with optional version-specific document filtering.
+        """
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        data = serializer.data
+        
+        # Check if version-specific filtering is requested
+        project_version_id = request.query_params.get('project_version_id')
+        if project_version_id:
+            try:
+                project_version = ProjectVersion.objects.get(id=project_version_id, project=instance)
+                # Filter documents by the specified version
+                filtered_documents = []
+                for doc in data['document_details']:
+                    if doc['project_version']['id'] == int(project_version_id):
+                        filtered_documents.append(doc)
+                data['document_details'] = filtered_documents
+                data['doc_parsed'] = len(filtered_documents)
+            except ProjectVersion.DoesNotExist:
+                data['document_details'] = []
+                data['doc_parsed'] = 0
+                data['error'] = f"ProjectVersion with id {project_version_id} does not exist for this project."
+        
+        return Response(data)
+
 
 class ProjectVersionViewSet(viewsets.ModelViewSet):
     queryset = ProjectVersion.objects.all()
