@@ -69,13 +69,16 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         
         # Apply sorting to log_data if it exists and sorting parameters are provided
-        if data.get('log_data') and hasattr(self.context.get('request', {}), 'sort_field'):
-            request = self.context.get('request')
+        request = self.context.get('request')
+        if data.get('log_data') and request and hasattr(request, 'sort_field'):
             sort_field = getattr(request, 'sort_field', None)
             sort_direction = getattr(request, 'sort_direction', 'desc')
             
+            print(f"🔍 Serializer: Sorting log_data with field={sort_field}, direction={sort_direction}")
+            
             if sort_field and sort_field != 'created_at':
                 data['log_data'] = self.sort_structured_data(data['log_data'], sort_field, sort_direction)
+                print(f"🔍 Serializer: Applied sorting to log_data, result length={len(data['log_data'])}")
         
         return data
     
@@ -84,6 +87,8 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         Sort structured data by the specified field and direction.
         """
         try:
+            print(f"🔍 Serializer: sort_structured_data called with field={sort_field}, direction={sort_direction}")
+            
             # Map field names to the actual keys in the structured data
             field_mapping = {
                 'spec_section_number': 'Spec Section #',
@@ -98,6 +103,7 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
             
             # Get the actual field key
             field_key = field_mapping.get(sort_field, sort_field)
+            print(f"🔍 Serializer: Mapped field {sort_field} to {field_key}")
             
             # Sort the data
             reverse = sort_direction == 'desc'
@@ -110,6 +116,7 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
                 return str(value).lower()
             
             sorted_data = sorted(log_data, key=sort_key, reverse=reverse)
+            print(f"🔍 Serializer: Sorted {len(log_data)} items, first item: {sorted_data[0] if sorted_data else 'None'}")
             
             return sorted_data
             

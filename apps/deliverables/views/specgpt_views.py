@@ -395,6 +395,13 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             from rest_framework.exceptions import ValidationError
             raise ValidationError({'error': 'project_id is required'})
         
+        # Set team context from project for feature flag evaluation
+        try:
+            project = Project.objects.get(id=project_id)
+            self.request.team = project.team
+        except Project.DoesNotExist:
+            pass
+        
         # For list views, also filter by project_version_id and log_type
         if self.action == 'list':
             project_version_id = self.request.query_params.get('project_version_id')
@@ -418,7 +425,9 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(project_id=project_id)
         
         # Apply sorting
+        print(f"🔍 ViewSet: About to apply sorting to queryset")
         queryset = self.apply_sorting(queryset)
+        print(f"🔍 ViewSet: Applied sorting, queryset count: {queryset.count()}")
         
         return queryset
     
@@ -431,9 +440,12 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         order_by = self.request.query_params.get('order_by', 'created_at')
         order_direction = self.request.query_params.get('order', 'desc')
         
+        print(f"🔍 ViewSet: apply_sorting called with order_by={order_by}, order_direction={order_direction}")
+        
         # Validate sorting parameters
         valid_sort_fields = self.get_valid_sort_fields()
         if order_by not in valid_sort_fields:
+            print(f"🔍 ViewSet: Invalid sort field {order_by}, defaulting to created_at")
             order_by = 'created_at'  # Default
         
         # Apply database sorting for non-structured fields
@@ -448,6 +460,8 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         self.request.sort_field = order_by
         self.request.sort_direction = order_direction
         
+        print(f"🔍 ViewSet: Set request.sort_field={order_by}, request.sort_direction={order_direction}")
+        
         # Default to created_at desc for database query
         return queryset.order_by('-created_at')
     
@@ -455,19 +469,35 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         """
         Get valid sort fields based on log type.
         """
-        log_type = self.request.query_params.get('log_type')
+        # Get log_type from the URL path (log_id)
+        log_id = self.kwargs.get('pk')
+        log_type = None
+        
+        if log_id:
+            try:
+                log_obj = AiGeneratedLog.objects.get(id=log_id)
+                log_type = log_obj.log_type
+                print(f"🔍 ViewSet: Found log_type={log_type} for log_id={log_id}")
+            except AiGeneratedLog.DoesNotExist:
+                print(f"🔍 ViewSet: Log with id={log_id} not found")
+                pass
         
         if log_type == 'inspection_log':
-            return [
+            valid_fields = [
                 'created_at', 'spec_section_number', 'spec_section_name',
                 'inspection_type_and_requirements', 'inspection_frequency', 'responsible_party'
             ]
+            print(f"🔍 ViewSet: Valid sort fields for inspection_log: {valid_fields}")
+            return valid_fields
         elif log_type == 'owner_deliverables_log':
-            return [
+            valid_fields = [
                 'created_at', 'spec_section_number', 'spec_section_name',
                 'deliverable_type', 'when_due', 'responsible_party', 'exact_requirement_text'
             ]
+            print(f"🔍 ViewSet: Valid sort fields for owner_deliverables_log: {valid_fields}")
+            return valid_fields
         else:
+            print(f"🔍 ViewSet: Unknown log_type={log_type}, defaulting to created_at only")
             return ['created_at']  # Default
 
 
