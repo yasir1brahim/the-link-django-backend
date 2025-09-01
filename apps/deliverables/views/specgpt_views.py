@@ -908,53 +908,76 @@ class ChatViewSet(viewsets.ModelViewSet):
                         'error': 'No tables found'
                     })
                 
-                # Create Excel workbook
+                # Create Excel workbook with single worksheet
                 workbook = Workbook()
+                worksheet = workbook.active
+                worksheet.title = "Table"
                 
-                # Remove default sheet
-                workbook.remove(workbook.active)
+                # Combine all tables into one large table
+                all_rows = []
+                headers = None
                 
-                # Add each table as a separate worksheet
-                for i, csv_content in enumerate(csv_tables, 1):
-                    worksheet = workbook.create_sheet(title=f"Table_{i}")
-                    
-                    # Parse CSV content and add to worksheet
+                for csv_content in csv_tables:
                     csv_lines = csv_content.strip().split('\n')
-                    for row_idx, line in enumerate(csv_lines, 1):
-                        # Use proper CSV parsing to handle quoted values
+                    if not csv_lines:
+                        continue
+                    
+                    # Parse CSV content
+                    parsed_rows = []
+                    for line in csv_lines:
                         csv_reader = csv.reader([line])
-                        cells = next(csv_reader)
-                        for col_idx, cell_value in enumerate(cells, 1):
-                            worksheet.cell(row=row_idx, column=col_idx, value=cell_value)
+                        parsed_rows.append(next(csv_reader))
                     
-                    # Style the header row
-                    if csv_lines:
-                        header_font = Font(bold=True, color='FFFFFF')
-                        header_fill = PatternFill(start_color='202a44', end_color='202a44', fill_type='solid')
-                        header_alignment = Alignment(wrap_text=True, vertical='center')
-                        
-                        # Parse first line to get column count
-                        csv_reader = csv.reader([csv_lines[0]])
-                        header_cells = next(csv_reader)
-                        
-                        for col in range(1, len(header_cells) + 1):
-                            cell = worksheet.cell(row=1, column=col)
-                            cell.font = header_font
-                            cell.fill = header_fill
-                            cell.alignment = header_alignment
+                    if not parsed_rows:
+                        continue
                     
-                    # Auto-adjust column widths
-                    for col_num, col in enumerate(worksheet.columns, 1):
-                        max_length = 0
-                        column = get_column_letter(col_num)
-                        for cell in col:
-                            try:
-                                if len(str(cell.value)) > max_length:
-                                    max_length = len(str(cell.value))
-                            except:
-                                pass
-                        adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
-                        worksheet.column_dimensions[column].width = adjusted_width
+                    # Set headers from first table
+                    if headers is None:
+                        headers = parsed_rows[0]
+                        all_rows.append(headers)  # Add header row
+                    
+                    # Verify headers match (they should be the same)
+                    if parsed_rows[0] == headers:
+                        # Add data rows (skip header row)
+                        all_rows.extend(parsed_rows[1:])
+                    else:
+                        # If headers don't match, still add but log warning
+                        print(f"Warning: Table headers don't match. Expected: {headers}, Got: {parsed_rows[0]}")
+                        if headers is None:
+                            headers = parsed_rows[0]
+                            all_rows.append(headers)
+                        all_rows.extend(parsed_rows[1:])
+                
+                # Write all rows to worksheet
+                for row_idx, row_data in enumerate(all_rows, 1):
+                    for col_idx, cell_value in enumerate(row_data, 1):
+                        worksheet.cell(row=row_idx, column=col_idx, value=cell_value)
+                
+                # Style the header row
+                if all_rows:
+                    header_font = Font(bold=True, color='FFFFFF')
+                    header_fill = PatternFill(start_color='202a44', end_color='202a44', fill_type='solid')
+                    header_alignment = Alignment(wrap_text=True, vertical='center')
+                    
+                    # Style the first row (headers)
+                    for col in range(1, len(headers) + 1):
+                        cell = worksheet.cell(row=1, column=col)
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = header_alignment
+                
+                # Auto-adjust column widths
+                for col_num, col in enumerate(worksheet.columns, 1):
+                    max_length = 0
+                    column = get_column_letter(col_num)
+                    for cell in col:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                    worksheet.column_dimensions[column].width = adjusted_width
                 
                 # Create response with Excel content type
                 response = HttpResponse(
