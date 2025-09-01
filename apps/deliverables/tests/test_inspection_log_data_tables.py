@@ -344,12 +344,16 @@ class AiGeneratedLogSerializerTests(TestCase):
         
         self.assertEqual(data['data_format'], 'markdown')
     
-    def test_serializer_sorts_structured_data(self):
+    @patch('apps.deliverables.serializers.specgpt.is_inspection_log_use_data_tables_feature_flag_active')
+    def test_serializer_sorts_structured_data(self, mock_flag):
         """Test that serializer sorts structured data correctly."""
+        mock_flag.return_value = True
+        
         # Create a mock request with sorting parameters
         mock_request = MagicMock()
         mock_request.sort_field = 'spec_section_number'
         mock_request.sort_direction = 'desc'
+        mock_request.user = self.user
         
         serializer = AiGeneratedLogSerializer(
             self.log,
@@ -363,12 +367,16 @@ class AiGeneratedLogSerializerTests(TestCase):
         self.assertEqual(sorted_data[0]['Spec Section #'], '02 2000')  # Higher number first
         self.assertEqual(sorted_data[1]['Spec Section #'], '01 1000')  # Lower number second
     
-    def test_serializer_sorts_structured_data_ascending(self):
+    @patch('apps.deliverables.serializers.specgpt.is_inspection_log_use_data_tables_feature_flag_active')
+    def test_serializer_sorts_structured_data_ascending(self, mock_flag):
         """Test that serializer sorts structured data in ascending order."""
+        mock_flag.return_value = True
+        
         # Create a mock request with sorting parameters
         mock_request = MagicMock()
         mock_request.sort_field = 'spec_section_number'
         mock_request.sort_direction = 'asc'
+        mock_request.user = self.user
         
         serializer = AiGeneratedLogSerializer(
             self.log,

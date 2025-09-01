@@ -64,20 +64,102 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
     
     def to_representation(self, instance):
         """
-        Override to_representation to apply sorting to structured data.
+        Override to_representation to apply sorting and pagination to structured data.
         """
         data = super().to_representation(instance)
         
-        # Apply sorting to log_data if it exists and sorting parameters are provided
+        # Apply sorting and pagination to log_data if it exists
         request = self.context.get('request')
-        if data.get('log_data') and request and hasattr(request, 'sort_field'):
+        if data.get('log_data') and request:
+            # Get sorting parameters if available
             sort_field = getattr(request, 'sort_field', None)
             sort_direction = getattr(request, 'sort_direction', 'desc')
             
+            # Apply sorting if sorting parameters are provided
             if sort_field and sort_field != 'created_at':
-                data['log_data'] = self.sort_structured_data(data['log_data'], sort_field, sort_direction)
+                sorted_data = self.sort_structured_data(data['log_data'], sort_field, sort_direction)
+            else:
+                # No sorting - use original data order
+                sorted_data = data['log_data']
+            
+            # Check if pagination parameters are present
+            page = None
+            page_size = None
+            if hasattr(request, 'query_params') and request.query_params:
+                page = request.query_params.get('page')
+                page_size = request.query_params.get('page_size')
+            
+            # Always apply pagination for structured data to provide pagination info
+            # Use default page=1 and page_size=50 if not specified
+            if not page:
+                page = 1
+            if not page_size:
+                page_size = 50
+            
+            # Apply pagination to sorted data
+            paginated_data = self.paginate_structured_data(sorted_data, request, default_page=page, default_page_size=page_size)
+            data['log_data'] = paginated_data['data']
+            data['pagination'] = paginated_data['pagination']
         
         return data
+    
+    def paginate_structured_data(self, log_data, request, default_page=1, default_page_size=50):
+        """
+        Apply pagination to structured data.
+        """
+        try:
+            # Get pagination parameters, use defaults if not provided
+            page = int(request.query_params.get('page', default_page))
+            page_size = int(request.query_params.get('page_size', default_page_size))
+            
+            # Validate parameters
+            page = max(1, page)
+            page_size = max(1, min(page_size, 100))  # Limit page size to 100
+            
+            # Calculate pagination
+            total_items = len(log_data)
+            start_index = (page - 1) * page_size
+            end_index = start_index + page_size
+            
+            # Get paginated data
+            paginated_data = log_data[start_index:end_index]
+            
+            # Calculate pagination metadata
+            total_pages = (total_items + page_size - 1) // page_size
+            has_next = page < total_pages
+            has_previous = page > 1
+            
+            pagination_info = {
+                'current_page': page,
+                'page_size': page_size,
+                'total_items': total_items,
+                'total_pages': total_pages,
+                'has_next': has_next,
+                'has_previous': has_previous,
+                'next_page': page + 1 if has_next else None,
+                'previous_page': page - 1 if has_previous else None,
+            }
+            
+            return {
+                'data': paginated_data,
+                'pagination': pagination_info
+            }
+            
+        except (ValueError, TypeError) as e:
+            # Return all data if pagination fails
+            return {
+                'data': log_data,
+                'pagination': {
+                    'current_page': 1,
+                    'page_size': len(log_data),
+                    'total_items': len(log_data),
+                    'total_pages': 1,
+                    'has_next': False,
+                    'has_previous': False,
+                    'next_page': None,
+                    'previous_page': None,
+                }
+            }
     
     def sort_structured_data(self, log_data, sort_field, sort_direction):
         """

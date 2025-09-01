@@ -460,6 +460,66 @@ class InspectionLogDataTablesE2ETests(APITestCase):
             self.assertEqual(data['data_format'], 'markdown')
             # The log_data should still be available for fallback
             self.assertEqual(data['log_data'], structured_data)
+    
+    def test_pagination_functionality(self):
+        """
+        Test that pagination parameters are properly handled and basic pagination works.
+        """
+        # Create log with structured data
+        structured_data = []
+        for i in range(25):  # Create 25 items for simple testing
+            structured_data.append({
+                'Spec Section #': f'{i:02d} {i*1000:04d}',
+                'Spec Section Name': f'SECTION {i}',
+                'Inspection Type And Requirements': f'Requirements for section {i}',
+                'Inspection Frequency': 'As required',
+                'Responsible Party': 'Architect'
+            })
+        
+        log = AiGeneratedLog.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            log_type='inspection_log',
+            log_status='SUCCESS',
+            log_table='# Test Markdown Table',
+            log_data=structured_data
+        )
+        
+        # Test API response with pagination
+        with patch('apps.deliverables.serializers.specgpt.is_inspection_log_use_data_tables_feature_flag_active') as mock_flag:
+            mock_flag.return_value = True
+            
+            url = reverse('ai-generated-log-detail', kwargs={
+                'project_id': self.project.id,
+                'pk': log.id
+            })
+            
+            # Test pagination with page_size=10
+            response = self.client.get(url, {
+                'order_by': 'spec_section_number',
+                'order': 'asc',
+                'page': 1,
+                'page_size': 10
+            })
+            
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            data = response.data
+            
+            # Verify pagination info is present
+            self.assertIn('pagination', data)
+            pagination = data['pagination']
+            self.assertEqual(pagination['current_page'], 1)
+            self.assertEqual(pagination['page_size'], 10)
+            self.assertEqual(pagination['total_items'], 25)
+            self.assertEqual(pagination['total_pages'], 3)
+            self.assertTrue(pagination['has_next'])
+            self.assertFalse(pagination['has_previous'])
+            
+            # Verify we get the expected number of items
+            self.assertEqual(len(data['log_data']), 10)
+            
+            # Verify sorting is working (first item should be the lowest)
+            self.assertEqual(data['log_data'][0]['Spec Section #'], '00 0000')
 
 
 class FrontendIntegrationE2ETests(APITestCase):

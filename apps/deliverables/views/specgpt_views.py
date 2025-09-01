@@ -12,6 +12,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status, viewsets
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.decorators import action
 import pymupdf
 from openai import OpenAI
@@ -379,6 +380,8 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AiGeneratedLog.objects.all()
     permission_classes = [IsAuthenticated, AiGeneratedLogAccessPermissions]
     serializer_class = AiGeneratedLogSerializer
+    pagination_class = PageNumberPagination
+    page_size = 50  # Default page size for structured data
 
     def get_queryset(self):
         """
