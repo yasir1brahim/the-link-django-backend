@@ -53,6 +53,7 @@ from apps.deliverables.models import (
     CustomPostgresChatMessageHistory,
     AiGeneratedLog
 )
+from apps.utils.feature_flags import is_specgpt_websockets_feature_flag_active
 
 from langchain.memory import ConversationBufferMemory
 from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv, merge_tables_from_text, convert_to_markdown_table
@@ -952,6 +953,19 @@ class ChatViewSet(viewsets.ModelViewSet):
     def generate_response(self, request, project_id=None):
         print("Generate response")
         print(request.data)
+        
+        # Check if WebSocket feature flag is active
+        try:
+            project = Project.objects.get(id=project_id)
+            team = project.team
+            if is_specgpt_websockets_feature_flag_active(request.user, team, project):
+                return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                    'error': 'WebSocket streaming is enabled for this project. Please use WebSocket connection.',
+                    'websocket_enabled': True
+                })
+        except Project.DoesNotExist:
+            pass
+        
         chat_id = request.data.get('chat_id', None)
         project_version_id = request.data.get('project_version_id', None)
         if not project_version_id:
