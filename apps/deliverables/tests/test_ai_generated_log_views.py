@@ -210,7 +210,7 @@ class AiGeneratedLogViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         expected_fields = [
             'id', 'project', 'project_version', 'log_type', 'log_status',
-            'log_table', 'created_at', 'project_name', 'project_version_number'
+            'log_table', 'log_data', 'data_format', 'created_at', 'project_name', 'project_version_number'
         ]
         for field in expected_fields:
             self.assertIn(field, response.data)

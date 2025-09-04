@@ -424,6 +424,7 @@ class AiGeneratedLog(BaseModel):
     log_type = models.CharField(max_length=256)
     log_status = models.CharField(max_length=256)
     log_table = models.TextField(blank=True, null=True)
+    log_data = models.JSONField(blank=True, null=True, help_text="Structured data for inspection logs and owner deliverables logs")
 
     def __str__(self):
         return f"{self.project.name} - {self.project_version.version_number} - {self.log_type} - {self.log_status}"

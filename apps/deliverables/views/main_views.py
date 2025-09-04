@@ -82,6 +82,7 @@ from ..models import (
     ProcoreToken,
     ProcoreSubmittalTypeMapping,
     ROLE_PROJECT_MEMBER,
+    NoticeExcerpt,
 )
 from ..permissions import (
     ProjectAccessPermissions,
@@ -318,6 +319,33 @@ class ProjectViewSet(viewsets.ModelViewSet):
             return Response({"project_id": project_id}, status=status.HTTP_200_OK)
         except ValueError:
             return Response({"error": "Invalid submittal_id. Must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
+
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Retrieve project details with optional version-specific document filtering.
+        """
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        data = serializer.data
+        
+        # Check if version-specific filtering is requested
+        project_version_id = request.query_params.get('project_version_id')
+        if project_version_id:
+            try:
+                project_version = ProjectVersion.objects.get(id=project_version_id, project=instance)
+                # Filter documents by the specified version
+                filtered_documents = []
+                for doc in data['document_details']:
+                    if doc['project_version']['id'] == int(project_version_id):
+                        filtered_documents.append(doc)
+                data['document_details'] = filtered_documents
+                data['doc_parsed'] = len(filtered_documents)
+            except ProjectVersion.DoesNotExist:
+                data['document_details'] = []
+                data['doc_parsed'] = 0
+                data['error'] = f"ProjectVersion with id {project_version_id} does not exist for this project."
+        
+        return Response(data)
 
 
 class ProjectVersionViewSet(viewsets.ModelViewSet):
@@ -2658,4 +2686,81 @@ def download_document(request):
         logging.error(f"Error generating download URL for document {uploaded_file.name}: {e}")
         return Response({
             'detail': f'Error generating download URL: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@extend_schema(
+    responses={200: {'description': 'Document deleted successfully'}},
+    description="Delete an uploaded document while preserving submittals and other related data.",
+    methods=["POST"]
+)
+@api_view(['POST'])
+def delete_document(request):
+    if not request.user.is_authenticated:
+        return Response({'detail': 'User is not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    document_id = request.data.get('document_id')
+    if not document_id:
+        return Response({'detail': 'document_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        uploaded_file = UploadedFile.objects.get(id=document_id)
+    except UploadedFile.DoesNotExist:
+        return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    project = uploaded_file.project
+    
+    # Check if user has access to the project
+    if not request.user.is_member_of_project(project):
+        return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        # Set document field to null for all related submittal items instead of deleting them
+        submittal_items_updated = SubmittalItem.objects.filter(document=uploaded_file).update(document=None)
+        
+        # Set document field to null for all related notice matches instead of deleting them
+        notice_matches_updated = NoticeMatch.objects.filter(document=uploaded_file).update(document=None)
+        
+        # Set spec_section to null for submittal items that reference spec sections from this document
+        spec_sections_to_delete = SpecSection.objects.filter(document=uploaded_file)
+        submittal_items_spec_section_updated = SubmittalItem.objects.filter(spec_section__in=spec_sections_to_delete).update(spec_section=None)
+        semantically_processed_items_spec_section_updated = SemanticallyProcessedSpecItem.objects.filter(spec_section__in=spec_sections_to_delete).update(spec_section=None)
+        
+        # Now delete spec sections since they are directly tied to documents and don't make sense without a document
+        spec_sections_deleted, _ = spec_sections_to_delete.delete()
+        
+        # Delete notice excerpts since they are directly tied to documents
+        notice_excerpts_deleted, _ = NoticeExcerpt.objects.filter(document=uploaded_file).delete()
+        
+        # Set document field to null for all related semantically processed spec items instead of deleting them
+        semantically_processed_items_updated = SemanticallyProcessedSpecItem.objects.filter(document=uploaded_file).update(document=None)
+        
+        # Delete the uploaded file record
+        document_name = uploaded_file.name
+        uploaded_file.delete()
+        
+        logging.info(f"Document '{document_name}' (ID: {document_id}) deleted successfully. "
+                    f"Updated {submittal_items_updated} submittal items, "
+                    f"{notice_matches_updated} notice matches, "
+                    f"Updated {submittal_items_spec_section_updated} submittal items (spec_section), "
+                    f"Updated {semantically_processed_items_spec_section_updated} semantically processed items (spec_section), "
+                    f"Deleted {spec_sections_deleted} spec sections, "
+                    f"Deleted {notice_excerpts_deleted} notice excerpts, "
+                    f"{semantically_processed_items_updated} semantically processed items.")
+        
+        return Response({
+            'detail': 'Document deleted successfully',
+            'document_name': document_name,
+            'submittal_items_updated': submittal_items_updated,
+            'notice_matches_updated': notice_matches_updated,
+            'submittal_items_spec_section_updated': submittal_items_spec_section_updated,
+            'semantically_processed_items_spec_section_updated': semantically_processed_items_spec_section_updated,
+            'spec_sections_deleted': spec_sections_deleted,
+            'notice_excerpts_deleted': notice_excerpts_deleted,
+            'semantically_processed_items_updated': semantically_processed_items_updated
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logging.error(f"Error deleting document {uploaded_file.name}: {e}")
+        return Response({
+            'detail': f'Error deleting document: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+We keep centralized instructions for working in this repo in .the_link/ai/RULES.md.
+
+Make sure you've read .the_link/ai/RULES.md before making any changes to this repo.

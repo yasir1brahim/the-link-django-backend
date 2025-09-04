@@ -1,0 +1,15 @@
+{% extends 'account/email/email_template_base.html' %}
+{% load i18n %}
+
+{% block message_body %}
+{% blocktranslate with team_name=team.name role=role first_name=user.first_name %}
+  Hello {{ first_name }},
+  
+  You've been added to {{ team_name }} on {{ project_name }} with the role of {{ role }}.
+  
+  You can now access this team when you log in to your account. No password reset is required - you can continue using your existing password.
+{% endblocktranslate %}
+{% endblock %}
+
+{% block cta_link %}{% endblock %}
+{% block cta_text %}{% endblock %} 
