@@ -215,9 +215,23 @@ class ProjectDetailsSerializer(BaseProjectSerializer):
     document_details = serializers.SerializerMethodField()
 
     def get_doc_parsed(self, obj):
-        return obj.uploadedfile_set.count()
+        """
+        Return the count of documents, optionally filtered by project_version_id.
+        """
+        request = self.context.get("request")
+        queryset = obj.uploadedfile_set.all()
+
+        project_version_id = request.query_params.get("project_version_id") if request else None
+        if project_version_id:
+            queryset = queryset.filter(project_version_id=project_version_id)
+
+        return queryset.count()
 
     def get_document_details(self, obj):
+        """
+        Return the serialized list of documents, optionally filtered by project_version_id.
+        """
+        request = self.context.get("request")
         queryset = obj.uploadedfile_set.all().annotate(
             status_order=Case(
                 When(processing_status=DocProcessingStatus.PENDING_PROCESSING, then=1),
@@ -230,12 +244,18 @@ class ProjectDetailsSerializer(BaseProjectSerializer):
                 default=8,
                 output_field=IntegerField(),
             )
-        ).order_by("status_order", '-created_at')
+        ).order_by("status_order", "-created_at")
+
+        # Apply version filter if present
+        project_version_id = request.query_params.get("project_version_id") if request else None
+        if project_version_id:
+            queryset = queryset.filter(project_version_id=project_version_id)
+
         return DocumentSerializer(queryset, many=True).data
 
     class Meta:
         model = Project
-        fields = BaseProjectSerializer.Meta.fields + ['doc_parsed', 'document_details']
+        fields = BaseProjectSerializer.Meta.fields + ["doc_parsed", "document_details"]
 
 
 class FileUploadSerializer(serializers.Serializer):
