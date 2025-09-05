@@ -425,6 +425,8 @@ class AiGeneratedLog(BaseModel):
     log_status = models.CharField(max_length=256)
     log_table = models.TextField(blank=True, null=True)
     log_data = models.JSONField(blank=True, null=True, help_text="Structured data for inspection logs and owner deliverables logs")
+    qa_options_selected = models.JSONField(blank=True, null=True, help_text="Selected QA options for qa_planner log type")
+    completion_status = models.JSONField(blank=True, null=True, help_text="Status of each QA option processing")
 
     def __str__(self):
         return f"{self.project.name} - {self.project_version.version_number} - {self.log_type} - {self.log_status}"
