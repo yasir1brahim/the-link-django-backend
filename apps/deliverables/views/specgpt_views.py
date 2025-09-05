@@ -273,7 +273,10 @@ def _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdow
             log_obj.log_data = []
         
         log_obj.log_data.extend(log_data)
-        print(f"Merged {len(log_data)} items for QA option '{qa_option}' into log {log_obj.id}")
+        
+        # Sort all log_data by spec_section_number (simple string sort works due to leading zeros)
+        log_obj.log_data.sort(key=lambda item: item.get('spec_section_number', ''))
+        print(f"Merged and sorted {len(log_data)} items for QA option '{qa_option}' into log {log_obj.id}")
     
     # Merge markdown table data
     if markdown_table:
@@ -985,11 +988,14 @@ class ChatViewSet(viewsets.ModelViewSet):
         # QA option to PromptLayer template mapping
         QA_OPTION_PROMPTS = {
             'inspections': 'qa_planner__inspections',
-            'mock_ups': 'qa_planner__mock_ups', 
+            'mock_ups_sample_construction': 'qa_planner__mock_ups_sample_construction', 
             'pre_installation_meetings': 'qa_planner__pre_installation_meetings',
             'warranties': 'qa_planner__warranties',
             'certificates': 'qa_planner__certificates',
-            'reports': 'qa_planner__reports'
+            'closeout_submittals': 'qa_planner__closeout_submittals',
+            'test_reports': 'qa_planner__test_reports',
+            'commissioning': 'qa_planner__commissioning',
+            'delegated_design': 'qa_planner__delegated_design'
         }
         
         # Generate log types for lambda calls
