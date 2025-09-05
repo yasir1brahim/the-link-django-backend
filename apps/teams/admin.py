@@ -63,8 +63,51 @@ def projects_list(flag):
     return [project.name for project in flag.projects.all()]
 
 
+class ProjectInlineAdmin(admin.TabularInline):
+    model = Flag.projects.through
+    extra = 1
+    verbose_name = "Project"
+    verbose_name_plural = "Projects"
+    autocomplete_fields = ['project']
+
+class TeamInlineAdmin(admin.TabularInline):
+    model = Flag.teams.through
+    extra = 1
+    verbose_name = "Team"
+    verbose_name_plural = "Teams"
+    autocomplete_fields = ['team']
+
+
+class UserInlineAdmin(admin.TabularInline):
+    model = Flag.users.through
+    extra = 1
+    verbose_name = "User"
+    verbose_name_plural = "Users"
+
+@admin.display(description="Active Teams")
+def active_teams_count(flag):
+    return flag.teams.count()
+
+@admin.display(description="Active Projects")
+def active_projects_count(flag):
+    return flag.projects.count()
+
+@admin.display(description="Active Users")
+def active_users_count(flag):
+    return flag.users.count()
+
+
 @admin.register(Flag)
 class FlagAdmin(WaffleFlagAdmin):
-    list_display = tuple(list(WaffleFlagAdmin.list_display) + [teams_list, projects_list])
-    list_filter = tuple(list(WaffleFlagAdmin.list_filter) + ["teams", "projects"])
-    raw_id_fields = tuple(list(WaffleFlagAdmin.raw_id_fields) + ["teams", "projects"])
+    list_display = [
+        field for field in WaffleFlagAdmin.list_display
+        if field not in ['teams', 'projects', 'users']
+    ] + [active_teams_count, active_projects_count, active_users_count]
+    inlines = [UserInlineAdmin, ProjectInlineAdmin, TeamInlineAdmin]
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        form.base_fields.pop('teams', None)
+        form.base_fields.pop('projects', None)
+        form.base_fields.pop('users', None)
+        return form
