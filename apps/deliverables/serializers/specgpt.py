@@ -175,7 +175,11 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
                 'responsible_party': 'Responsible Party',
                 'deliverable_type': 'Deliverable Type',
                 'when_due': 'When Due',
-                'exact_requirement_text': 'Exact Requirement Text'
+                'exact_requirement_text': 'Exact Requirement Text',
+                # QA Planner fields
+                'paragraph_number': 'Paragraph Number',
+                'item_type': 'item_type',
+                'requirement_text': 'Requirement Text'
             }
             
             # Get the actual field key

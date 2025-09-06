@@ -553,6 +553,11 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 'created_at', 'spec_section_number', 'spec_section_name',
                 'deliverable_type', 'when_due', 'responsible_party', 'exact_requirement_text'
             ]
+        elif log_type == 'qa_planner':
+            return [
+                'created_at', 'spec_section_number', 'spec_section_name',
+                'paragraph_number', 'item_type', 'requirement_text', 'responsible_party', 'when_due'
+            ]
         else:
             return ['created_at']  # Default
 
