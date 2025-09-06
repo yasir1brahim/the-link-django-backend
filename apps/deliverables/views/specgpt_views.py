@@ -528,6 +528,61 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         # Default to created_at desc for database query
         return queryset.order_by('-created_at')
     
+    @action(detail=True, methods=['get'])
+    def filter_values(self, request, pk=None, project_id=None):
+        """
+        Get all available filter values for filterable columns in the log data.
+        """
+        try:
+            # Get the log object directly without going through get_queryset 
+            # to avoid project_id validation for this specific action
+            log_obj = AiGeneratedLog.objects.get(id=pk)
+            
+            if not log_obj.log_data:
+                return Response({'filter_values': {}})
+            
+            # Get filterable columns based on log type
+            filterable_columns = self.get_filterable_columns(log_obj.log_type)
+            
+            filter_values = {}
+            
+            for column_key in filterable_columns:
+                # Extract unique values for this column
+                values = set()
+                for item in log_obj.log_data:
+                    value = item.get(column_key)
+                    if value is not None and value != '':
+                        values.add(str(value))
+                
+                # Sort the values
+                filter_values[column_key] = sorted(list(values))
+            
+            return Response({'filter_values': filter_values})
+            
+        except AiGeneratedLog.DoesNotExist:
+            return Response(
+                {'error': 'Log not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Error fetching filter values: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def get_filterable_columns(self, log_type):
+        """
+        Get filterable column names based on log type.
+        """
+        if log_type == 'qa_planner':
+            return ['Spec Section #', 'item_type', 'Responsible Party']
+        elif log_type == 'inspection_log':
+            return ['Spec Section #', 'Responsible Party']
+        elif log_type == 'owner_deliverables_log':
+            return ['Spec Section #', 'Responsible Party', 'Deliverable Type']
+        else:
+            return []
+
     def get_valid_sort_fields(self):
         """
         Get valid sort fields based on log type.
