@@ -74,35 +74,26 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
             # Get filter parameters if available
             filter_params = {}
             if hasattr(request, 'query_params'):
-                print(f"DEBUG: All query params: {dict(request.query_params)}")
                 for param_name, param_value in request.query_params.items():
                     if param_name.startswith('filter_'):
-                        print(f"DEBUG: Processing filter param: {param_name} = {param_value}")
                         # Extract column name from parameter name and handle multiple underscores
                         raw_key = param_name.replace('filter_', '')
                         # Replace underscores with spaces, but handle multiple consecutive underscores
                         column_key = ' '.join(part for part in raw_key.split('_') if part).title()
-                        print(f"DEBUG: Column key after processing: '{column_key}'")
                         
                         # Map specific parameter names to correct column keys
                         if column_key == 'Spec Section':  # This covers both single and double underscore cases
                             column_key = 'Spec Section #'
-                            print(f"DEBUG: Mapped to: '{column_key}'")
                         elif column_key == 'Item Type':
                             column_key = 'item_type'
-                            print(f"DEBUG: Mapped to: '{column_key}'")
                         elif column_key == 'Responsible Party':
                             column_key = 'Responsible Party'
-                            print(f"DEBUG: Mapped to: '{column_key}'")
                         
                         filter_params[column_key] = param_value.split(',') if param_value else []
             
             # Apply column-based filtering if filter parameters are provided
             if filter_params:
-                print(f"DEBUG: Applying filters: {filter_params}")
-                print(f"DEBUG: Original data count: {len(data['log_data'])}")
                 filtered_data = self.filter_structured_data(data['log_data'], filter_params)
-                print(f"DEBUG: Filtered data count: {len(filtered_data)}")
             else:
                 filtered_data = data['log_data']
             
@@ -296,16 +287,8 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         - Across columns: AND logic (item must match at least one value from EVERY filtered column)
         """
         try:
-            print(f"DEBUG: filter_structured_data called with {len(log_data)} items")
-            print(f"DEBUG: filter_params: {filter_params}")
-            
             if not filter_params or not log_data:
                 return log_data
-            
-            # Debug: Show a sample of the data structure
-            if log_data:
-                print(f"DEBUG: Sample data item: {log_data[0]}")
-                print(f"DEBUG: Available keys in data: {list(log_data[0].keys())}")
             
             filtered_data = []
             
