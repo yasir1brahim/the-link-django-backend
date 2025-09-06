@@ -528,6 +528,61 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         # Default to created_at desc for database query
         return queryset.order_by('-created_at')
     
+    @action(detail=True, methods=['get'])
+    def filter_values(self, request, pk=None, project_id=None):
+        """
+        Get all available filter values for filterable columns in the log data.
+        """
+        try:
+            # Get the log object directly without going through get_queryset 
+            # to avoid project_id validation for this specific action
+            log_obj = AiGeneratedLog.objects.get(id=pk)
+            
+            if not log_obj.log_data:
+                return Response({'filter_values': {}})
+            
+            # Get filterable columns based on log type
+            filterable_columns = self.get_filterable_columns(log_obj.log_type)
+            
+            filter_values = {}
+            
+            for column_key in filterable_columns:
+                # Extract unique values for this column
+                values = set()
+                for item in log_obj.log_data:
+                    value = item.get(column_key)
+                    if value is not None and value != '':
+                        values.add(str(value))
+                
+                # Sort the values
+                filter_values[column_key] = sorted(list(values))
+            
+            return Response({'filter_values': filter_values})
+            
+        except AiGeneratedLog.DoesNotExist:
+            return Response(
+                {'error': 'Log not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Error fetching filter values: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def get_filterable_columns(self, log_type):
+        """
+        Get filterable column names based on log type.
+        """
+        if log_type == 'qa_planner':
+            return ['Spec Section #', 'item_type', 'Responsible Party']
+        elif log_type == 'inspection_log':
+            return ['Spec Section #', 'Responsible Party']
+        elif log_type == 'owner_deliverables_log':
+            return ['Spec Section #', 'Responsible Party', 'Deliverable Type']
+        else:
+            return []
+
     def get_valid_sort_fields(self):
         """
         Get valid sort fields based on log type.
@@ -560,6 +615,144 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             ]
         else:
             return ['created_at']  # Default
+
+    @action(detail=True, methods=['get'])
+    def export(self, request, pk=None, project_id=None):
+        """
+        Export AI generated log data to Excel with optional filters, search, and sorting.
+        """
+        try:
+            # Get the log object
+            log_obj = AiGeneratedLog.objects.get(id=pk)
+            
+            if not log_obj.log_data:
+                return Response(
+                    {'error': 'No data available for export'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Get filter, search, and sort parameters
+            filter_params = {}
+            for param_name, values in request.query_params.items():
+                if param_name.startswith('filter_'):
+                    # Extract column name from parameter
+                    raw_key = param_name.replace('filter_', '')
+                    column_key = ' '.join(part for part in raw_key.split('_') if part).title()
+                    
+                    # Map to actual column names
+                    if column_key == 'Spec Section':
+                        column_key = 'Spec Section #'
+                    elif column_key == 'Item Type':
+                        column_key = 'item_type'
+                    elif column_key == 'Responsible Party':
+                        column_key = 'Responsible Party'
+                    
+                    filter_params[column_key] = values.split(',')
+            
+            search_term = request.query_params.get('search', '')
+            order_by = request.query_params.get('order_by', 'created_at')
+            order_direction = request.query_params.get('order', 'desc')
+            
+            # Use the serializer to process the data with filters, search, and sorting
+            serializer = AiGeneratedLogSerializer(log_obj, context={'request': request})
+            
+            # Apply filters, search, and sorting
+            filtered_data = log_obj.log_data
+            
+            if filter_params:
+                filtered_data = serializer.filter_structured_data(filtered_data, filter_params)
+            
+            if search_term:
+                filtered_data = serializer.search_structured_data(filtered_data, search_term)
+            
+            if order_by != 'created_at':
+                filtered_data = serializer.sort_structured_data(filtered_data, order_by, order_direction)
+            
+            if not filtered_data:
+                return Response(
+                    {'error': 'No data matches the specified filters'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Create Excel workbook
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.title = f"{log_obj.log_type.replace('_', ' ').title()} Export"
+            
+            # Define styles
+            header_font = Font(bold=True, color='FFFFFF')
+            header_fill = PatternFill(start_color='202a44', end_color='202a44', fill_type='solid')
+            header_alignment = Alignment(wrap_text=True, vertical='center')
+            text_alignment = Alignment(wrap_text=True, vertical='center')
+            
+            # Get headers in the same order as the UI table
+            if log_obj.log_type == 'inspection_log':
+                headers = [
+                    'Spec Section #', 'Spec Section Name', 'Inspection Type And Requirements',
+                    'Inspection Frequency', 'Responsible Party'
+                ]
+            elif log_obj.log_type == 'owner_deliverables_log':
+                headers = [
+                    'Spec Section #', 'Spec Section Name', 'Deliverable Type',
+                    'When Due', 'Responsible Party', 'Exact Requirement Text'
+                ]
+            elif log_obj.log_type == 'qa_planner':
+                headers = [
+                    'Spec Section #', 'Spec Section Name', 'Paragraph Number',
+                    'item_type', 'Requirement Text', 'Responsible Party', 'When Due'
+                ]
+            else:
+                # Fallback to dynamic headers if log type is unknown
+                headers = list(filtered_data[0].keys()) if filtered_data else []
+            
+            # Write headers
+            for col_idx, header in enumerate(headers, 1):
+                cell = worksheet.cell(row=1, column=col_idx, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+            
+            # Write data rows
+            for row_idx, item in enumerate(filtered_data, 2):
+                for col_idx, header in enumerate(headers, 1):
+                    value = item.get(header, '')
+                    cell = worksheet.cell(row=row_idx, column=col_idx, value=value)
+                    cell.alignment = text_alignment
+            
+            # Auto-adjust column widths
+            for col_num, col in enumerate(worksheet.columns, 1):
+                max_length = 0
+                column = get_column_letter(col_num)
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                worksheet.column_dimensions[column].width = adjusted_width
+            
+            # Create response
+            response = HttpResponse(
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            log_type_display = log_obj.log_type.replace('_', ' ').title()
+            response['Content-Disposition'] = f'attachment; filename={log_type_display}_Export.xlsx'
+            
+            # Save workbook to response
+            workbook.save(response)
+            return response
+            
+        except AiGeneratedLog.DoesNotExist:
+            return Response(
+                {'error': 'Log not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Error exporting data: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class CustomPromptLayerCallbackHandler(PromptLayerCallbackHandler):

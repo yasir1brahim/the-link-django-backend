@@ -68,19 +68,56 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         """
         data = super().to_representation(instance)
         
-        # Apply sorting and pagination to log_data if it exists
+        # Apply filtering, search, sorting and pagination to log_data if it exists
         request = self.context.get('request')
         if data.get('log_data') and request:
+            # Get filter parameters if available
+            filter_params = {}
+            if hasattr(request, 'query_params'):
+                for param_name, param_value in request.query_params.items():
+                    if param_name.startswith('filter_'):
+                        # Extract column name from parameter name and handle multiple underscores
+                        raw_key = param_name.replace('filter_', '')
+                        # Replace underscores with spaces, but handle multiple consecutive underscores
+                        column_key = ' '.join(part for part in raw_key.split('_') if part).title()
+                        
+                        # Map specific parameter names to correct column keys
+                        if column_key == 'Spec Section':  # This covers both single and double underscore cases
+                            column_key = 'Spec Section #'
+                        elif column_key == 'Item Type':
+                            column_key = 'item_type'
+                        elif column_key == 'Responsible Party':
+                            column_key = 'Responsible Party'
+                        
+                        filter_params[column_key] = param_value.split(',') if param_value else []
+            
+            # Apply column-based filtering if filter parameters are provided
+            if filter_params:
+                filtered_data = self.filter_structured_data(data['log_data'], filter_params)
+            else:
+                filtered_data = data['log_data']
+            
+            # Get search parameter if available
+            search_term = getattr(request, 'search_term', None)
+            if not search_term and hasattr(request, 'query_params'):
+                search_term = request.query_params.get('search', '')
+            
+            # Apply search filtering if search term is provided
+            if search_term:
+                filtered_data = self.search_structured_data(filtered_data, search_term)
+            else:
+                filtered_data = filtered_data
+            
             # Get sorting parameters if available
             sort_field = getattr(request, 'sort_field', None)
             sort_direction = getattr(request, 'sort_direction', 'desc')
             
             # Apply sorting if sorting parameters are provided
             if sort_field and sort_field != 'created_at':
-                sorted_data = self.sort_structured_data(data['log_data'], sort_field, sort_direction)
+                sorted_data = self.sort_structured_data(filtered_data, sort_field, sort_direction)
             else:
-                # No sorting - use original data order
-                sorted_data = data['log_data']
+                # No sorting - use filtered data order
+                sorted_data = filtered_data
             
             # Check if pagination parameters are present
             page = None
@@ -202,6 +239,97 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         except Exception as e:
             # Log error and return original data
             print(f"Error sorting structured data: {str(e)}")
+            return log_data
+
+    def search_structured_data(self, log_data, search_term):
+        """
+        Search structured data across all fields for the given search term (case-insensitive).
+        """
+        try:
+            if not search_term or not log_data:
+                return log_data
+            
+            search_term_lower = str(search_term).lower()
+            filtered_data = []
+            
+            for item in log_data:
+                # Search across all fields in the item
+                match_found = False
+                for key, value in item.items():
+                    if value is not None:
+                        # Convert value to string and search case-insensitively
+                        value_str = str(value).lower()
+                        if search_term_lower in value_str:
+                            match_found = True
+                            break
+                
+                if match_found:
+                    filtered_data.append(item)
+            
+            return filtered_data
+            
+        except Exception as e:
+            # Log error and return original data
+            print(f"Error searching structured data: {str(e)}")
+            return log_data
+
+    def filter_structured_data(self, log_data, filter_params):
+        """
+        Filter structured data based on column-specific filter values.
+        Uses OR logic within each column and AND logic across columns.
+        
+        @param log_data: List of data items to filter
+        @param filter_params: Dict with column names as keys and lists of allowed values as values
+                            e.g., {'Spec Section #': ['01 5000', '02 3000'], 'item_type': ['Product']}
+        
+        Logic:
+        - Within a column: OR logic (item matches ANY of the selected values)
+        - Across columns: AND logic (item must match at least one value from EVERY filtered column)
+        """
+        try:
+            if not filter_params or not log_data:
+                return log_data
+            
+            filtered_data = []
+            
+            for item in log_data:
+                # Check if item passes all active filters (AND logic across columns)
+                passes_all_filters = True
+                
+                for column_key, allowed_values in filter_params.items():
+                    if not allowed_values:  # Skip empty filter arrays
+                        continue
+                        
+                    item_value = item.get(column_key)
+                    if item_value is None:
+                        # Item has no value for this column, fails the filter
+                        passes_all_filters = False
+                        break
+                    
+                    # Convert to string for comparison
+                    item_value_str = str(item_value)
+                    
+                    # OR logic within column: check if item value matches ANY of the allowed values
+                    column_match = False
+                    for allowed_value in allowed_values:
+                        if item_value_str == str(allowed_value):
+                            column_match = True
+                            break
+                    
+                    # If no match found for this column, item fails the filter
+                    if not column_match:
+                        passes_all_filters = False
+                        break
+                
+                # Add item only if it passes ALL column filters
+                if passes_all_filters:
+                    filtered_data.append(item)
+            
+            return filtered_data
+            
+        except Exception as e:
+            # Log error and return original data
+            print(f"Error filtering structured data: {str(e)}")
             return log_data
 
 
