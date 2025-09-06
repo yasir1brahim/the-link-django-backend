@@ -685,8 +685,25 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             header_alignment = Alignment(wrap_text=True, vertical='center')
             text_alignment = Alignment(wrap_text=True, vertical='center')
             
-            # Get headers from first row
-            headers = list(filtered_data[0].keys()) if filtered_data else []
+            # Get headers in the same order as the UI table
+            if log_obj.log_type == 'inspection_log':
+                headers = [
+                    'Spec Section #', 'Spec Section Name', 'Inspection Type And Requirements',
+                    'Inspection Frequency', 'Responsible Party'
+                ]
+            elif log_obj.log_type == 'owner_deliverables_log':
+                headers = [
+                    'Spec Section #', 'Spec Section Name', 'Deliverable Type',
+                    'When Due', 'Responsible Party', 'Exact Requirement Text'
+                ]
+            elif log_obj.log_type == 'qa_planner':
+                headers = [
+                    'Spec Section #', 'Spec Section Name', 'Paragraph Number',
+                    'item_type', 'Requirement Text', 'Responsible Party', 'When Due'
+                ]
+            else:
+                # Fallback to dynamic headers if log type is unknown
+                headers = list(filtered_data[0].keys()) if filtered_data else []
             
             # Write headers
             for col_idx, header in enumerate(headers, 1):
