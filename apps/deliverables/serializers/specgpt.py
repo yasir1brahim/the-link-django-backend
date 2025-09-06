@@ -74,22 +74,35 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
             # Get filter parameters if available
             filter_params = {}
             if hasattr(request, 'query_params'):
+                print(f"DEBUG: All query params: {dict(request.query_params)}")
                 for param_name, param_value in request.query_params.items():
                     if param_name.startswith('filter_'):
-                        # Extract column name from parameter name
-                        column_key = param_name.replace('filter_', '').replace('_', ' ').title()
-                        if column_key == 'Spec Section #':
+                        print(f"DEBUG: Processing filter param: {param_name} = {param_value}")
+                        # Extract column name from parameter name and handle multiple underscores
+                        raw_key = param_name.replace('filter_', '')
+                        # Replace underscores with spaces, but handle multiple consecutive underscores
+                        column_key = ' '.join(part for part in raw_key.split('_') if part).title()
+                        print(f"DEBUG: Column key after processing: '{column_key}'")
+                        
+                        # Map specific parameter names to correct column keys
+                        if column_key == 'Spec Section':  # This covers both single and double underscore cases
                             column_key = 'Spec Section #'
+                            print(f"DEBUG: Mapped to: '{column_key}'")
                         elif column_key == 'Item Type':
                             column_key = 'item_type'
+                            print(f"DEBUG: Mapped to: '{column_key}'")
                         elif column_key == 'Responsible Party':
                             column_key = 'Responsible Party'
+                            print(f"DEBUG: Mapped to: '{column_key}'")
                         
                         filter_params[column_key] = param_value.split(',') if param_value else []
             
             # Apply column-based filtering if filter parameters are provided
             if filter_params:
+                print(f"DEBUG: Applying filters: {filter_params}")
+                print(f"DEBUG: Original data count: {len(data['log_data'])}")
                 filtered_data = self.filter_structured_data(data['log_data'], filter_params)
+                print(f"DEBUG: Filtered data count: {len(filtered_data)}")
             else:
                 filtered_data = data['log_data']
             
@@ -272,19 +285,32 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
     def filter_structured_data(self, log_data, filter_params):
         """
         Filter structured data based on column-specific filter values.
+        Uses OR logic within each column and AND logic across columns.
         
         @param log_data: List of data items to filter
         @param filter_params: Dict with column names as keys and lists of allowed values as values
                             e.g., {'Spec Section #': ['01 5000', '02 3000'], 'item_type': ['Product']}
+        
+        Logic:
+        - Within a column: OR logic (item matches ANY of the selected values)
+        - Across columns: AND logic (item must match at least one value from EVERY filtered column)
         """
         try:
+            print(f"DEBUG: filter_structured_data called with {len(log_data)} items")
+            print(f"DEBUG: filter_params: {filter_params}")
+            
             if not filter_params or not log_data:
                 return log_data
+            
+            # Debug: Show a sample of the data structure
+            if log_data:
+                print(f"DEBUG: Sample data item: {log_data[0]}")
+                print(f"DEBUG: Available keys in data: {list(log_data[0].keys())}")
             
             filtered_data = []
             
             for item in log_data:
-                # Check if item passes all active filters
+                # Check if item passes all active filters (AND logic across columns)
                 passes_all_filters = True
                 
                 for column_key, allowed_values in filter_params.items():
@@ -293,17 +319,26 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
                         
                     item_value = item.get(column_key)
                     if item_value is None:
+                        # Item has no value for this column, fails the filter
                         passes_all_filters = False
                         break
                     
                     # Convert to string for comparison
                     item_value_str = str(item_value)
                     
-                    # Check if item value is in the allowed values
-                    if item_value_str not in allowed_values:
+                    # OR logic within column: check if item value matches ANY of the allowed values
+                    column_match = False
+                    for allowed_value in allowed_values:
+                        if item_value_str == str(allowed_value):
+                            column_match = True
+                            break
+                    
+                    # If no match found for this column, item fails the filter
+                    if not column_match:
                         passes_all_filters = False
                         break
                 
+                # Add item only if it passes ALL column filters
                 if passes_all_filters:
                     filtered_data.append(item)
             
