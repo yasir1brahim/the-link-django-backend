@@ -68,19 +68,30 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         """
         data = super().to_representation(instance)
         
-        # Apply sorting and pagination to log_data if it exists
+        # Apply search, sorting and pagination to log_data if it exists
         request = self.context.get('request')
         if data.get('log_data') and request:
+            # Get search parameter if available
+            search_term = getattr(request, 'search_term', None)
+            if not search_term and hasattr(request, 'query_params'):
+                search_term = request.query_params.get('search', '')
+            
+            # Apply search filtering if search term is provided
+            if search_term:
+                filtered_data = self.search_structured_data(data['log_data'], search_term)
+            else:
+                filtered_data = data['log_data']
+            
             # Get sorting parameters if available
             sort_field = getattr(request, 'sort_field', None)
             sort_direction = getattr(request, 'sort_direction', 'desc')
             
             # Apply sorting if sorting parameters are provided
             if sort_field and sort_field != 'created_at':
-                sorted_data = self.sort_structured_data(data['log_data'], sort_field, sort_direction)
+                sorted_data = self.sort_structured_data(filtered_data, sort_field, sort_direction)
             else:
-                # No sorting - use original data order
-                sorted_data = data['log_data']
+                # No sorting - use filtered data order
+                sorted_data = filtered_data
             
             # Check if pagination parameters are present
             page = None
@@ -202,6 +213,38 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         except Exception as e:
             # Log error and return original data
             print(f"Error sorting structured data: {str(e)}")
+            return log_data
+
+    def search_structured_data(self, log_data, search_term):
+        """
+        Search structured data across all fields for the given search term (case-insensitive).
+        """
+        try:
+            if not search_term or not log_data:
+                return log_data
+            
+            search_term_lower = str(search_term).lower()
+            filtered_data = []
+            
+            for item in log_data:
+                # Search across all fields in the item
+                match_found = False
+                for key, value in item.items():
+                    if value is not None:
+                        # Convert value to string and search case-insensitively
+                        value_str = str(value).lower()
+                        if search_term_lower in value_str:
+                            match_found = True
+                            break
+                
+                if match_found:
+                    filtered_data.append(item)
+            
+            return filtered_data
+            
+        except Exception as e:
+            # Log error and return original data
+            print(f"Error searching structured data: {str(e)}")
             return log_data
 
 
