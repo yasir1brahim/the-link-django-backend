@@ -175,20 +175,19 @@ class SpecGptWebSocketConsumer(AsyncWebsocketConsumer):
         async def on_llm_new_token(self, token: str, *args, **kwargs) -> None:
             if not token:
                 return
-            # Append and clean only the tail to avoid heavy work
+            
+            # Append token to buffer
             self._buffer += token
-            cleaned = self._clean_tail(self._buffer)
-            if cleaned != self._buffer:
-                self._buffer = cleaned
-            # Compute delta to send
-            if self._last_sent_len < len(self._buffer):
-                delta = self._buffer[self._last_sent_len:]
-                if delta:
-                    await self.send_coroutine(json.dumps({
-                        'type': 'response_chunk',
-                        'data': {'content': delta}
-                    }))
-                    self._last_sent_len = len(self._buffer)
+            
+            # No need to clean the buffer - we'll let the frontend handle the display
+            # Just send the new token directly
+            await self.send_coroutine(json.dumps({
+                'type': 'response_chunk',
+                'data': {'content': token}
+            }))
+            
+            # Update the last sent position
+            self._last_sent_len = len(self._buffer)
 
         async def on_chat_model_start(self, *args, **kwargs):
             return None
