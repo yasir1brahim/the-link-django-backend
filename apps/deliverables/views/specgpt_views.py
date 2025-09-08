@@ -253,6 +253,63 @@ def _process_log_data(log_data, log_type, markdown_table):
         return None, markdown_table
 
 
+def _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdown_table):
+    """Handle webhook response for QA planner logs with merging logic."""
+    
+    # Update completion status for this QA option
+    if log_obj.completion_status is None:
+        log_obj.completion_status = {}
+    
+    log_obj.completion_status[qa_option] = new_status
+    
+    # Add item_type to each data entry if we have structured data
+    if log_data and isinstance(log_data, list):
+        # Tag each item with the QA option type
+        for item in log_data:
+            if isinstance(item, dict):
+                item['item_type'] = qa_option
+        
+        # Merge with existing log_data
+        if log_obj.log_data is None:
+            log_obj.log_data = []
+        
+        log_obj.log_data.extend(log_data)
+        
+        # Sort all log_data by spec_section_number (simple string sort works due to leading zeros)
+        log_obj.log_data.sort(key=lambda item: item.get('spec_section_number', ''))
+        print(f"Merged and sorted {len(log_data)} items for QA option '{qa_option}' into log {log_obj.id}")
+    
+    # Merge markdown table data
+    if markdown_table:
+        if log_obj.log_table:
+            log_obj.log_table += f"\n\n## {qa_option.replace('_', ' ').title()}\n\n{markdown_table}"
+        else:
+            log_obj.log_table = f"## {qa_option.replace('_', ' ').title()}\n\n{markdown_table}"
+    
+    # Check if all QA options are complete
+    selected_options = log_obj.qa_options_selected or []
+    completed_options = list(log_obj.completion_status.keys())
+    all_complete = all(option in completed_options for option in selected_options)
+    
+    if all_complete:
+        # Determine overall status
+        all_statuses = list(log_obj.completion_status.values())
+        success_count = all_statuses.count('SUCCESS')
+        failure_count = all_statuses.count('FAILURE')
+        
+        if failure_count == 0:
+            log_obj.log_status = 'SUCCESS'
+        elif success_count == 0:
+            log_obj.log_status = 'FAILURE'
+        else:
+            log_obj.log_status = 'PARTIAL_SUCCESS'
+        
+        print(f"QA planner log {log_obj.id} completed with status: {log_obj.log_status}")
+        print(f"Individual statuses: {log_obj.completion_status}")
+    
+    log_obj.save()
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def ai_log_generation_webhook(request):
@@ -263,6 +320,11 @@ def ai_log_generation_webhook(request):
 
     new_status = request_data['new_status']
     ai_generated_log_id = request_payload.get('ai_generated_log_id') or request_data.get('ai_generated_log_id')
+    # Extract QA option from log_type if it's a QA planner log
+    qa_option = None
+    log_type = request_data['log_type']
+    if log_type.startswith('qa_planner__'):
+        qa_option = log_type.split('qa_planner__')[1]
 
     if new_status in ['SUCCESS', 'FAILURE']:
         # Prefer updating by explicit log id if provided
@@ -299,18 +361,23 @@ def ai_log_generation_webhook(request):
             ).order_by('-created_at').first()
 
         if log_obj:
-            log_obj.log_status = new_status
-            
-            # Process log data using helper function
-            processed_log_data, processed_markdown = _process_log_data(log_data, request_data['log_type'], markdown_table)
-            
-            # Store processed data
-            if processed_log_data is not None:
-                log_obj.log_data = processed_log_data
-                print(f"Stored structured data for log {log_obj.id}: {len(processed_log_data)} items")
-            log_obj.log_table = processed_markdown
-            
-            log_obj.save()
+            # Handle QA planner logs differently (they need merging)
+            if log_obj.log_type == 'qa_planner' and qa_option:
+                _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdown_table)
+            else:
+                # Handle regular logs (inspection, owner_deliverables)
+                log_obj.log_status = new_status
+                
+                # Process log data using helper function
+                processed_log_data, processed_markdown = _process_log_data(log_data, request_data['log_type'], markdown_table)
+                
+                # Store processed data
+                if processed_log_data is not None:
+                    log_obj.log_data = processed_log_data
+                    print(f"Stored structured data for log {log_obj.id}: {len(processed_log_data)} items")
+                log_obj.log_table = processed_markdown
+                
+                log_obj.save()
         else:
             # Create new log entry
             log_entry_data = {
@@ -462,6 +529,61 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         # Default to created_at desc for database query
         return queryset.order_by('-created_at')
     
+    @action(detail=True, methods=['get'])
+    def filter_values(self, request, pk=None, project_id=None):
+        """
+        Get all available filter values for filterable columns in the log data.
+        """
+        try:
+            # Get the log object directly without going through get_queryset 
+            # to avoid project_id validation for this specific action
+            log_obj = AiGeneratedLog.objects.get(id=pk)
+            
+            if not log_obj.log_data:
+                return Response({'filter_values': {}})
+            
+            # Get filterable columns based on log type
+            filterable_columns = self.get_filterable_columns(log_obj.log_type)
+            
+            filter_values = {}
+            
+            for column_key in filterable_columns:
+                # Extract unique values for this column
+                values = set()
+                for item in log_obj.log_data:
+                    value = item.get(column_key)
+                    if value is not None and value != '':
+                        values.add(str(value))
+                
+                # Sort the values
+                filter_values[column_key] = sorted(list(values))
+            
+            return Response({'filter_values': filter_values})
+            
+        except AiGeneratedLog.DoesNotExist:
+            return Response(
+                {'error': 'Log not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Error fetching filter values: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def get_filterable_columns(self, log_type):
+        """
+        Get filterable column names based on log type.
+        """
+        if log_type == 'qa_planner':
+            return ['Spec Section #', 'item_type', 'Responsible Party']
+        elif log_type == 'inspection_log':
+            return ['Spec Section #', 'Responsible Party']
+        elif log_type == 'owner_deliverables_log':
+            return ['Spec Section #', 'Responsible Party', 'Deliverable Type']
+        else:
+            return []
+
     def get_valid_sort_fields(self):
         """
         Get valid sort fields based on log type.
@@ -487,8 +609,151 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 'created_at', 'spec_section_number', 'spec_section_name',
                 'deliverable_type', 'when_due', 'responsible_party', 'exact_requirement_text'
             ]
+        elif log_type == 'qa_planner':
+            return [
+                'created_at', 'spec_section_number', 'spec_section_name',
+                'paragraph_number', 'item_type', 'requirement_text', 'responsible_party', 'when_due'
+            ]
         else:
             return ['created_at']  # Default
+
+    @action(detail=True, methods=['get'])
+    def export(self, request, pk=None, project_id=None):
+        """
+        Export AI generated log data to Excel with optional filters, search, and sorting.
+        """
+        try:
+            # Get the log object
+            log_obj = AiGeneratedLog.objects.get(id=pk)
+            
+            if not log_obj.log_data:
+                return Response(
+                    {'error': 'No data available for export'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Get filter, search, and sort parameters
+            filter_params = {}
+            for param_name, values in request.query_params.items():
+                if param_name.startswith('filter_'):
+                    # Extract column name from parameter
+                    raw_key = param_name.replace('filter_', '')
+                    column_key = ' '.join(part for part in raw_key.split('_') if part).title()
+                    
+                    # Map to actual column names
+                    if column_key == 'Spec Section':
+                        column_key = 'Spec Section #'
+                    elif column_key == 'Item Type':
+                        column_key = 'item_type'
+                    elif column_key == 'Responsible Party':
+                        column_key = 'Responsible Party'
+                    
+                    filter_params[column_key] = values.split(',')
+            
+            search_term = request.query_params.get('search', '')
+            order_by = request.query_params.get('order_by', 'created_at')
+            order_direction = request.query_params.get('order', 'desc')
+            
+            # Use the serializer to process the data with filters, search, and sorting
+            serializer = AiGeneratedLogSerializer(log_obj, context={'request': request})
+            
+            # Apply filters, search, and sorting
+            filtered_data = log_obj.log_data
+            
+            if filter_params:
+                filtered_data = serializer.filter_structured_data(filtered_data, filter_params)
+            
+            if search_term:
+                filtered_data = serializer.search_structured_data(filtered_data, search_term)
+            
+            if order_by != 'created_at':
+                filtered_data = serializer.sort_structured_data(filtered_data, order_by, order_direction)
+            
+            if not filtered_data:
+                return Response(
+                    {'error': 'No data matches the specified filters'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Create Excel workbook
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.title = f"{log_obj.log_type.replace('_', ' ').title()} Export"
+            
+            # Define styles
+            header_font = Font(bold=True, color='FFFFFF')
+            header_fill = PatternFill(start_color='202a44', end_color='202a44', fill_type='solid')
+            header_alignment = Alignment(wrap_text=True, vertical='center')
+            text_alignment = Alignment(wrap_text=True, vertical='center')
+            
+            # Get headers in the same order as the UI table
+            if log_obj.log_type == 'inspection_log':
+                headers = [
+                    'Spec Section #', 'Spec Section Name', 'Inspection Type And Requirements',
+                    'Inspection Frequency', 'Responsible Party'
+                ]
+            elif log_obj.log_type == 'owner_deliverables_log':
+                headers = [
+                    'Spec Section #', 'Spec Section Name', 'Deliverable Type',
+                    'When Due', 'Responsible Party', 'Exact Requirement Text'
+                ]
+            elif log_obj.log_type == 'qa_planner':
+                headers = [
+                    'Spec Section #', 'Spec Section Name', 'Paragraph Number',
+                    'item_type', 'Requirement Text', 'Responsible Party', 'When Due'
+                ]
+            else:
+                # Fallback to dynamic headers if log type is unknown
+                headers = list(filtered_data[0].keys()) if filtered_data else []
+            
+            # Write headers
+            for col_idx, header in enumerate(headers, 1):
+                cell = worksheet.cell(row=1, column=col_idx, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+            
+            # Write data rows
+            for row_idx, item in enumerate(filtered_data, 2):
+                for col_idx, header in enumerate(headers, 1):
+                    value = item.get(header, '')
+                    cell = worksheet.cell(row=row_idx, column=col_idx, value=value)
+                    cell.alignment = text_alignment
+            
+            # Auto-adjust column widths
+            for col_num, col in enumerate(worksheet.columns, 1):
+                max_length = 0
+                column = get_column_letter(col_num)
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                worksheet.column_dimensions[column].width = adjusted_width
+            
+            # Create response
+            response = HttpResponse(
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            log_type_display = log_obj.log_type.replace('_', ' ').title()
+            response['Content-Disposition'] = f'attachment; filename={log_type_display}_Export.xlsx'
+            
+            # Save workbook to response
+            workbook.save(response)
+            return response
+            
+        except AiGeneratedLog.DoesNotExist:
+            return Response(
+                {'error': 'Log not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Error exporting data: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class CustomPromptLayerCallbackHandler(PromptLayerCallbackHandler):
@@ -778,7 +1043,7 @@ class ChatViewSet(viewsets.ModelViewSet):
         responsible_party: str = Field(alias="Responsible Party", description="The responsible party for the inspection")
 
     class InspectionLog(BaseModel):
-        results: List['InspectionLogRow'] = Field(description="List of inspection log rows")
+        results: List['ChatViewSet.InspectionLogRow'] = Field(description="List of inspection log rows")
 
     class OwnerDeliverablesRow(BaseModel):
         spec_section_number: str = Field(alias="Spec Section #", description="The section this item was found in")
@@ -789,7 +1054,7 @@ class ChatViewSet(viewsets.ModelViewSet):
         exact_requirement_text: str = Field(alias="Exact Requirement Text", description="The exact requirement text")
 
     class OwnerDeliverablesLog(BaseModel):
-        results: List['OwnerDeliverablesRow'] = Field(description="List of owner deliverables rows")
+        results: List['ChatViewSet.OwnerDeliverablesRow'] = Field(description="List of owner deliverables rows")
 
     def generate_general_log(self, project_id, project_version_id, promptlayer_template_name, full_log_model, log_row_model, request=None):
         try:
@@ -867,8 +1132,8 @@ class ChatViewSet(viewsets.ModelViewSet):
             project_id, 
             project_version_id, 
             settings.INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME, 
-            self.InspectionLog,
-            self.InspectionLogRow,
+            ChatViewSet.InspectionLog,
+            ChatViewSet.InspectionLogRow,
             request
         )
 
@@ -894,8 +1159,8 @@ class ChatViewSet(viewsets.ModelViewSet):
             project_id, 
             project_version_id, 
             settings.OWNER_DELIVERABLES_PROMPTLAYER_PROMPT_NAME, 
-            self.OwnerDeliverablesLog,
-            self.OwnerDeliverablesRow,
+            ChatViewSet.OwnerDeliverablesLog,
+            ChatViewSet.OwnerDeliverablesRow,
             request
         )
 
@@ -914,6 +1179,120 @@ class ChatViewSet(viewsets.ModelViewSet):
         #     raw_message=self.create_raw_message(final_answer, "ai")
         # )
 
+        return processing_log
+
+    def generate_qa_planner_log(self, project_id, project_version_id, selected_options, request=None):
+        """Generate QA planner log by processing multiple QA options."""
+        
+        # QA option to PromptLayer template mapping
+        QA_OPTION_PROMPTS = {
+            'inspections': 'qa_planner__inspections',
+            'mock_ups_sample_construction': 'qa_planner__mock_ups_sample_construction', 
+            'pre_installation_meetings': 'qa_planner__pre_installation_meetings',
+            'warranties': 'qa_planner__warranties',
+            'certificates': 'qa_planner__certificates',
+            'closeout_submittals': 'qa_planner__closeout_submittals',
+            'test_reports': 'qa_planner__test_reports',
+            'commissioning': 'qa_planner__commissioning',
+            'delegated_design': 'qa_planner__delegated_design'
+        }
+        
+        # Generate log types for lambda calls
+        def get_qa_log_type(qa_option):
+            return f"qa_planner__{qa_option}"
+        
+        # Validate selected options
+        invalid_options = [opt for opt in selected_options if opt not in QA_OPTION_PROMPTS]
+        if invalid_options:
+            raise ValueError(f"Invalid QA options: {invalid_options}")
+        
+        # Create initial processing log
+        processing_log = None
+        try:
+            processing_log = AiGeneratedLog.objects.create(
+                project_id=project_id,
+                project_version_id=project_version_id,
+                log_type='qa_planner',
+                log_status='PROCESSING',
+                log_table='',
+                qa_options_selected=selected_options,
+                completion_status={option: 'PENDING' for option in selected_options}
+            )
+        except Exception as e:
+            print(f"Failed to create PROCESSING AiGeneratedLog for QA planner: {str(e)}")
+            raise e
+        
+        # Get common data for all lambda calls
+        project_version_files = UploadedFile.objects.filter(project_version_id=project_version_id).order_by('id')
+        project_version_specs = SpecSection.objects.filter(document__in=project_version_files).order_by('id')
+        spec_sections = [{
+            'master_format_section_number': spec_section.masterformat_section.masterformat_number,
+            'file_s3_key': spec_section.file_s3_key
+        } for spec_section in project_version_specs if spec_section.file_s3_key]
+        s3_bucket = settings.S3_BUCKET
+        
+        # Check feature flag for data tables
+        use_data_tables = False
+        if request and hasattr(request, 'user'):
+            try:
+                project = Project.objects.get(id=project_id)
+                team = project.team
+                user = request.user
+                use_data_tables = is_inspection_log_use_data_tables_feature_flag_active(user, team, project)
+            except Exception as e:
+                print(f"Error checking feature flag: {str(e)}")
+                use_data_tables = False
+        
+        # Invoke lambda for each selected QA option
+        for qa_option in selected_options:
+            try:
+                promptlayer_template_name = QA_OPTION_PROMPTS[qa_option]
+                
+                # Get prompt data for this QA option
+                try:
+                    promptlayer_template = self.get_promptlayer_template(promptlayer_template_name)
+                except Exception as e:
+                    print(f"Failed to retrieve PromptLayer template for {qa_option}: {str(e)}")
+                    # Update completion status for this option to failed
+                    processing_log.completion_status[qa_option] = 'FAILURE'
+                    processing_log.save()
+                    continue
+                
+                system_prompt = self.get_promptlayer_system_prompt(promptlayer_template)
+                user_prompt = self.get_promptlayer_user_prompt(promptlayer_template)
+                promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
+                temperature = promptlayer_model_metadata['parameters'].get('temperature', 0.1)
+                top_p = promptlayer_model_metadata['parameters'].get('top_p', 1)
+                
+                # Call lambda with QA-specific log type
+                qa_log_type = get_qa_log_type(qa_option)
+                requests.post(
+                    settings.GENERATE_LOG_LAMBDA_FUNCTION_URL,
+                    json={
+                        'project_id': project_id,
+                        'project_version_id': project_version_id,
+                        'log_type': qa_log_type,  # Use qa_planner__[option] format
+                        'bucket': s3_bucket,
+                        'spec_sections': spec_sections,
+                        'callback_url': settings.BACKEND_AI_LOG_CALLBACK_URL,
+                        'ai_generated_log_id': str(processing_log.id),
+                        'promptlayer_system_prompt': system_prompt,
+                        'promptlayer_user_prompt': user_prompt,
+                        'promptlayer_model_metadata': promptlayer_model_metadata,
+                        'temperature': temperature,
+                        'top_p': top_p,
+                        'chunk_size': settings.OPENAI_MODEL_MAX_CONTEXT_SIZE,
+                        'use_data_tables': use_data_tables,
+                    }
+                )
+                print(f"Lambda invoked for QA option: {qa_option}")
+                
+            except Exception as e:
+                print(f"Error invoking lambda for QA option {qa_option}: {str(e)}")
+                # Update completion status for this option to failed
+                processing_log.completion_status[qa_option] = 'FAILURE'
+                processing_log.save()
+        
         return processing_log
 
     @action(detail=False, methods=['post'], url_path='generate-ai-log')
@@ -941,6 +1320,13 @@ class ChatViewSet(viewsets.ModelViewSet):
             processing_log_object = self.generate_inspection_log(project_id, project_version_id, request)
         elif log_type == 'owner_deliverables_log':
             processing_log_object = self.generate_owner_deliverables_log(project_id, project_version_id, request)
+        elif log_type == 'qa_planner':
+            selected_options = request.data.get('selected_options', [])
+            if not selected_options:
+                return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                    'error': 'Selected options are required for QA planner'
+                })
+            processing_log_object = self.generate_qa_planner_log(project_id, project_version_id, selected_options, request)
         else:
             return Response(status=status.HTTP_400_BAD_REQUEST, data={
                 'error': 'Invalid log type'
@@ -948,6 +1334,45 @@ class ChatViewSet(viewsets.ModelViewSet):
         serializer = AiGeneratedLogSerializer(processing_log_object)
         return Response(status=status.HTTP_200_OK, data=serializer.data)
 
+    @action(detail=False, methods=['post'], url_path='generate-qa-planner-log')
+    def generate_qa_planner_log_endpoint(self, request, project_id=None):
+        """API endpoint specifically for QA planner log generation."""
+        print("Generate QA Planner log")
+        print(request.data)
+        
+        project_id = request.data.get('project_id', None)
+        project_version_id = request.data.get('project_version_id', None)
+        selected_options = request.data.get('selected_options', [])
+        
+        # Validation
+        if not project_id:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'Project ID is required'
+            })
+        if not project_version_id:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'Project version ID is required'
+            })
+        if not selected_options or not isinstance(selected_options, list):
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': 'Selected options are required and must be a list'
+            })
+        
+        try:
+            processing_log_object = self.generate_qa_planner_log(
+                project_id, project_version_id, selected_options, request
+            )
+            serializer = AiGeneratedLogSerializer(processing_log_object)
+            return Response(status=status.HTTP_200_OK, data=serializer.data)
+        except ValueError as e:
+            return Response(status=status.HTTP_400_BAD_REQUEST, data={
+                'error': str(e)
+            })
+        except Exception as e:
+            print(f"Error generating QA planner log: {str(e)}")
+            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR, data={
+                'error': 'Internal server error while generating QA planner log'
+            })
 
     @action(detail=False, methods=['post'], url_path='generate-response')
     def generate_response(self, request, project_id=None):
