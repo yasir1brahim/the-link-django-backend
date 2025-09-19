@@ -2,6 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
 from . import views
+from .views.spec_centric_views import SpecCentricViewSet
 
 
 app_name = "deliverables"
@@ -49,6 +50,12 @@ single_project_router.register(
     'project-versions',
     views.ProjectVersionViewSet,
     basename='project-version',
+)
+# spec centric view
+single_project_router.register(
+    'spec-sections',
+    SpecCentricViewSet,
+    basename='spec-section',
 )
 
 
