@@ -32,7 +32,7 @@ class SpecCentricViewSet(viewsets.ViewSet):
 
     def get_queryset(self):
         """Get queryset with proper filtering and prefetching."""
-        project_id = self.kwargs.get('project_pk')
+        project_id = self.kwargs.get('project_id')
         project = get_object_or_404(Project, id=project_id)
         
         # Check feature flag
@@ -48,8 +48,6 @@ class SpecCentricViewSet(viewsets.ViewSet):
         ).select_related(
             'masterformat_section',
             'document'
-        ).prefetch_related(
-            'submittalitem_set'
         )
 
     @extend_schema(
@@ -68,9 +66,9 @@ class SpecCentricViewSet(viewsets.ViewSet):
             403: {'description': 'Feature flag not enabled'}
         }
     )
-    def list(self, request, project_pk=None):
+    def list(self, request, project_id=None):
         """Get all spec sections for a project."""
-        project = get_object_or_404(Project, id=project_pk)
+        project = get_object_or_404(Project, id=project_id)
         
         # Check feature flag
         if not is_spec_centered_view_feature_flag_active(
@@ -118,9 +116,9 @@ class SpecCentricViewSet(viewsets.ViewSet):
             403: {'description': 'Feature flag not enabled'}
         }
     )
-    def retrieve(self, request, pk=None, project_pk=None):
+    def retrieve(self, request, pk=None, project_id=None):
         """Get detailed content for a specific spec section."""
-        project = get_object_or_404(Project, id=project_pk)
+        project = get_object_or_404(Project, id=project_id)
         
         # Check feature flag
         if not is_spec_centered_view_feature_flag_active(
@@ -153,10 +151,17 @@ class SpecCentricViewSet(viewsets.ViewSet):
         if project_version_id:
             submittals = submittals.filter(project_version_id=project_version_id)
         
-        # Create a modified spec section with filtered submittals
-        spec_section.submittalitem_set = submittals
+        # Create a data structure for the serializer
+        data = {
+            'spec_section': spec_section,
+            'content': f"Content for {spec_section.document.name if spec_section.document else 'Unknown Document'} - Section {spec_section.masterformat_section.masterformat_number if spec_section.masterformat_section else 'Unknown'}"
+        }
         
-        serializer = SpecSectionContentSerializer(spec_section, context={'request': request})
+        # Pass the filtered submittals to the serializer context
+        serializer = SpecSectionContentSerializer(data, context={
+            'request': request,
+            'filtered_submittals': submittals
+        })
         
         return Response(serializer.data)
 
@@ -178,9 +183,9 @@ class SpecCentricViewSet(viewsets.ViewSet):
         }
     )
     @action(detail=True, methods=['get'], url_path='submittal-highlights')
-    def get_submittal_highlights(self, request, pk=None, project_pk=None):
+    def get_submittal_highlights(self, request, pk=None, project_id=None):
         """Get submittal highlights for a specific spec section."""
-        project = get_object_or_404(Project, id=project_pk)
+        project = get_object_or_404(Project, id=project_id)
         
         # Check feature flag
         if not is_spec_centered_view_feature_flag_active(
@@ -228,9 +233,9 @@ class SpecCentricViewSet(viewsets.ViewSet):
         }
     )
     @action(detail=False, methods=['get'], url_path='spec-centric-data')
-    def get_spec_centric_data(self, request, project_pk=None):
+    def get_spec_centric_data(self, request, project_id=None):
         """Get comprehensive spec centric view data."""
-        project = get_object_or_404(Project, id=project_pk)
+        project = get_object_or_404(Project, id=project_id)
         
         # Check feature flag
         if not is_spec_centered_view_feature_flag_active(

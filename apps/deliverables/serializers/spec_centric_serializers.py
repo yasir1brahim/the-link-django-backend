@@ -55,18 +55,29 @@ class SubmittalHighlightSerializer(serializers.ModelSerializer):
         ]
 
 
-class SpecSectionContentSerializer(serializers.ModelSerializer):
+class SpecSectionContentSerializer(serializers.Serializer):
     """Serializer for spec section content with submittal highlights."""
     spec_section = SpecSectionSerializer(read_only=True)
+    content = serializers.CharField(read_only=True)
     submittal_highlights = SubmittalHighlightSerializer(many=True, read_only=True)
     
-    class Meta:
-        model = SpecSection
-        fields = [
-            'id',
-            'spec_section',
-            'submittal_highlights'
-        ]
+    def to_representation(self, instance):
+        """Override to use filtered submittals from context."""
+        data = super().to_representation(instance)
+        
+        # Use filtered submittals from context if available
+        if 'filtered_submittals' in self.context:
+            filtered_submittals = self.context['filtered_submittals']
+            data['submittal_highlights'] = SubmittalHighlightSerializer(
+                filtered_submittals, many=True, context=self.context
+            ).data
+        else:
+            # Fallback to default submittalitem_set
+            data['submittal_highlights'] = SubmittalHighlightSerializer(
+                instance.submittalitem_set.all(), many=True, context=self.context
+            ).data
+            
+        return data
 
 
 class SpecCentricViewSerializer(serializers.Serializer):

@@ -94,7 +94,7 @@ class SpecCentricViewAccessPermissions(permissions.BasePermission):
     """
 
     def has_permission(self, request, view):
-        return request.user.is_member_of_project(view.kwargs['project_pk'])
+        return request.user.is_member_of_project(view.kwargs['project_id'])
 
 
 class AiGeneratedLogAccessPermissions(permissions.BasePermission):
