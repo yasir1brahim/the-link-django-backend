@@ -23,6 +23,7 @@ from rest_framework.viewsets import ViewSet
 from apps.users.models import CustomUser as User
 import secrets 
 import string
+from ..emails import send_team_added_notification
 
 
 class AnonymousRetrieveOnlyPermission(BasePermission):
@@ -70,7 +71,7 @@ class TeamViewSet(
         if self.request.user.is_superuser:
             return self.queryset.order_by("name")
         return self.request.user.teams.order_by("name")
-
+    
     
     @action(detail=True, methods=['post'], url_path='upload-logo')
     def upload_logo(self, request, pk=None):
@@ -174,9 +175,6 @@ class InvitationViewSet(viewsets.ModelViewSet):
 
 @api_view(['POST'])
 def api_accept_invitation(request, team_id, invitation_id):
-    print(request)
-    print(team_id)
-    print(invitation_id)
     invitation = get_object_or_404(Invitation, id=invitation_id)
 
     if invitation.is_accepted:
@@ -223,8 +221,7 @@ class InvitedUserResetPasswordViewSet(ViewSet):
 
     def _check_user_exists(self, email):
         """Check if user exists by email."""
-        if User.objects.filter(email=email).exists():
-            return User.objects.filter(email=email).exists()
+        return User.objects.filter(email=email).exists()
     
     def _generate_password(self):
         """Generate a random password."""
@@ -253,54 +250,8 @@ class InvitedUserResetPasswordViewSet(ViewSet):
             return Response({"error": "Password reset email failed."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     def _send_team_added_notification_email(self, request, user, team, role):
-        """Send notification email that user has been added to a team."""
-        import logging
-        from django.core.mail import send_mail
-        from django.template.loader import render_to_string
-        from django.utils.translation import gettext_lazy as _
-        from django.conf import settings
-        
-        logger = logging.getLogger(__name__)
-        
-        subject = _("You've been added to {}").format(team.name)
-        
-        context = {
-            'user': user,
-            'team': team,
-            'role': role,
-            'project_name': settings.PROJECT_METADATA.get("NAME", "The Link"),
-        }
-        
-        # Render email templates
-        message_text = render_to_string("teams/email/team_added_notification.txt", context)
-        message_html = render_to_string("teams/email/team_added_notification.html", context)
-        
-        # Log email details for testing
-        logger.info(f"=== TEAM ADDED NOTIFICATION EMAIL ===")
-        logger.info(f"To: {user.email}")
-        logger.info(f"Subject: {subject}")
-        logger.info(f"Team: {team.name}")
-        logger.info(f"Role: {role}")
-        logger.info(f"User ID: {user.id}")
-        logger.info(f"User First Name: '{user.first_name}'")
-        logger.info(f"User Last Name: '{user.last_name}'")
-        logger.info(f"User Email: '{user.email}'")
-        logger.info(f"Context Data: {context}")
-        logger.info(f"Text Content: {message_text}")
-        logger.info(f"HTML Content: {message_html}")
-        logger.info(f"From Email: {settings.DEFAULT_FROM_EMAIL}")
-        logger.info(f"=====================================")
-        
-        send_mail(
-            subject=subject,
-            message=message_text,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=False,
-            html_message=message_html,
-        )
-        
-        logger.info(f"Email sent successfully to {user.email}")
+        """Send notification email that user has been added to a team (delegated to helper)."""
+        send_team_added_notification(user, team, role, source="api")
         
     def _add_existing_user_to_team(self, request, email, team, role, first_name, last_name):
         """Add existing user to team and send notification email."""

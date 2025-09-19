@@ -4,11 +4,41 @@ from waffle.admin import FlagAdmin as WaffleFlagAdmin
 
 from .models import Team, Membership, Invitation, Flag
 
+from django.conf import settings
+from apps.users.serializers import CustomPasswordResetSerializer
+from apps.utils.constants import WELCOME_RESET_SUBJECT
+from .emails import send_team_added_notification
+
 
 @admin.register(Membership)
 class MembershipAdmin(admin.ModelAdmin):
     list_display = ["user", "team", "role", "created_at"]
     list_filter = ["team"]
+
+    def save_model(self, request, obj, form, change):
+        is_new = obj.pk is None
+        super().save_model(request, obj, form, change)
+        # Only act on creations done via the Membership admin
+        if is_new:
+            self._send_membership_created_email(obj)
+
+    def _send_membership_created_email(self, membership: Membership):
+        user = membership.user
+        team = membership.team
+        role = membership.role
+        total_memberships = Membership.objects.filter(user=user).count()
+
+        if total_memberships > 1:
+            # Existing user being added to another team → send notification email
+            send_team_added_notification(user, team, role, source="admin")
+        else:
+            # First team for this user → send password reset email (no default password)
+            serializer = CustomPasswordResetSerializer(
+                data={'email': user.email, 'subject_line': WELCOME_RESET_SUBJECT},
+                context={'request': None}
+            )
+            if serializer.is_valid():
+                serializer.save()
 
 
 @admin.register(Invitation)
@@ -40,6 +70,24 @@ class TeamAdmin(admin.ModelAdmin):
 
     active_members.admin_order_field = "active_member_count"
 
+    def save_formset(self, request, form, formset, change):
+        if formset.model is Membership:
+            instances = formset.save(commit=False)
+            new_memberships = []
+            for obj in instances:
+                is_new = obj.pk is None
+                obj.save()
+                if is_new:
+                    new_memberships.append(obj)
+            formset.save_m2m()
+
+            # Send emails for newly created memberships via Team admin
+            for membership in new_memberships:
+                # Reuse same logic as MembershipAdmin
+                MembershipAdmin._send_membership_created_email(self, membership)
+        else:
+            formset.save()
+
 
 MAX_TEAMS_DISPLAY = 3
 
@@ -63,8 +111,51 @@ def projects_list(flag):
     return [project.name for project in flag.projects.all()]
 
 
+class ProjectInlineAdmin(admin.TabularInline):
+    model = Flag.projects.through
+    extra = 1
+    verbose_name = "Project"
+    verbose_name_plural = "Projects"
+    autocomplete_fields = ['project']
+
+class TeamInlineAdmin(admin.TabularInline):
+    model = Flag.teams.through
+    extra = 1
+    verbose_name = "Team"
+    verbose_name_plural = "Teams"
+    autocomplete_fields = ['team']
+
+
+class UserInlineAdmin(admin.TabularInline):
+    model = Flag.users.through
+    extra = 1
+    verbose_name = "User"
+    verbose_name_plural = "Users"
+
+@admin.display(description="Active Teams")
+def active_teams_count(flag):
+    return flag.teams.count()
+
+@admin.display(description="Active Projects")
+def active_projects_count(flag):
+    return flag.projects.count()
+
+@admin.display(description="Active Users")
+def active_users_count(flag):
+    return flag.users.count()
+
+
 @admin.register(Flag)
 class FlagAdmin(WaffleFlagAdmin):
-    list_display = tuple(list(WaffleFlagAdmin.list_display) + [teams_list, projects_list])
-    list_filter = tuple(list(WaffleFlagAdmin.list_filter) + ["teams", "projects"])
-    raw_id_fields = tuple(list(WaffleFlagAdmin.raw_id_fields) + ["teams", "projects"])
+    list_display = [
+        field for field in WaffleFlagAdmin.list_display
+        if field not in ['teams', 'projects', 'users']
+    ] + [active_teams_count, active_projects_count, active_users_count]
+    inlines = [UserInlineAdmin, ProjectInlineAdmin, TeamInlineAdmin]
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        form.base_fields.pop('teams', None)
+        form.base_fields.pop('projects', None)
+        form.base_fields.pop('users', None)
+        return form

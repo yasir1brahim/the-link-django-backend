@@ -322,6 +322,7 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
     text_loc = serializers.JSONField(source='text_location')
     type = serializers.CharField(source='submittal_type')
     parsing_method = serializers.CharField()
+    manually_added = serializers.BooleanField()
 
     def get_section_title(self, obj):
         title_override = obj.spec_section.custom_section_title if obj.spec_section else None
@@ -361,6 +362,7 @@ class SubmittalItemReadSerializer(serializers.ModelSerializer):
             'text_loc',
             'type',
             'parsing_method',
+            'manually_added',
         ]
 
 
