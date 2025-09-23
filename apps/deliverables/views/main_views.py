@@ -89,6 +89,7 @@ from ..permissions import (
     SubmittalItemAccessPermissions,
     SubmittalListAccessPermissions,
     ProjectVersionAccessPermissions,
+    SpecCentricViewAccessPermissions,
 )
 from apps.utils.feature_flags import (
     is_notices_feature_flag_active, is_versioning_feature_flag_active, is_v2_process_deliverables_feature_flag_active,
@@ -2760,7 +2761,7 @@ def delete_document(request):
     description="Get spec sections for a project."
 )
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, SpecCentricViewAccessPermissions])
 def get_project_spec_sections(request, project_id):
     try:
         project = get_object_or_404(Project, id=project_id)
@@ -2797,7 +2798,7 @@ def get_project_spec_sections(request, project_id):
     description="Download a spec section file."
 )
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, SpecCentricViewAccessPermissions])
 def download_spec_section(request, section_id):
     try:
         section = get_object_or_404(SpecSection, id=section_id)
