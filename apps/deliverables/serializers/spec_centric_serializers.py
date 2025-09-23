@@ -16,6 +16,27 @@ class SpecSectionSerializer(serializers.ModelSerializer):
     masterformat_title = serializers.CharField(source='masterformat_section.title', read_only=True)
     document_name = serializers.CharField(source='document.name', read_only=True)
     document_id = serializers.IntegerField(source='document.id', read_only=True)
+    pdf_url = serializers.SerializerMethodField()
+    
+    def get_pdf_url(self, obj):
+        """Get presigned S3 URL for the spec section."""
+        if obj.file_s3_key:
+            from django.conf import settings
+            import boto3
+            
+            try:
+                # Use the same S3 client pattern as other serializers
+                s3 = boto3.client('s3')
+                presigned_url = s3.generate_presigned_url(
+                    'get_object', 
+                    Params={'Bucket': settings.S3_BUCKET, 'Key': obj.file_s3_key}, 
+                    ExpiresIn=3600
+                )
+                return presigned_url
+            except Exception as e:
+                # If presigned URL generation fails, return the raw S3 key
+                return obj.file_s3_key
+        return None
     
     class Meta:
         model = SpecSection
@@ -26,6 +47,7 @@ class SpecSectionSerializer(serializers.ModelSerializer):
             'custom_section_title',
             'document_name',
             'document_id',
+            'pdf_url',
             'processing_status',
             'processing_method',
             'specgpt_embedding_status',
