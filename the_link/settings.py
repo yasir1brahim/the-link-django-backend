@@ -579,7 +579,7 @@ LOGGING = {
         "console": {"class": "logging.StreamHandler", "formatter": "verbose"},
         'mail_admins': {
             'level': 'ERROR',
-            'class': 'django.utils.log.AdminEmailHandler'
+            'class': 'apps.web.filtered_email_handler.FilteredAdminEmailHandler'
         },
     },
     "loggers": {
