@@ -2798,10 +2798,13 @@ def get_project_spec_sections(request, project_id):
     description="Download a spec section file."
 )
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, SpecCentricViewAccessPermissions])
+@permission_classes([IsAuthenticated])
 def download_spec_section(request, section_id):
     try:
         section = get_object_or_404(SpecSection, id=section_id)
+
+        if not request.user.is_member_of_project(section.document.project):
+            return Response({"error": "User is not a member of the project"}, status=status.HTTP_403_FORBIDDEN)
         
         if not section.file_s3_key:
             return Response({"error": "Spec section file not available"}, status=status.HTTP_404_NOT_FOUND)
