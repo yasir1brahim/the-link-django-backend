@@ -276,7 +276,7 @@ def _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdow
         log_obj.log_data.extend(log_data)
         
         # Sort all log_data by spec_section_number (simple string sort works due to leading zeros)
-        log_obj.log_data.sort(key=lambda item: item.get('spec_section_number', ''))
+        log_obj.log_data.sort(key=lambda item: item.get('Spec Section #', ''))
         print(f"Merged and sorted {len(log_data)} items for QA option '{qa_option}' into log {log_obj.id}")
     
     # Merge markdown table data
@@ -288,7 +288,7 @@ def _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdow
     
     # Check if all QA options are complete
     selected_options = log_obj.qa_options_selected or []
-    completed_options = list(log_obj.completion_status.keys())
+    completed_options = [option_name for option_name in log_obj.completion_status.keys() if log_obj.completion_status[option_name] in ['SUCCESS', 'FAILURE']]
     all_complete = all(option in completed_options for option in selected_options)
     
     if all_complete:

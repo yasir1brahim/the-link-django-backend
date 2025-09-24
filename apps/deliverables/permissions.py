@@ -86,10 +86,15 @@ class ChatAccessPermissions(permissions.BasePermission):
 
     def has_permission(self, request, view):
         return request.user.is_member_of_project(view.kwargs['project_id'])
-    
 
-    def has_object_permission(self, request, view, obj: Chat):
-        return request.user.is_member_of_project(obj.project)
+
+class SpecCentricViewAccessPermissions(permissions.BasePermission):
+    """
+    Permission to only allow members of a project to access spec centric view.
+    """
+
+    def has_permission(self, request, view):
+        return request.user.is_member_of_project(view.kwargs['project_id'])
 
 
 class AiGeneratedLogAccessPermissions(permissions.BasePermission):

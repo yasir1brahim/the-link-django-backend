@@ -89,6 +89,7 @@ from ..permissions import (
     SubmittalItemAccessPermissions,
     SubmittalListAccessPermissions,
     ProjectVersionAccessPermissions,
+    SpecCentricViewAccessPermissions,
 )
 from apps.utils.feature_flags import (
     is_notices_feature_flag_active, is_versioning_feature_flag_active, is_v2_process_deliverables_feature_flag_active,
@@ -2742,3 +2743,86 @@ def delete_document(request):
         return Response({
             'detail': f'Error deleting document: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    parameters=[
+        OpenApiParameter(
+            name='project_version_id',
+            description='ID of the project version to filter spec sections',
+            required=False,
+            type=OpenApiTypes.INT
+        )
+    ],
+    responses={
+        200: OpenApiTypes.OBJECT,
+        400: OpenApiTypes.OBJECT
+    },
+    description="Get spec sections for a project."
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, SpecCentricViewAccessPermissions])
+def get_project_spec_sections(request, project_id):
+    try:
+        project = get_object_or_404(Project, id=project_id)
+        project_version_id = request.query_params.get('project_version_id')
+        
+        queryset = SpecSection.objects.filter(document__project=project)
+        
+        if project_version_id:
+            queryset = queryset.filter(document__project_version_id=project_version_id)
+        
+        # Build the response data
+        spec_sections_data = []
+        for section in queryset:
+            spec_sections_data.append({
+                'id': section.id,
+                'masterformat_number': section.masterformat_section.masterformat_number,
+                'section_title': section.custom_section_title or section.masterformat_section.masterformat_description,
+                'document_name': section.document.name,
+                'file_s3_key': section.file_s3_key,
+                'created_at': section.created_at.isoformat() if section.created_at else None,
+            })
+        
+        return Response(spec_sections_data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    responses={
+        200: OpenApiTypes.OBJECT,
+        400: OpenApiTypes.OBJECT,
+        404: OpenApiTypes.OBJECT
+    },
+    description="Download a spec section file."
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_spec_section(request, section_id):
+    try:
+        section = get_object_or_404(SpecSection, id=section_id)
+
+        if not request.user.is_member_of_project(section.document.project):
+            return Response({"error": "User is not a member of the project"}, status=status.HTTP_403_FORBIDDEN)
+        
+        if not section.file_s3_key:
+            return Response({"error": "Spec section file not available"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Generate presigned URL
+        download_url = s3.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': settings.S3_BUCKET, 'Key': section.file_s3_key},
+            ExpiresIn=3600
+        )
+        
+        # Generate a filename for download
+        file_name = f"{section.masterformat_section.masterformat_number}_{section.document.name}"
+        
+        return Response({
+            "download_url": download_url,
+            "file_name": file_name
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

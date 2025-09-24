@@ -4,6 +4,7 @@ from django.http import HttpResponseRedirect, Http404, HttpResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
+from django.core.exceptions import DisallowedHost
 from health_check.views import MainView
 
 from apps.teams.decorators import login_and_team_required
@@ -29,6 +30,10 @@ def team_home(request, team_slug):
 
 def simulate_error(request):
     raise Exception("This is a simulated error.")
+
+
+def simulate_invalid_http_host_error(request):
+    raise DisallowedHost("This is a simulated invalid HTTP host error.")
 
 
 class HealthCheck(MainView):
