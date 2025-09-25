@@ -579,7 +579,7 @@ LOGGING = {
         "console": {"class": "logging.StreamHandler", "formatter": "verbose"},
         'mail_admins': {
             'level': 'ERROR',
-            'class': 'django.utils.log.AdminEmailHandler'
+            'class': 'apps.web.filtered_email_handler.FilteredAdminEmailHandler'
         },
     },
     "loggers": {
@@ -627,6 +627,7 @@ SPECGPT_FEATURE_FLAG_NAME = 'specgpt'
 INSPECTION_LOG_FEATURE_FLAG_NAME = 'inspection_log'
 INSPECTION_LOG_USE_DATA_TABLES_FEATURE_FLAG_NAME = 'inspection_log_use_data_tables'
 QA_PLANNER_FEATURE_FLAG_NAME = 'qa_planner'
+SPEC_CENTERED_VIEW_FEATURE_FLAG_NAME = 'spec_centered_view'
 
 PROCORE_CLIENT_ID = os.environ.get("PROCORE_CLIENT_ID", default="")
 PROCORE_CLIENT_SECRET = os.environ.get("PROCORE_CLIENT_SECRET", default="")
