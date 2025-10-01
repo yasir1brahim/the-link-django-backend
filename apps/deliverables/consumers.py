@@ -266,14 +266,12 @@ class SpecGptWebSocketConsumer(AsyncWebsocketConsumer):
             docs = deps['retriever'].get_relevant_documents(user_input)
             parts = []
             for d in docs[: int(num_documents)]:
-                # Limit each doc to a sane length to avoid overlong system messages
-                text = (d.page_content or "")[:1500]
+                text = d.page_content or ""
                 meta = d.metadata or {}
                 sn = meta.get('master_format_section_number') or meta.get('spec_section_number') or ''
                 parts.append(f"[Section: {sn}]\n{text}")
             context_text = "\n\n".join(parts)
-            # Cap total context length
-            return context_text[:6000]
+            return context_text
 
         context_text = await asyncio.get_event_loop().run_in_executor(None, _prefetch_context)
 
