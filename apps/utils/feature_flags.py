@@ -37,6 +37,22 @@ def is_specgpt_feature_flag_active(user, team, project):
             settings.SPECGPT_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
             settings.SPECGPT_FEATURE_FLAG_NAME in get_active_flags_for_project(project))
 
+def is_specgpt_websockets_feature_flag_active(user, team, project):
+    """
+    Check if the specgpt_websockets feature flag is active for the given user/team/project.
+    
+    Args:
+        user: User object
+        team: Team object
+        project: Optional Project object
+        
+    Returns:
+        bool: True if flag is active, False otherwise
+    """
+    return (settings.SPECGPT_WEBSOCKETS_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
+            settings.SPECGPT_WEBSOCKETS_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
+            (project and settings.SPECGPT_WEBSOCKETS_FEATURE_FLAG_NAME in get_active_flags_for_project(project)))
+
 def is_inspection_log_use_data_tables_feature_flag_active(user, team, project):
     return (settings.INSPECTION_LOG_USE_DATA_TABLES_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
             settings.INSPECTION_LOG_USE_DATA_TABLES_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
