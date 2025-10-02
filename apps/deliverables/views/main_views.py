@@ -2826,3 +2826,92 @@ def download_spec_section(request, section_id):
         
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+@extend_schema(
+    summary="Get PDF URLs for version comparison",
+    request=VersionComparisonSerializer,
+    responses={
+        200: OpenApiResponse(description="PDF URLs for both versions"),
+        400: OpenApiResponse(description="Bad Request"),
+        401: OpenApiResponse(description="Unauthorized"),
+        403: OpenApiResponse(description="Forbidden"),
+        404: OpenApiResponse(description="Not Found"),
+    },
+    description="Get PDF URLs for comparing two versions of a project for a specific spec section.",
+    methods=["GET"]
+)
+@api_view(['GET'])
+def get_pdf_version_comparison(request):
+    """Get PDF URLs for version comparison"""
+    from apps.utils.feature_flags import is_versioning_pdf_comparison_feature_flag_active
+    from ..serializers import VersionComparisonSerializer
+    import boto3
+    
+    serializer = VersionComparisonSerializer(data=request.query_params)
+
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    old_version = serializer.validated_data['old_version']
+    new_version = serializer.validated_data['new_version']
+    masterformat_number = serializer.validated_data['masterformat_number']
+    project = Project.objects.get(id=old_version.project_id)
+    
+    # Check project access
+    if not request.user.is_member_of_project(project):
+        return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Check feature flag
+    if not is_versioning_pdf_comparison_feature_flag_active(request.user, project.team, project):
+        return Response({'detail': 'PDF comparison feature is not enabled'}, status=status.HTTP_403_FORBIDDEN)
+
+    if old_version.project_id != new_version.project_id:
+        return Response({'detail': 'Old and new versions must be from the same project'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Get documents for both versions
+    old_documents = UploadedFile.objects.filter(project_version=old_version)
+    new_documents = UploadedFile.objects.filter(project_version=new_version)
+    
+    if not old_documents.exists():
+        return Response({'detail': 'No documents found for old version'}, status=status.HTTP_404_NOT_FOUND)
+    
+    if not new_documents.exists():
+        return Response({'detail': 'No documents found for new version'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # For now, we'll use the first document from each version
+    # In the future, this could be enhanced to filter by spec section
+    old_document = old_documents.first()
+    new_document = new_documents.first()
+    
+    # Generate S3 presigned URLs
+    s3 = boto3.client('s3')
+    
+    try:
+        old_pdf_url = s3.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': settings.S3_BUCKET, 'Key': old_document.document_path},
+            ExpiresIn=3600
+        )
+        
+        new_pdf_url = s3.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': settings.S3_BUCKET, 'Key': new_document.document_path},
+            ExpiresIn=3600
+        )
+        
+        response_data = {
+            'oldPdfUrl': old_pdf_url,
+            'newPdfUrl': new_pdf_url,
+            'metadata': {
+                'oldVersionName': old_version.version_name,
+                'newVersionName': new_version.version_name,
+                'specSection': masterformat_number,
+                'oldDocumentName': old_document.name,
+                'newDocumentName': new_document.name
+            }
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({'detail': f'Error generating PDF URLs: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
