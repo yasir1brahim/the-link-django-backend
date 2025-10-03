@@ -117,8 +117,5 @@ class SpecCentricViewSerializer(serializers.Serializer):
             team = getattr(request, 'team', None)
             project = instance.get('project')
             
-            # Check if feature flag is active
-            if not is_spec_centered_view_feature_flag_active(user, team, project):
-                return {'error': 'Spec centered view feature is not enabled for this user/team/project'}
         
         return super().to_representation(instance)
