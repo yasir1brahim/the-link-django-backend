@@ -30,7 +30,7 @@ class ProcoreCompanySerializer(serializers.Serializer):
 class ProcoreMeSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     login = serializers.CharField()
-    name = serializers.CharField()
+    name = serializers.CharField(required=False, allow_null=True)
 
 
 class ProcoreProjectMappingSerializer(serializers.Serializer):
