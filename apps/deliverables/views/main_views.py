@@ -2354,8 +2354,7 @@ class DeleteProcoreTokenView(generics.RetrieveAPIView):
     def get(self, request, *args, **kwargs):
         user_id = self.request.query_params.get('user_id', '')
         user = get_object_or_404(CustomUser, id=user_id)
-        token = get_object_or_404(ProcoreToken, user=user)
-        token.delete()
+        ProcoreToken.objects.filter(user=user).delete()
         return Response(status=status.HTTP_200_OK)
     
 
