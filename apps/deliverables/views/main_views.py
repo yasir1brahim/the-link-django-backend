@@ -2088,7 +2088,7 @@ class ProcoreRefreshAccessTokenView(generics.CreateAPIView):
                 'refresh_token': procore_token.refresh_token,
                 'expires_in': procore_token.expires_in,
                 'token_type': procore_token.token_type,
-                'created_at': procore_token.created_at,
+                'created_at': int(procore_token.created_at.timestamp()),
             }
         )
         print(access_token_serializer)
