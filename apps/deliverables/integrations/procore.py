@@ -111,7 +111,7 @@ def get_managers(project_id, procore_token):
     response = requests.get(url, headers=headers)
     return response
 
-def create_spec_division(division_number, project_id, procore_token):
+def create_spec_division(project_id, division_number, procore_token):
     payload = json.dumps({
         "specification_section_division": {
             "number": str(division_number),

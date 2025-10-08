@@ -2283,14 +2283,18 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                 continue
             if spec_section_division not in procore_division_numbers:
                 print("Spec section division not in procore division numbers")
-                create_div_response = create_spec_division(project.procore_id, spec_section_division, procore_token.access_token)
+                create_div_response = create_spec_division(
+                    project_id=project.procore_id,
+                    division_number=spec_section_division,
+                    procore_token=procore_token.access_token
+                )
                 if create_div_response.status_code != 201:
                     print("Error creating procore spec division")
                     print("create_div_response status code: " + str(create_div_response.status_code))
                     print("create_div_response json: " + str(create_div_response.json()))
                     continue
                 else:
-                    procore_division_dict[spec_section_division] = create_div_response.json()
+                    procore_division_dict[spec_section_division] = str(create_div_response.json()['id'])
                     print("updated division dict", procore_division_dict)
             else:
                 print("Division: " + spec_section_division + " already exists")
@@ -2309,7 +2313,7 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                     print("create_spec_response json: " + str(create_spec_response.json()))
                     return Response(create_spec_response.json(), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 else:
-                    procore_spec_section_dict[spec_section] = create_spec_response.json()
+                    procore_spec_section_dict[spec_section] = str(create_spec_response.json()['id'])
                     print("updated spec section dict", procore_spec_section_dict)
             else:
                 print("Spec: " + spec_section + " already exists")
