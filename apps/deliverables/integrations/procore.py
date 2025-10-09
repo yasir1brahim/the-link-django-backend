@@ -51,6 +51,7 @@ def get_fresh_token_for_user(user) -> ProcoreToken:
     if not existing_token:
         raise Http404("No Procore token found for user")
     if not existing_token.is_expired():
+        print("existing token is not expired")
         return existing_token
     
     procore_response = get_procore_access_token(existing_token.code, existing_token.redirect_uri)
@@ -58,6 +59,7 @@ def get_fresh_token_for_user(user) -> ProcoreToken:
         raise ProcoreException(procore_response.text)
     access_token_serializer = ProcoreAccessTokenSerializer(data=procore_response.json())
     access_token_serializer.is_valid(raise_exception=True)
+    print("access_token_serializer", access_token_serializer.validated_data)
     return ProcoreToken.objects.create(
         user=user,
         access_token=access_token_serializer.validated_data['access_token'],
@@ -66,6 +68,12 @@ def get_fresh_token_for_user(user) -> ProcoreToken:
         token_type=access_token_serializer.validated_data['token_type'],
         code=existing_token.code,
     )
+
+def check_token_info(procore_token):
+    url = settings.PROCORE_AUTH_BASE_URL + '/oauth/token/info'
+    headers = {'Authorization': "Bearer " + procore_token}
+    response = requests.get(url, headers=headers)
+    return response
 
 def get_companies(procore_token):
     url = settings.PROCORE_BASE_URL + '/rest/v1.0/companies'
@@ -85,7 +93,6 @@ def get_spec_divisions(project_id, procore_token):
     response = requests.get(url, headers=headers)
     return response
 
-
 def get_spec_sections(project_id, procore_token):
     url = settings.PROCORE_BASE_URL + '/rest/v1.0/specification_sections?project_id=' + str(project_id)
     headers = {'Authorization': "Bearer " + procore_token}
@@ -104,7 +111,7 @@ def get_managers(project_id, procore_token):
     response = requests.get(url, headers=headers)
     return response
 
-def create_spec_division(division_number, project_id, procore_token):
+def create_spec_division(project_id, division_number, procore_token):
     payload = json.dumps({
         "specification_section_division": {
             "number": str(division_number),

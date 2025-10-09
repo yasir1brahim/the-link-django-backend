@@ -70,16 +70,6 @@ class SpecCentricViewSet(viewsets.ViewSet):
         """Get all spec sections for a project."""
         project = get_object_or_404(Project, id=project_id)
         
-        # Check feature flag
-        if not is_spec_centered_view_feature_flag_active(
-            request.user, 
-            getattr(request, 'team', None), 
-            project
-        ):
-            return Response(
-                {'error': 'Spec centered view feature is not enabled'}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
         
         # Filter by project version if provided
         project_version_id = request.query_params.get('project_version_id')
@@ -119,17 +109,6 @@ class SpecCentricViewSet(viewsets.ViewSet):
     def retrieve(self, request, pk=None, project_id=None):
         """Get detailed content for a specific spec section."""
         project = get_object_or_404(Project, id=project_id)
-        
-        # Check feature flag
-        if not is_spec_centered_view_feature_flag_active(
-            request.user, 
-            getattr(request, 'team', None), 
-            project
-        ):
-            return Response(
-                {'error': 'Spec centered view feature is not enabled'}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
         
         spec_section = get_object_or_404(
             self.get_queryset().prefetch_related(
@@ -187,17 +166,6 @@ class SpecCentricViewSet(viewsets.ViewSet):
         """Get submittal highlights for a specific spec section."""
         project = get_object_or_404(Project, id=project_id)
         
-        # Check feature flag
-        if not is_spec_centered_view_feature_flag_active(
-            request.user, 
-            getattr(request, 'team', None), 
-            project
-        ):
-            return Response(
-                {'error': 'Spec centered view feature is not enabled'}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
         spec_section = get_object_or_404(self.get_queryset(), id=pk)
         
         # Get submittals for this spec section
@@ -236,17 +204,6 @@ class SpecCentricViewSet(viewsets.ViewSet):
     def get_spec_centric_data(self, request, project_id=None):
         """Get comprehensive spec centric view data."""
         project = get_object_or_404(Project, id=project_id)
-        
-        # Check feature flag
-        if not is_spec_centered_view_feature_flag_active(
-            request.user, 
-            getattr(request, 'team', None), 
-            project
-        ):
-            return Response(
-                {'error': 'Spec centered view feature is not enabled'}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
         
         project_version_id = request.query_params.get('project_version_id')
         queryset = self.get_queryset()

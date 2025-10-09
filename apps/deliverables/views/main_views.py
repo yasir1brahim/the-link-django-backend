@@ -106,7 +106,7 @@ from ..services import SubmittalService, VersionComparisonService
 from ..integrations.procore import (get_procore_access_token, get_companies, get_fresh_token_for_user, 
                                    ProcoreException, get_me, get_status, get_spec_divisions, get_spec_sections,
                                    create_spec_division, create_spec_section, create_submittal, get_projects,
-                                   get_managers, get_submittal_types)
+                                   get_managers, get_submittal_types, check_token_info)
 
 logger = logging.getLogger(__name__)
 
@@ -2088,7 +2088,7 @@ class ProcoreRefreshAccessTokenView(generics.CreateAPIView):
                 'refresh_token': procore_token.refresh_token,
                 'expires_in': procore_token.expires_in,
                 'token_type': procore_token.token_type,
-                'created_at': procore_token.created_at,
+                'created_at': int(procore_token.created_at.timestamp()),
             }
         )
         print(access_token_serializer)
@@ -2142,6 +2142,7 @@ class GetCurrentUserProcoreInfoView(generics.RetrieveAPIView):
             return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
         response = get_me(procore_token.access_token)
         serializer = ProcoreMeSerializer(data=response.json())
+        print(serializer)
         serializer.is_valid(raise_exception=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
@@ -2214,6 +2215,8 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
         project_version_id = serializer.validated_data.get('project_version_id')
         submittal_ids_to_post_to_procore = serializer.validated_data.get('records')
         export_all = serializer.validated_data.get('export_all', False)
+
+
         project = get_object_or_404(Project, id=project_id)
         if not request.user.is_member_of_project(project):
             return Response(status=status.HTTP_403_FORBIDDEN)
@@ -2222,7 +2225,10 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
         except ProcoreException as e:
             print("Error getting fresh token for user: " + str(e))
             return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
-        
+
+        token_info_response = check_token_info(procore_token.access_token)
+        print("token_info_response", token_info_response.json())
+
         is_versioning_active = is_versioning_feature_flag_active(request.user, project.team)
         project_version = None
         if is_versioning_active:
@@ -2248,7 +2254,9 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
         
         submittals: List[SubmittalItem] = self.get_submittals(project, project_version, submittal_ids_to_post_to_procore, export_all)
         spec_section_list = list(set([str(submittal.masterformat_section.masterformat_number) for submittal in submittals]))
+        print("procore_token", procore_token.access_token)
 
+        print("company id")
         procore_spec_divisions_response = get_spec_divisions(project.procore_id, procore_token.access_token)
         if procore_spec_divisions_response.status_code != 200:
             print("Error getting procore spec divisions")
@@ -2257,6 +2265,7 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
         procore_division_numbers = [d['number'] for d in procore_spec_divisions]
         procore_division_ids = [str(d['id']) for d in procore_spec_divisions]
         procore_division_dict = dict(map(lambda i, j: (i, j), procore_division_numbers, procore_division_ids))
+        print("procore_division_dict", procore_division_dict)
 
         procore_spec_sections = get_spec_sections(project.procore_id, procore_token.access_token)
         if procore_spec_sections.status_code != 200:
@@ -2266,21 +2275,32 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
         procore_spec_section_numbers = [d['number'] for d in procore_spec_sections]
         procore_spec_section_ids = [str(d['id']) for d in procore_spec_sections]
         procore_spec_section_dict = dict(map(lambda i, j: (i, j), procore_spec_section_numbers, procore_spec_section_ids))
+        print("procore_spec_section_dict", procore_spec_section_dict)
 
         for spec_section in spec_section_list:
             spec_section_division = spec_section[0:2]
             if spec_section_division == "":
                 continue
             if spec_section_division not in procore_division_numbers:
-                create_div_response = create_spec_division(project.procore_id, spec_section_division, procore_token.access_token)
+                print("Spec section division not in procore division numbers")
+                create_div_response = create_spec_division(
+                    project_id=project.procore_id,
+                    division_number=spec_section_division,
+                    procore_token=procore_token.access_token
+                )
                 if create_div_response.status_code != 201:
+                    print("Error creating procore spec division")
+                    print("create_div_response status code: " + str(create_div_response.status_code))
+                    print("create_div_response json: " + str(create_div_response.json()))
                     continue
                 else:
-                    procore_division_dict[spec_section_division] = create_div_response.json()
+                    procore_division_dict[spec_section_division] = str(create_div_response.json()['id'])
+                    print("updated division dict", procore_division_dict)
             else:
                 print("Division: " + spec_section_division + " already exists")
             
             if spec_section not in procore_spec_section_numbers:
+                print("Spec section not in procore spec section numbers")
                 create_spec_response = create_spec_section(
                     spec_section=spec_section,
                     division_id=procore_division_dict[spec_section_division],
@@ -2293,7 +2313,8 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                     print("create_spec_response json: " + str(create_spec_response.json()))
                     return Response(create_spec_response.json(), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 else:
-                    procore_spec_section_dict[spec_section] = create_spec_response.json()
+                    procore_spec_section_dict[spec_section] = str(create_spec_response.json()['id'])
+                    print("updated spec section dict", procore_spec_section_dict)
             else:
                 print("Spec: " + spec_section + " already exists")
             # TODO ISSUE API does not increment ID from API, replacing with para no
@@ -2308,6 +2329,7 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
         for submittal in submittals:
             if submittal.masterformat_section.masterformat_number == "":
                 continue
+            print("procore_spec_section_id", procore_spec_section_dict[submittal.masterformat_section.masterformat_number])
             submittal_creation_response = create_submittal(
                 submittal_content=submittal.submittal_content,
                 paragraph_number=submittal.paragraph_number,
@@ -2354,8 +2376,7 @@ class DeleteProcoreTokenView(generics.RetrieveAPIView):
     def get(self, request, *args, **kwargs):
         user_id = self.request.query_params.get('user_id', '')
         user = get_object_or_404(CustomUser, id=user_id)
-        token = get_object_or_404(ProcoreToken, user=user)
-        token.delete()
+        ProcoreToken.objects.filter(user=user).delete()
         return Response(status=status.HTTP_200_OK)
     
 
