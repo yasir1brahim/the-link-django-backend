@@ -3,7 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
-from django.db.models import Prefetch, Q
+from django.db.models import Prefetch, Q, Max
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 
@@ -13,7 +13,8 @@ from apps.deliverables.models import (
     Project,
     SpecSection,
     SubmittalItem,
-    ProjectVersion
+    ProjectVersion,
+    AiGeneratedLog
 )
 from apps.deliverables.serializers.spec_centric_serializers import (
     SpecSectionSerializer,
@@ -151,16 +152,39 @@ class SpecCentricViewSet(viewsets.ViewSet):
         if project_version_id:
             submittals = submittals.filter(project_version_id=project_version_id)
         
+        # Fetch AI generated log data for this project/version
+        ai_logs = []
+        if project_version_id:
+            try:
+                # Get the latest log ID for each distinct log_type
+                latest_by_type = AiGeneratedLog.objects.filter(
+                    project=project,
+                    project_version_id=project_version_id,
+                    log_status='SUCCESS',
+                    log_data__isnull=False
+                ).values('log_type').annotate(
+                    latest_id=Max('id')
+                ).values_list('latest_id', flat=True)
+                
+                # Get the actual log objects for the latest logs
+                ai_logs = AiGeneratedLog.objects.filter(id__in=latest_by_type).order_by('log_type')
+                
+            except Exception as e:
+                # Log error but don't fail the request
+                print(f"Error fetching AI log data: {str(e)}")
+                ai_logs = []
+        
         # Create a data structure for the serializer
         data = {
             'spec_section': spec_section,
             'content': f"Content for {spec_section.document.name if spec_section.document else 'Unknown Document'} - Section {spec_section.masterformat_section.masterformat_number if spec_section.masterformat_section else 'Unknown'}"
         }
         
-        # Pass the filtered submittals to the serializer context
+        # Pass the filtered submittals and AI log data to the serializer context
         serializer = SpecSectionContentSerializer(data, context={
             'request': request,
-            'filtered_submittals': submittals
+            'filtered_submittals': submittals,
+            'ai_log_data': ai_logs
         })
         
         return Response(serializer.data)
