@@ -85,6 +85,42 @@ class SpecSectionContentSerializer(serializers.Serializer):
     submittal_highlights = SubmittalHighlightSerializer(many=True, read_only=True)
     ai_log_highlights = serializers.SerializerMethodField()
 
+    def _normalize_item_type(self, item_type):
+        """
+        Normalize item type to code format (lowercase with underscores).
+        Converts display labels like 'Inspection' or 'Inspections' to 'inspections'.
+        """
+        if not item_type:
+            return ''
+        
+        # Mapping from various display formats to canonical code format
+        item_type_mapping = {
+            'inspection': 'inspections',
+            'inspections': 'inspections',
+            'warranty': 'warranties',
+            'warranties': 'warranties',
+            'certificate': 'certificates',
+            'certificates': 'certificates',
+            'closeout submittal': 'closeout_submittals',
+            'closeout submittals': 'closeout_submittals',
+            'test report': 'test_reports',
+            'test reports': 'test_reports',
+            'commissioning': 'commissioning',
+            'delegated design': 'delegated_design',
+            'mock-up': 'mock_ups_sample_construction',
+            'mock-ups': 'mock_ups_sample_construction',
+            'mock-ups/sample construction': 'mock_ups_sample_construction',
+            'sample construction': 'mock_ups_sample_construction',
+            'pre-installation meeting': 'pre_installation_meetings',
+            'pre-installation meetings': 'pre_installation_meetings',
+        }
+        
+        # Normalize to lowercase for lookup
+        normalized_key = item_type.lower().strip()
+        
+        # Return the canonical format or the original if not found in mapping
+        return item_type_mapping.get(normalized_key, item_type.lower().replace(' ', '_').replace('-', '_'))
+    
     def fuzzy_match_spec_section_number(self, spec_section_number_from_ai_log, spec_section_number_from_spec_section):
         """Fuzzy match the spec section number from the AI log to the spec section number from the spec section."""
         import re
@@ -143,12 +179,16 @@ class SpecSectionContentSerializer(serializers.Serializer):
                 if self.fuzzy_match_spec_section_number(item_section, spec_section_number):
                     if has_pdf_locations:
                         print(f"✅ MATCH FOUND: Adding item with pdf_locations")
+                        
+                        # Get item_type and normalize it to code format (lowercase with underscores)
+                        raw_item_type = item.get('item_type', '')
+                        
                         matching_items.append({
                             'pdf_locations': item['pdf_locations'],
                             'spec_section_number': item_section,
                             'spec_section_name': item.get('Spec Section Name', item.get('spec_section_name', '')),
                             # Include relevant fields based on log type
-                            'item_type': item.get('Item Type', ''),
+                            'item_type': raw_item_type,
                             'extraction_type': extraction_type,
                             'requirement_text': item.get('Requirement Text', item.get('requirement_text', item.get('Inspection Type And Requirements', item.get('inspection_type_and_requirements', '')))),
                         })
