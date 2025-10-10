@@ -3,7 +3,6 @@ from rest_framework.routers import DefaultRouter
 
 from . import views
 from .views.spec_centric_views import SpecCentricViewSet
-from .views import bulk_operations
 
 
 app_name = "deliverables"
@@ -98,10 +97,6 @@ urlpatterns = [
     path('webhooks/ai-log-generation/', views.ai_log_generation_webhook, name='webhook-ai-log-generation'),
     path('projects/<int:project_id>/spec-sections/', views.get_project_spec_sections, name='get-project-spec-sections'),
     path('spec-sections/<int:section_id>/download/', views.download_spec_section, name='download-spec-section'),
-    path('spec-sections/download-multiple/', views.bulk_download_spec_sections, name='download-multiple-spec-sections'),
-    path('documents/download-multiple/', views.bulk_download_documents, name='download-multiple-documents'),
-    path('documents/reprocess-multiple/', bulk_operations.bulk_reprocess_documents, name='reprocess-multiple-documents'),
-    path('documents/delete-multiple/', bulk_operations.bulk_delete_documents, name='delete-multiple-documents'),
 ]
 
 
