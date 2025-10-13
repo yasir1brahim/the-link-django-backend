@@ -401,10 +401,6 @@ class AiGeneratedLogAdmin(admin.ModelAdmin):
         """Disable manual creation of AI generated logs."""
         return False
     
-    def has_change_permission(self, request, obj=None):
-        """Allow viewing but not editing."""
-        return False
-    
     def has_delete_permission(self, request, obj=None):
         """Allow deletion for admin users."""
         return request.user.is_superuser
