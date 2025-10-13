@@ -10,7 +10,6 @@ import re
 from enum import Enum
 from datetime import datetime
 from datetime import timezone
-from typing import TypedDict, List
 import ast
 import json
 
@@ -2847,6 +2846,251 @@ def download_spec_section(request, section_id):
         
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    parameters=[
+        OpenApiParameter(
+            name='section_ids',
+            description='Comma-separated list of spec section IDs to download',
+            required=True,
+            type=OpenApiTypes.STR
+        )
+    ],
+    responses={
+        200: OpenApiTypes.OBJECT,
+        400: OpenApiTypes.OBJECT
+    },
+    description="Download multiple spec section files as a zip archive."
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def bulk_download_spec_sections(request):
+    try:
+        section_ids_param = request.query_params.get('section_ids')
+        if not section_ids_param:
+            return Response({"error": "section_ids parameter is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Parse section IDs
+        try:
+            section_ids = [int(id.strip()) for id in section_ids_param.split(',')]
+        except ValueError:
+            return Response({"error": "Invalid section_ids format"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not section_ids:
+            return Response({"error": "No section IDs provided"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get spec sections
+        sections = SpecSection.objects.filter(id__in=section_ids)
+        
+        if not sections.exists():
+            return Response({"error": "No spec sections found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check permissions for all sections
+        for section in sections:
+            if not request.user.is_member_of_project(section.document.project):
+                return Response({"error": f"User is not a member of project for section {section.id}"}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Filter sections that have files available
+        sections_with_files = sections.filter(file_s3_key__isnull=False).exclude(file_s3_key='')
+        
+        if not sections_with_files.exists():
+            return Response({"error": "No spec section files available for download"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # If only one section, return single download URL
+        if sections_with_files.count() == 1:
+            section = sections_with_files.first()
+            download_url = s3.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': settings.S3_BUCKET, 'Key': section.file_s3_key},
+                ExpiresIn=3600
+            )
+            file_name = f"{section.masterformat_section.masterformat_number}_{section.document.name}"
+            
+            return Response({
+                "download_url": download_url,
+                "file_name": file_name,
+                "single_file": True
+            }, status=status.HTTP_200_OK)
+        
+        # For multiple sections, create a zip file
+        import zipfile
+        import tempfile
+        import os
+        import time
+        
+        # Create a temporary zip file
+        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+        zip_name = temp_zip.name
+        temp_zip.close()
+        
+        try:
+            with zipfile.ZipFile(zip_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for section in sections_with_files:
+                    try:
+                        # Download file from S3
+                        s3_response = s3.get_object(Bucket=settings.S3_BUCKET, Key=section.file_s3_key)
+                        file_content = s3_response['Body'].read()
+                        
+                        # Add to zip with proper filename
+                        file_name = f"{section.masterformat_section.masterformat_number}_{section.document.name}"
+                        zipf.writestr(file_name, file_content)
+                    except Exception as e:
+                        print(f"Error adding {section.id} to zip: {e}")
+                        continue
+            
+            # Upload zip to S3
+            zip_s3_key = f"temp_bulk_downloads/{request.user.id}_{int(time.time())}_spec_sections.zip"
+            s3.upload_file(zip_name, settings.S3_BUCKET, zip_s3_key)
+            
+            # Generate presigned URL for zip
+            download_url = s3.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': settings.S3_BUCKET, 'Key': zip_s3_key},
+                ExpiresIn=3600
+            )
+            
+            # Clean up temporary file
+            os.unlink(zip_name)
+            
+            return Response({
+                "download_url": download_url,
+                "file_name": f"spec_sections_{len(sections_with_files)}_files.zip",
+                "single_file": True,
+                "count": len(sections_with_files)
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            # Clean up temporary file on error
+            if os.path.exists(zip_name):
+                os.unlink(zip_name)
+            raise e
+        
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    parameters=[
+        OpenApiParameter(
+            name='document_ids',
+            description='Comma-separated list of document IDs to download',
+            required=True,
+            type=OpenApiTypes.STR
+        )
+    ],
+    responses={
+        200: OpenApiTypes.OBJECT,
+        400: OpenApiTypes.OBJECT
+    },
+    description="Download multiple document files as a zip archive."
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def bulk_download_documents(request):
+    try:
+        document_ids_param = request.query_params.get('document_ids')
+        if not document_ids_param:
+            return Response({"error": "document_ids parameter is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Parse document IDs
+        try:
+            document_ids = [int(id.strip()) for id in document_ids_param.split(',')]
+        except ValueError:
+            return Response({"error": "Invalid document_ids format"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not document_ids:
+            return Response({"error": "No document IDs provided"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get documents
+        from ..models import UploadedFile
+        documents = UploadedFile.objects.filter(id__in=document_ids)
+        
+        if not documents.exists():
+            return Response({"error": "No documents found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check permissions for all documents
+        for document in documents:
+            if not request.user.is_member_of_project(document.project):
+                return Response({"error": f"User is not a member of project for document {document.id}"}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Filter documents that have files available
+        documents_with_files = documents.filter(document_path__isnull=False).exclude(document_path='')
+        
+        if not documents_with_files.exists():
+            return Response({"error": "No document files available for download"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # If only one document, return single download URL
+        if documents_with_files.count() == 1:
+            document = documents_with_files.first()
+            download_url = s3.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': settings.S3_BUCKET, 'Key': document.document_path},
+                ExpiresIn=3600
+            )
+            file_name = document.name
+            
+            return Response({
+                "download_url": download_url,
+                "file_name": file_name,
+                "single_file": True
+            }, status=status.HTTP_200_OK)
+        
+        # For multiple documents, create a zip file
+        import zipfile
+        import tempfile
+        import os
+        import time
+        
+        # Create a temporary zip file
+        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+        zip_name = temp_zip.name
+        temp_zip.close()
+        
+        try:
+            with zipfile.ZipFile(zip_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for document in documents_with_files:
+                    try:
+                        # Download file from S3
+                        s3_response = s3.get_object(Bucket=settings.S3_BUCKET, Key=document.document_path)
+                        file_content = s3_response['Body'].read()
+                        
+                        # Add to zip with proper filename
+                        zipf.writestr(document.name, file_content)
+                    except Exception as e:
+                        print(f"Error adding {document.id} to zip: {e}")
+                        continue
+            
+            # Upload zip to S3
+            zip_s3_key = f"temp_bulk_downloads/{request.user.id}_{int(time.time())}_documents.zip"
+            s3.upload_file(zip_name, settings.S3_BUCKET, zip_s3_key)
+            
+            # Generate presigned URL for zip
+            download_url = s3.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': settings.S3_BUCKET, 'Key': zip_s3_key},
+                ExpiresIn=3600
+            )
+            
+            # Clean up temporary file
+            os.unlink(zip_name)
+            
+            return Response({
+                "download_url": download_url,
+                "file_name": f"documents_{len(documents_with_files)}_files.zip",
+                "single_file": True,
+                "count": len(documents_with_files)
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            # Clean up temporary file on error
+            if os.path.exists(zip_name):
+                os.unlink(zip_name)
+            raise e
+        
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 @extend_schema(
     summary="Get PDF URLs for version comparison",
