@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from . import views
 from .views.spec_centric_views import SpecCentricViewSet
+from .views.pdf_annotation_views import PDFAnnotationViewSet
 
 
 app_name = "deliverables"
@@ -58,6 +59,12 @@ single_project_router.register(
     basename='spec-section',
 )
 
+#annotation view
+single_project_router.register(
+    r"pdf-annotations",
+    PDFAnnotationViewSet,
+    basename="pdf-annotations"
+)
 
 urlpatterns = [
     path('', include(router.urls)),

@@ -433,3 +433,45 @@ class AiGeneratedLog(BaseModel):
     
 
 # endregion SpecGPT
+
+class PDFAnnotation(BaseModel):
+    project = models.ForeignKey(
+        "Project",
+        on_delete=models.CASCADE,
+        related_name="pdf_annotations"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="created_pdf_annotations",
+        blank=True,
+        null=True
+    )
+    spec_section = models.ForeignKey(
+        "SpecSection",
+        on_delete=models.CASCADE,
+        related_name="pdf_annotations"
+    )
+    page_number = models.PositiveIntegerField()
+    color = models.CharField(
+        max_length=7,
+        help_text="Highlight color in HEX (e.g., #FFDD00)"
+    )
+    quads = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Array of text quads for highlight annotation (each quad = [x1,y1,x2,y2,x3,y3,x4,y4])"
+    )
+    xfdf_data = models.TextField(
+        help_text="Full XFDF string for this annotation. It will be used for import/exporting-ing the annotations"
+    )
+    tag = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Optional label or tag for categorizing annotations"
+    )
+
+    def __str__(self):
+        user_display = self.user.email if self.user else "Unknown user"
+        return f"Annotation (Page {self.page_number}) by {user_display}"
