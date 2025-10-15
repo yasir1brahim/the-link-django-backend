@@ -8,7 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 
-from ..models import UploadedFile
+from ..models import UploadedFile, SpecSection, SubmittalItem, NoticeMatch, NoticeExcerpt, SemanticallyProcessedSpecItem
 from .main_views import (
     delete_submittals_for_document,
     is_notices_feature_flag_active,
@@ -212,6 +212,25 @@ def bulk_delete_documents(request):
         
         for document in documents:
             try:
+                # Get all spec sections related to this document for logging purposes
+                spec_sections = SpecSection.objects.filter(document=document)
+                
+                # Set document field to null for all related submittal items instead of deleting them
+                SubmittalItem.objects.filter(document=document).update(document=None)
+                
+                # Set document field to null for all related notice matches instead of deleting them
+                NoticeMatch.objects.filter(document=document).update(document=None)
+                
+                # Set spec_section to null for submittal items that reference spec sections from this document
+                SubmittalItem.objects.filter(spec_section__in=spec_sections).update(spec_section=None)
+                SemanticallyProcessedSpecItem.objects.filter(spec_section__in=spec_sections).update(spec_section=None)
+                
+                # Set document field to null for all related semantically processed spec items instead of deleting them
+                SemanticallyProcessedSpecItem.objects.filter(document=document).update(document=None)
+                
+                # Delete notice excerpts since they are directly tied to documents
+                NoticeExcerpt.objects.filter(document=document).delete()
+                
                 # Delete the document file from S3 if it exists
                 if document.document_path:
                     try:
