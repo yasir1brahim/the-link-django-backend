@@ -19,6 +19,47 @@ from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 
+
+def clean_excel_content(content):
+    """
+    Clean content for safe Excel/XML export by removing:
+    1. Illegal XML characters (control chars)
+    2. Zero-width characters
+    3. Special Unicode characters that cause XML parsing issues
+    4. All high Unicode characters that might not be XML-safe
+    
+    Uses regex for performance - much faster than looping over every character.
+    """
+    if not content:
+        return ''
+    
+    # Convert to string first
+    content = str(content)
+    
+    # Use regex to keep ONLY XML-safe characters
+    # This pattern matches the INVERSE of what we want to keep, then we remove those characters
+    # 
+    # Pattern explanation:
+    # [^\x09\x0A\x0D\x20-\x7E\xA0-\xFF\u0100-\u024F\u0370-\u03FF\u0400-\u04FF]
+    # ^ = NOT (inverse match)
+    # \x09\x0A\x0D = tab, newline, carriage return
+    # \x20-\x7E = standard ASCII printable (space through tilde)
+    # \xA0-\xFF = extended Latin (Western European)
+    # \u0100-\u024F = Latin Extended-A and Extended-B
+    # \u0370-\u03FF = Greek and Coptic
+    # \u0400-\u04FF = Cyrillic
+    #
+    # So we remove everything that's NOT in these ranges
+    unsafe_pattern = re.compile(r'[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF\u0100-\u024F\u0370-\u03FF\u0400-\u04FF]')
+    content = unsafe_pattern.sub('', content)
+    
+    # Truncate to safe length
+    max_length = 30000
+    if len(content) > max_length:
+        content = content[:max_length]
+    
+    return content
+
 from django.http import HttpResponse
 from django.conf import settings
 from django.shortcuts import get_object_or_404
@@ -750,7 +791,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
                     item.paragraph_number,
                     item.submittal_type,
                     item.submittal_description,
-                    re.sub(ILLEGAL_CHARACTERS_RE, '', item.submittal_content)
+                    clean_excel_content(re.sub(ILLEGAL_CHARACTERS_RE, '', item.submittal_content))
                 ]
                 worksheet.append(row)
                 for col in range(1, len(row) + 1):
@@ -772,7 +813,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
                     elif header_option['name'] == 'Submittal Title':
                         field_value = item.submittal_description
                     elif header_option['name'] == 'Submittal Description':
-                        field_value = re.sub(ILLEGAL_CHARACTERS_RE, '', item.submittal_content)
+                        field_value = clean_excel_content(re.sub(ILLEGAL_CHARACTERS_RE, '', item.submittal_content))
 
                     cell = worksheet.cell(row=row_idx, column=header_option['col'] + 1)
                     cell.value = field_value
