@@ -27,6 +27,8 @@ def clean_excel_content(content):
     2. Zero-width characters
     3. Special Unicode characters that cause XML parsing issues
     4. All high Unicode characters that might not be XML-safe
+    
+    Uses regex for performance - much faster than looping over every character.
     """
     if not content:
         return ''
@@ -34,35 +36,22 @@ def clean_excel_content(content):
     # Convert to string first
     content = str(content)
     
-    # More aggressive approach: Keep ONLY XML 1.0 valid characters
-    # XML 1.0 valid characters are: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
-    # But we'll be even more conservative and stick to common printable characters
-    def is_xml_safe(char):
-        code = ord(char)
-        # Tab, newline, carriage return
-        if code in (0x09, 0x0A, 0x0D):
-            return True
-        # Basic printable ASCII and common extended ASCII
-        if 0x20 <= code <= 0x7E:  # Standard ASCII printable
-            return True
-        # Common extended Latin characters (Western European)
-        if 0xA0 <= code <= 0xFF:
-            return True
-        # Allow some common Unicode ranges that are generally safe
-        # Latin Extended-A and Extended-B
-        if 0x0100 <= code <= 0x024F:
-            return True
-        # Greek and Coptic
-        if 0x0370 <= code <= 0x03FF:
-            return True
-        # Cyrillic
-        if 0x0400 <= code <= 0x04FF:
-            return True
-        # Everything else is potentially problematic - exclude it
-        return False
-    
-    # Filter to only safe characters
-    content = ''.join(char for char in content if is_xml_safe(char))
+    # Use regex to keep ONLY XML-safe characters
+    # This pattern matches the INVERSE of what we want to keep, then we remove those characters
+    # 
+    # Pattern explanation:
+    # [^\x09\x0A\x0D\x20-\x7E\xA0-\xFF\u0100-\u024F\u0370-\u03FF\u0400-\u04FF]
+    # ^ = NOT (inverse match)
+    # \x09\x0A\x0D = tab, newline, carriage return
+    # \x20-\x7E = standard ASCII printable (space through tilde)
+    # \xA0-\xFF = extended Latin (Western European)
+    # \u0100-\u024F = Latin Extended-A and Extended-B
+    # \u0370-\u03FF = Greek and Coptic
+    # \u0400-\u04FF = Cyrillic
+    #
+    # So we remove everything that's NOT in these ranges
+    unsafe_pattern = re.compile(r'[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF\u0100-\u024F\u0370-\u03FF\u0400-\u04FF]')
+    content = unsafe_pattern.sub('', content)
     
     # Truncate to safe length
     max_length = 30000
@@ -802,7 +791,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
                     item.paragraph_number,
                     item.submittal_type,
                     item.submittal_description,
-                    clean_excel_content(item.submittal_content)
+                    clean_excel_content(re.sub(ILLEGAL_CHARACTERS_RE, '', item.submittal_content))
                 ]
                 worksheet.append(row)
                 for col in range(1, len(row) + 1):
@@ -824,7 +813,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
                     elif header_option['name'] == 'Submittal Title':
                         field_value = item.submittal_description
                     elif header_option['name'] == 'Submittal Description':
-                        field_value = clean_excel_content(item.submittal_content)
+                        field_value = clean_excel_content(re.sub(ILLEGAL_CHARACTERS_RE, '', item.submittal_content))
 
                     cell = worksheet.cell(row=row_idx, column=header_option['col'] + 1)
                     cell.value = field_value
