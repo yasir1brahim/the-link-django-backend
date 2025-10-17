@@ -2296,7 +2296,7 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
         spec_section_list = list(set([str(submittal.masterformat_section.masterformat_number) for submittal in submittals]))
         print("procore_token", procore_token.access_token)
 
-        print("company id")
+        print("company id", project.team.procore_id)
         procore_spec_divisions_response = get_spec_divisions(project.procore_id, procore_token.access_token)
         if procore_spec_divisions_response.status_code != 200:
             print("Error getting procore spec divisions")
@@ -2322,7 +2322,7 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
             if spec_section_division == "":
                 continue
             if spec_section_division not in procore_division_numbers:
-                print("Spec section division not in procore division numbers")
+                print(f"Spec section division {spec_section_division} not in procore division numbers")
                 create_div_response = create_spec_division(
                     project_id=project.procore_id,
                     division_number=spec_section_division,
@@ -2335,6 +2335,7 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                     continue
                 else:
                     procore_division_dict[spec_section_division] = str(create_div_response.json()['id'])
+                    procore_division_numbers.append(spec_section_division)
                     print("updated division dict", procore_division_dict)
             else:
                 print("Division: " + spec_section_division + " already exists")
@@ -2354,6 +2355,7 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                     return Response(create_spec_response.json(), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 else:
                     procore_spec_section_dict[spec_section] = str(create_spec_response.json()['id'])
+                    procore_spec_section_numbers.append(spec_section)
                     print("updated spec section dict", procore_spec_section_dict)
             else:
                 print("Spec: " + spec_section + " already exists")

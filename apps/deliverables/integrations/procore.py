@@ -112,6 +112,7 @@ def get_managers(project_id, procore_token):
     return response
 
 def create_spec_division(project_id, division_number, procore_token):
+    print(f"Creating spec division {division_number} for project {project_id}")
     payload = json.dumps({
         "specification_section_division": {
             "number": str(division_number),
