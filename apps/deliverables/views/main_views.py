@@ -2452,8 +2452,13 @@ class GetProcoreProjectsView(generics.ListAPIView):
         except ProcoreException as e:
             return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
         
+        token_info_response = check_token_info(procore_token.access_token)
+        print("get_projects token_info_response", token_info_response.json())
         response = get_projects(procore_company_id, procore_token.access_token)
         if response.status_code != 200:
+            print("Error getting procore projects")
+            print("response status code: " + str(response.status_code))
+            print("response text: " + response.text)
             return Response(response.text, status=status.HTTP_400_BAD_REQUEST)
         projects_list = []
         for project in response.json():
@@ -2476,16 +2481,24 @@ class GetProcoreManagersView(generics.ListAPIView):
         try:
             procore_token = get_fresh_token_for_user(request.user)
         except ProcoreException as e:
+            print("Error getting fresh token for user: " + str(e))
             return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
+        
+        token_info_response = check_token_info(procore_token.access_token)
+        print("token_info_response", token_info_response.json())
         
         response = get_managers(procore_project_id, procore_token.access_token)
         if response.status_code != 200:
+            print("Error getting procore managers")
+            print("response status code: " + str(response.status_code))
+            print("response text: " + response.text)
             return Response(response.text, status=status.HTTP_400_BAD_REQUEST)
         managers_list = []
+        print("get_managers response", response.json())
         for manager in response.json():
             managers_list.append({
-                'key': manager['id'],
-                'value': manager['name']
+                'key': manager['key'],
+                'value': manager['value']
             })
         response_payload = {
             'message': 'List of managers',
