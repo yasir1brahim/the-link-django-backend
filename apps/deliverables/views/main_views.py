@@ -2332,6 +2332,13 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                     print("Error creating procore spec division")
                     print("create_div_response status code: " + str(create_div_response.status_code))
                     print("create_div_response json: " + str(create_div_response.json()))
+                    
+                    # Check for permission error
+                    if create_div_response.status_code == 403:
+                        return Response(
+                            {"message": "Your current Procore account doesn't have permissions to create spec sections or submittals in the currently mapped project. Please contact your Procore administrator to grant the necessary permissions."},
+                            status=status.HTTP_403_FORBIDDEN
+                        )
                     continue
                 else:
                     procore_division_dict[spec_section_division] = str(create_div_response.json()['id'])
@@ -2352,6 +2359,13 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                     print("Error creating procore spec section")
                     print("create_spec_response status code: " + str(create_spec_response.status_code))
                     print("create_spec_response json: " + str(create_spec_response.json()))
+                    
+                    # Check for permission error
+                    if create_spec_response.status_code == 403:
+                        return Response(
+                            {"message": "Your current Procore account doesn't have permissions to create spec sections or submittals in the currently mapped project. Please contact your Procore administrator to grant the necessary permissions."},
+                            status=status.HTTP_403_FORBIDDEN
+                        )
                     return Response(create_spec_response.json(), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 else:
                     procore_spec_section_dict[spec_section] = str(create_spec_response.json()['id'])
@@ -2384,6 +2398,12 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                 procore_token=procore_token.access_token
             )
             if submittal_creation_response.status_code != 201:
+                # Check for permission error
+                if submittal_creation_response.status_code == 403:
+                    return Response(
+                        {"message": "Your current Procore account doesn't have permissions to create spec sections or submittals in the currently mapped project. Please contact your Procore administrator to grant the necessary permissions."},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
                 submittals_not_created.append(submittal)
                 continue
             submittals_dict[submittal.id] = submittal_creation_response.json()['id']
