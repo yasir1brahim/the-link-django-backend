@@ -8,6 +8,7 @@ class PDFAnnotationSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "project",
+            "project_version",
             "spec_section",
             "user",
             "page_number",
@@ -17,6 +18,7 @@ class PDFAnnotationSerializer(serializers.ModelSerializer):
             "tag",
             "created_at",
             "updated_at",
+
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 

@@ -61,7 +61,7 @@ single_project_router.register(
 
 #annotation view
 single_project_router.register(
-    r"pdf-annotations",
+    'pdf-annotations',
     PDFAnnotationViewSet,
     basename="pdf-annotations"
 )
@@ -105,6 +105,7 @@ urlpatterns = [
     path('webhooks/ai-log-generation/', views.ai_log_generation_webhook, name='webhook-ai-log-generation'),
     path('projects/<int:project_id>/spec-sections/', views.get_project_spec_sections, name='get-project-spec-sections'),
     path('spec-sections/<int:section_id>/download/', views.download_spec_section, name='download-spec-section'),
+    path('projects/<int:project_id>/', include(single_project_router.urls)),
 ]
 
 

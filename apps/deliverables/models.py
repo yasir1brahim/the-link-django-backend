@@ -438,7 +438,11 @@ class PDFAnnotation(BaseModel):
     project = models.ForeignKey(
         "Project",
         on_delete=models.CASCADE,
-        related_name="pdf_annotations"
+        related_name="pdf_annotations",
+    )
+    project_version = models.ForeignKey(
+        "ProjectVersion",
+        on_delete=models.CASCADE
     )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
