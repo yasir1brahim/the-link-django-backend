@@ -888,7 +888,7 @@ class ChatViewSet(viewsets.ModelViewSet):
                 'chats': history_prev_30_days
             },
             {
-                'day': "30 Days After",
+                'day': "Over 30 Days Ago",
                 'chats': history_next_30_days
             }
         ]
