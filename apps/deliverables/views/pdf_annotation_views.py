@@ -32,23 +32,65 @@ class PDFAnnotationViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
-    def destroy(self, request, *args, **kwargs):
-        """Override destroy to verify the annotation exists and belongs to the user"""
+    def update(self, request, *args, **kwargs):
+        """
+        Update an existing PDF annotation
+        """
         try:
-            annotation = self.get_object()  # Retrieves the annotation by URL pk
-        except PDFAnnotation.DoesNotExist:
+            # Get the annotation using annotation_id from URL
+            annotation_id = self.kwargs.get("pk")
+            annotation = PDFAnnotation.objects.filter(annotation_id=annotation_id).first()
+            
+            if not annotation:
+                return Response(
+                    {"detail": "Annotation not found."}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Check permission - user can only update their own annotations
+            if annotation.user != request.user:
+                return Response(
+                    {"detail": "You do not have permission to update this annotation."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            # Partial update allowed (PATCH method)
+            partial = kwargs.pop('partial', False)
+            serializer = self.get_serializer(annotation, data=request.data, partial=partial)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+
+            return Response(serializer.data)
+
+        except Exception as e:
             return Response(
-                {"detail": "Annotation not found."},
-                status=status.HTTP_404_NOT_FOUND,
+                {"detail": f"Error updating annotation: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Optional: verify ownership or other conditions
+
+    def partial_update(self, request, *args, **kwargs):
+        """
+        Handle PATCH requests for partial updates
+        """
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
+
+    def destroy(self, request, *args, **kwargs):
+        annotation_id = self.kwargs.get("pk")  # This will still capture the value from the URL
+
+        annotation = PDFAnnotation.objects.filter(annotation_id=annotation_id).first()
+        if not annotation:
+            return Response({"detail": "Annotation not found."}, status=status.HTTP_404_NOT_FOUND)
+
         if annotation.user != request.user:
             return Response(
                 {"detail": "You do not have permission to delete this annotation."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # If verification passes, proceed with deletion
-        self.perform_destroy(annotation)
+        print("Deleting Annotation: ",annotation)
+        annotation.delete()
+        print("Total Annotations: ", PDFAnnotation.objects.all())
         return Response(status=status.HTTP_204_NO_CONTENT)
+

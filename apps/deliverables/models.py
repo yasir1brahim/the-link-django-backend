@@ -435,6 +435,13 @@ class AiGeneratedLog(BaseModel):
 # endregion SpecGPT
 
 class PDFAnnotation(BaseModel):
+    annotation_id = models.CharField(
+        max_length=255,
+        unique=True,
+        null=False,
+        blank=False,
+        help_text="Frontend-generated annotation ID"
+    )
     project = models.ForeignKey(
         "Project",
         on_delete=models.CASCADE,

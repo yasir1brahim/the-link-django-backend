@@ -7,6 +7,7 @@ class PDFAnnotationSerializer(serializers.ModelSerializer):
         model = PDFAnnotation
         fields = [
             "id",
+            "annotation_id",
             "project",
             "project_version",
             "spec_section",
