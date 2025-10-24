@@ -772,22 +772,38 @@ class CustomPromptLayerCallbackHandler(PromptLayerCallbackHandler):
     ) -> None:
         """Override to handle tool outputs gracefully."""
         try:
-            # Filter out tool messages that may cause issues with PromptLayer
+            # Filter out tool messages and other problematic message types
             filtered_messages = []
             for msg in messages:
-                # Skip tool messages or messages with very long content
+                # Skip if it's a tool message (check multiple attributes)
                 if hasattr(msg, 'type') and msg.type == 'tool':
                     continue
-                if hasattr(msg, 'content') and isinstance(msg.content, str) and len(msg.content) > 10000:
-                    # Truncate very long content (like formatted documents)
+                if hasattr(msg, '__class__') and 'Tool' in msg.__class__.__name__:
                     continue
+                    
+                # Skip messages with very long content (like formatted documents from retrieval)
+                if hasattr(msg, 'content'):
+                    content = msg.content
+                    if isinstance(content, str) and len(content) > 5000:
+                        continue
+                    # Skip if content looks like formatted retrieval results
+                    if isinstance(content, str) and '[Section:' in content and '---' in content:
+                        continue
+                
+                # Only include messages with recognized types (human, ai, system)
+                if hasattr(msg, 'type'):
+                    if msg.type not in ['human', 'ai', 'system', 'assistant', 'user']:
+                        continue
+                        
                 filtered_messages.append(msg)
             
-            # Call parent with filtered messages
-            super().on_chat_model_start(serialized, filtered_messages, run_id=run_id, parent_run_id=parent_run_id, **kwargs)
+            # Only call parent if we have valid messages
+            if filtered_messages:
+                super().on_chat_model_start(serialized, filtered_messages, run_id=run_id, parent_run_id=parent_run_id, **kwargs)
         except Exception as e:
-            # Log error but don't break the chain
-            print(f"Error in CustomPromptLayerCallbackHandler.on_chat_model_start: {str(e)}")
+            # Silently catch any errors to avoid breaking the chain
+            # This is just for logging to PromptLayer, not critical functionality
+            print(f"PromptLayer logging skipped due to message format incompatibility")
             pass
     
     def on_llm_end(
@@ -1067,7 +1083,7 @@ class ChatViewSet(viewsets.ModelViewSet):
         chat_message.save()
         return results['answer'], message_sources
     
-    def generate_adaptive_chat_response(self, chat, project_id, project_version_id, user_email, user_input):
+    def generate_adaptive_chat_response(self, chat, project_id, project_version_id, user_email, user_input, num_documents_to_return):
         """Generate chat response using LangGraph adaptive RAG agent.
         
         This method uses a ReAct agent that can dynamically decide whether and how to
@@ -1079,6 +1095,7 @@ class ChatViewSet(viewsets.ModelViewSet):
             project_version_id: Project version ID for filtering documents
             user_email: User email for logging
             user_input: User's question/input
+            num_documents_to_return: Maximum documents for fallback error handling (not used by agent; agent decides dynamically)
             
         Returns:
             tuple: (answer, message_sources) in the same format as generate_standard_chat_response
@@ -1109,6 +1126,14 @@ class ChatViewSet(viewsets.ModelViewSet):
         # Get model metadata from PromptLayer
         promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
 
+        # Fetch the adaptive RAG system prompt from PromptLayer
+        try:
+            adaptive_rag_template = self.get_promptlayer_template(settings.SPEC_GPT_V2_PROMPTLAYER_PROMPT_NAME)
+            agent_system_message = self.get_promptlayer_system_prompt(adaptive_rag_template)
+        except Exception as e:
+            print(f"Failed to retrieve PromptLayer template for adaptive RAG: {str(e)}")
+            raise e
+
         # Create retrieval tool with project context
         # The tool returns both the tool itself and a list that will store retrieved documents
         retrieved_documents_store = []
@@ -1118,45 +1143,6 @@ class ChatViewSet(viewsets.ModelViewSet):
             project_version_id=project_version_id,
             retrieved_documents_store=retrieved_documents_store
         )
-
-        # Define system message for agent
-        agent_system_message = """You are an AI assistant for a construction project with access to project specifications.
-
-CRITICAL: Your primary role is to answer questions based on THIS PROJECT'S specifications. 
-ALWAYS retrieve and use project documents unless the question is clearly unrelated to the project.
-
-DEFAULT BEHAVIOR - USE retrieve_documents FOR:
-- ANY question that could relate to the project (requirements, materials, procedures, schedules, etc.)
-- Questions about what's in the project or what sections are available
-- Technical questions about construction, design, or specifications
-- Questions about requirements, standards, or guidelines for this project
-- Exploratory questions ("what do you have on...", "tell me about...")
-- When you're uncertain - err on the side of retrieving!
-
-ONLY SKIP retrieve_documents FOR:
-- Pure greetings with no follow-up ("hello", "hi")
-- Questions about YOUR capabilities as an AI ("how do you work?", "what can you do?")
-- Questions about the user themselves ("what's my name?", "who am I?")
-- Completely off-topic questions (weather, sports, etc.)
-
-IMPORTANT: If a question COULD be answered with project data, retrieve documents. 
-Don't rely on general knowledge when project specifications might have specific requirements.
-
-SEARCH STRATEGY:
-- Generate focused, specific queries (e.g., "concrete mix design requirements")
-- For exploratory questions: Use broad queries to discover available content (e.g., "specification", "requirements")
-- Use multiple targeted searches for complex multi-topic questions
-- Include relevant MasterFormat numbers if known
-
-DYNAMIC DOCUMENT RETRIEVAL:
-- Simple, focused questions: 5-8 documents
-- Moderate complexity: 8-15 documents  
-- Complex or exploratory: 15-30 documents
-- "What's available" questions: 30-100 documents to get comprehensive coverage
-- Multi-topic questions: Multiple searches with 10-20 documents each
-- You control num_documents - adjust based on query needs
-
-ALWAYS cite specification sections when providing information. Ground your answers in the actual project specifications."""
 
         # Initialize LLM with PromptLayer callback
         llm = ChatOpenAI(
@@ -1168,8 +1154,8 @@ ALWAYS cite specification sections when providing information. Ground your answe
                         f"environment: {settings.ENVIRONMENT}",
                         f"application: deliverables",
                         f"user: {user_email}",
-                        f"prompt_name: {promptlayer_template['prompt_name']}",
-                        f"prompt_commit_message: {promptlayer_template['commit_message']}",
+                        f"prompt_name: {adaptive_rag_template['prompt_name']}",
+                        f"prompt_commit_message: {adaptive_rag_template['commit_message']}",
                         f"llm_model_name: {promptlayer_model_metadata['name']}",
                         f"llm_temperature: {promptlayer_model_metadata['parameters']['temperature']}",
                         "rag_type: adaptive"
@@ -1217,12 +1203,24 @@ ALWAYS cite specification sections when providing information. Ground your answe
                 for doc in retrieved_documents_store
             ]
             
+            # Extract and log the queries used
+            tool_call_messages = [msg for msg in result['messages'] if hasattr(msg, 'tool_calls') and msg.tool_calls]
+            queries_used = []
+            for msg in tool_call_messages:
+                for tool_call in msg.tool_calls:
+                    if 'query' in tool_call.get('args', {}):
+                        queries_used.append(tool_call['args']['query'])
+            
             # Log completion
             print(f"\n{'='*80}")
             print(f"✅ ADAPTIVE RAG AGENT COMPLETE")
             print(f"{'='*80}")
-            print(f"Tool calls made: {len(retrieved_documents_store) // max(1, len([msg for msg in result['messages'] if hasattr(msg, 'tool_calls') and msg.tool_calls]))}")
+            print(f"Tool calls made: {len(tool_call_messages)}")
             print(f"Total sources retrieved: {len(retrieved_documents_store)}")
+            if queries_used:
+                print(f"Queries used by agent:")
+                for i, query in enumerate(queries_used, 1):
+                    print(f"  {i}. \"{query}\"")
             if len(retrieved_documents_store) == 0:
                 print(f"ℹ️  Agent decided NOT to retrieve documents (query didn't require project specs)")
             print(f"Answer length: {len(answer)} characters")
@@ -1668,7 +1666,7 @@ ALWAYS cite specification sections when providing information. Ground your answe
             if use_adaptive_rag:
                 # Use the new adaptive RAG implementation
                 answer, message_sources = self.generate_adaptive_chat_response(
-                    chat, project_id, project_version_id, request.user.email, user_input
+                    chat, project_id, project_version_id, request.user.email, user_input, num_documents_to_return
                 )
             else:
                 # Use the standard RAG implementation

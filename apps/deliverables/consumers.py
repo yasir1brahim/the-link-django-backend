@@ -370,10 +370,18 @@ class SpecGptWebSocketConsumer(AsyncWebsocketConsumer):
         """
         deps = await self._prepare_chain_dependencies(user_input, chat_id, project_version_id, num_documents)
         
-        # Get model metadata for agent
+        # Get model metadata and prompt from PromptLayer
         viewset = ChatViewSet()
         promptlayer_template = viewset.get_promptlayer_template(settings.SPEC_GPT_PROMPTLAYER_PROMPT_NAME)
         model_meta = viewset.get_promptlayer_model_metadata(promptlayer_template)
+        
+        # Fetch the adaptive RAG system prompt from PromptLayer
+        try:
+            adaptive_rag_template = viewset.get_promptlayer_template(settings.SPEC_GPT_V2_PROMPTLAYER_PROMPT_NAME)
+            agent_system_message = viewset.get_promptlayer_system_prompt(adaptive_rag_template)
+        except Exception as e:
+            print(f"Failed to retrieve PromptLayer template for adaptive RAG: {str(e)}")
+            raise e
         
         # Create retrieval tool with project context
         # The tool returns both the tool itself and a list that will store retrieved documents
@@ -385,45 +393,6 @@ class SpecGptWebSocketConsumer(AsyncWebsocketConsumer):
             max_documents=int(num_documents),
             retrieved_documents_store=retrieved_documents_store
         )
-        
-        # Define system message for agent
-        agent_system_message = """You are an AI assistant for a construction project with access to project specifications.
-
-CRITICAL: Your primary role is to answer questions based on THIS PROJECT'S specifications. 
-ALWAYS retrieve and use project documents unless the question is clearly unrelated to the project.
-
-DEFAULT BEHAVIOR - USE retrieve_documents FOR:
-- ANY question that could relate to the project (requirements, materials, procedures, schedules, etc.)
-- Questions about what's in the project or what sections are available
-- Technical questions about construction, design, or specifications
-- Questions about requirements, standards, or guidelines for this project
-- Exploratory questions ("what do you have on...", "tell me about...")
-- When you're uncertain - err on the side of retrieving!
-
-ONLY SKIP retrieve_documents FOR:
-- Pure greetings with no follow-up ("hello", "hi")
-- Questions about YOUR capabilities as an AI ("how do you work?", "what can you do?")
-- Questions about the user themselves ("what's my name?", "who am I?")
-- Completely off-topic questions (weather, sports, etc.)
-
-IMPORTANT: If a question COULD be answered with project data, retrieve documents. 
-Don't rely on general knowledge when project specifications might have specific requirements.
-
-SEARCH STRATEGY:
-- Generate focused, specific queries (e.g., "concrete mix design requirements")
-- For exploratory questions: Use broad queries to discover available content (e.g., "specification", "requirements")
-- Use multiple targeted searches for complex multi-topic questions
-- Include relevant MasterFormat numbers if known
-
-DYNAMIC DOCUMENT RETRIEVAL:
-- Simple, focused questions: 5-8 documents
-- Moderate complexity: 8-15 documents  
-- Complex or exploratory: 15-30 documents
-- "What's available" questions: 30-50 documents to get comprehensive coverage
-- Multi-topic questions: Multiple searches with 10-20 documents each
-- You control num_documents - adjust based on query needs
-
-ALWAYS cite specification sections when providing information. Ground your answers in the actual project specifications."""
         
         # Create streaming token handler
         token_handler = self._StreamingTokenHandler(self.send)
@@ -439,7 +408,8 @@ ALWAYS cite specification sections when providing information. Ground your answe
                         f"environment: {settings.ENVIRONMENT}",
                         "application: deliverables",
                         f"user: {self.user.email}",
-                        f"prompt_name: {settings.SPEC_GPT_PROMPTLAYER_PROMPT_NAME}",
+                        f"prompt_name: {adaptive_rag_template['prompt_name']}",
+                        f"prompt_commit_message: {adaptive_rag_template['commit_message']}",
                         f"llm_model_name: {model_meta['name']}",
                         f"llm_temperature: {model_meta['parameters'].get('temperature', 0.1)}",
                         "rag_type: adaptive_streaming"
@@ -506,11 +476,24 @@ ALWAYS cite specification sections when providing information. Ground your answe
                 for doc in retrieved_documents_store
             ]
             
+            # Extract and log the queries used
+            tool_call_messages = [msg for msg in final_state['messages'] if hasattr(msg, 'tool_calls') and msg.tool_calls]
+            queries_used = []
+            for msg in tool_call_messages:
+                for tool_call in msg.tool_calls:
+                    if 'query' in tool_call.get('args', {}):
+                        queries_used.append(tool_call['args']['query'])
+            
             # Log completion
             print(f"\n{'='*80}")
             print(f"✅ ADAPTIVE RAG AGENT COMPLETE (WebSocket)")
             print(f"{'='*80}")
+            print(f"Tool calls made: {len(tool_call_messages)}")
             print(f"Total sources retrieved: {len(retrieved_documents_store)}")
+            if queries_used:
+                print(f"Queries used by agent:")
+                for i, query in enumerate(queries_used, 1):
+                    print(f"  {i}. \"{query}\"")
             if len(retrieved_documents_store) == 0:
                 print(f"ℹ️  Agent decided NOT to retrieve documents (query didn't require project specs)")
             print(f"Answer length: {len(answer)} characters")

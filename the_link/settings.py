@@ -646,6 +646,7 @@ MAX_CHAT_MESSAGES = 10
 
 PROMPTLAYER_API_KEY = os.environ.get("PROMPTLAYER_API_KEY", default="")
 SPEC_GPT_PROMPTLAYER_PROMPT_NAME = "specgpt"
+SPEC_GPT_V2_PROMPTLAYER_PROMPT_NAME = "specgpt_v2"
 INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME = "inspection_log"
 OWNER_DELIVERABLES_PROMPTLAYER_PROMPT_NAME = "owner_deliverables"
 GENERATE_LOG_LAMBDA_FUNCTION_URL = os.environ.get("GENERATE_LOG_LAMBDA_FUNCTION_URL", default="https://v4aiai3ftopjpvbdtonytus3c40wbojq.lambda-url.us-east-1.on.aws/")
