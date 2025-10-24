@@ -10,7 +10,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from django.conf import settings
 from apps.deliverables.models import Project
-from apps.utils.feature_flags import is_specgpt_websockets_feature_flag_active
+from apps.utils.feature_flags import is_specgpt_websockets_feature_flag_active, is_langchain_update_feature_flag_active
 
 # LangChain / LLM imports for streaming
 from langchain_openai import ChatOpenAI
@@ -19,6 +19,10 @@ from langchain.memory import ConversationBufferMemory
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 from langchain.callbacks.base import AsyncCallbackHandler
+
+# LangGraph imports for adaptive RAG
+from langgraph.prebuilt import create_react_agent
+from apps.deliverables.tools.adaptive_retrieval import create_retrieval_tool
 
 # Models used for memory/history
 from apps.deliverables.models import (
@@ -102,8 +106,15 @@ class SpecGptWebSocketConsumer(AsyncWebsocketConsumer):
         }))
 
         try:
-            # Run LLM with real-time streaming
-            results = await self._run_streaming_chain(user_input, chat_id, project_version_id, num_documents)
+            # Check if adaptive RAG is enabled
+            use_adaptive_rag = await self.check_adaptive_rag_flag()
+            
+            if use_adaptive_rag:
+                # Use adaptive RAG with LangGraph agent
+                results = await self._run_adaptive_streaming_chain(user_input, chat_id, project_version_id, num_documents)
+            else:
+                # Use standard RAG with ConversationalRetrievalChain
+                results = await self._run_streaming_chain(user_input, chat_id, project_version_id, num_documents)
 
             # Send completion signal
             await self.send(text_data=json.dumps({
@@ -151,6 +162,16 @@ class SpecGptWebSocketConsumer(AsyncWebsocketConsumer):
             project = Project.objects.get(id=self.project_id)
             team = project.team
             return is_specgpt_websockets_feature_flag_active(self.user, team, project)
+        except Project.DoesNotExist:
+            return False
+    
+    @database_sync_to_async
+    def check_adaptive_rag_flag(self):
+        """Check if the adaptive RAG feature flag is active."""
+        try:
+            project = Project.objects.get(id=self.project_id)
+            team = project.team
+            return is_langchain_update_feature_flag_active(self.user, team, project)
         except Project.DoesNotExist:
             return False
 
@@ -339,4 +360,187 @@ class SpecGptWebSocketConsumer(AsyncWebsocketConsumer):
             chat_message.sources = sources
             chat_message.save()
         except Exception:
-            pass 
+            pass
+    
+    async def _run_adaptive_streaming_chain(self, user_input, chat_id, project_version_id, num_documents):
+        """Run adaptive RAG agent with streaming support.
+        
+        Uses LangGraph ReAct agent that decides dynamically whether to retrieve documents.
+        Streams tokens in the same format as the standard chain for frontend compatibility.
+        """
+        deps = await self._prepare_chain_dependencies(user_input, chat_id, project_version_id, num_documents)
+        
+        # Get model metadata for agent
+        viewset = ChatViewSet()
+        promptlayer_template = viewset.get_promptlayer_template(settings.SPEC_GPT_PROMPTLAYER_PROMPT_NAME)
+        model_meta = viewset.get_promptlayer_model_metadata(promptlayer_template)
+        
+        # Create retrieval tool with project context
+        # The tool returns both the tool itself and a list that will store retrieved documents
+        retrieved_documents_store = []
+        retrieval_tool, _ = create_retrieval_tool(
+            vectorstore=deps['retriever'].vectorstore,  # Access vectorstore from retriever
+            project_id=self.project_id,
+            project_version_id=project_version_id,
+            max_documents=int(num_documents),
+            retrieved_documents_store=retrieved_documents_store
+        )
+        
+        # Define system message for agent
+        agent_system_message = """You are an AI assistant for a construction project with access to project specifications.
+
+CRITICAL: Your primary role is to answer questions based on THIS PROJECT'S specifications. 
+ALWAYS retrieve and use project documents unless the question is clearly unrelated to the project.
+
+DEFAULT BEHAVIOR - USE retrieve_documents FOR:
+- ANY question that could relate to the project (requirements, materials, procedures, schedules, etc.)
+- Questions about what's in the project or what sections are available
+- Technical questions about construction, design, or specifications
+- Questions about requirements, standards, or guidelines for this project
+- Exploratory questions ("what do you have on...", "tell me about...")
+- When you're uncertain - err on the side of retrieving!
+
+ONLY SKIP retrieve_documents FOR:
+- Pure greetings with no follow-up ("hello", "hi")
+- Questions about YOUR capabilities as an AI ("how do you work?", "what can you do?")
+- Questions about the user themselves ("what's my name?", "who am I?")
+- Completely off-topic questions (weather, sports, etc.)
+
+IMPORTANT: If a question COULD be answered with project data, retrieve documents. 
+Don't rely on general knowledge when project specifications might have specific requirements.
+
+SEARCH STRATEGY:
+- Generate focused, specific queries (e.g., "concrete mix design requirements")
+- For exploratory questions: Use broad queries to discover available content (e.g., "specification", "requirements")
+- Use multiple targeted searches for complex multi-topic questions
+- Include relevant MasterFormat numbers if known
+
+DYNAMIC DOCUMENT RETRIEVAL:
+- Simple, focused questions: 5-8 documents
+- Moderate complexity: 8-15 documents  
+- Complex or exploratory: 15-30 documents
+- "What's available" questions: 30-50 documents to get comprehensive coverage
+- Multi-topic questions: Multiple searches with 10-20 documents each
+- You control num_documents - adjust based on query needs
+
+ALWAYS cite specification sections when providing information. Ground your answers in the actual project specifications."""
+        
+        # Create streaming token handler
+        token_handler = self._StreamingTokenHandler(self.send)
+        
+        # Initialize LLM with streaming
+        llm = ChatOpenAI(
+            temperature=min(model_meta['parameters'].get('temperature', 0.1), 0.3),
+            model_name=model_meta['name'],
+            streaming=True,
+            callbacks=[
+                CustomPromptLayerCallbackHandler(
+                    pl_tags=[
+                        f"environment: {settings.ENVIRONMENT}",
+                        "application: deliverables",
+                        f"user: {self.user.email}",
+                        f"prompt_name: {settings.SPEC_GPT_PROMPTLAYER_PROMPT_NAME}",
+                        f"llm_model_name: {model_meta['name']}",
+                        f"llm_temperature: {model_meta['parameters'].get('temperature', 0.1)}",
+                        "rag_type: adaptive_streaming"
+                    ]
+                ),
+                token_handler,
+            ]
+        )
+        
+        # Create the ReAct agent
+        agent_executor = create_react_agent(
+            llm,
+            tools=[retrieval_tool],
+            state_modifier=agent_system_message
+        )
+        
+        # Get conversation history
+        history_messages = deps['memory'].chat_memory.messages if hasattr(deps['memory'].chat_memory, 'messages') else []
+        
+        # Stream agent execution
+        # LangGraph's astream_events allows us to capture streaming tokens and tool calls
+        config = {"recursion_limit": 4}
+        
+        print(f"\n{'='*80}")
+        print(f"🤖 ADAPTIVE RAG AGENT START (WebSocket)")
+        print(f"{'='*80}")
+        print(f"User query: '{user_input}'")
+        print(f"Chat ID: {chat_id or 'NEW'}")
+        print(f"Max iterations: 4")
+        print(f"{'='*80}\n")
+        
+        try:
+            # Stream agent execution events
+            async for event in agent_executor.astream_events(
+                {"messages": history_messages + [("user", user_input)]},
+                config=config,
+                version="v2"
+            ):
+                # The events include:
+                # - on_chat_model_stream: streaming tokens from LLM
+                # - on_tool_start: tool is being called
+                # - on_tool_end: tool finished execution
+                
+                # Streaming tokens are handled by the callback handler
+                # Tool calls automatically populate retrieved_documents_store
+                pass
+            
+            # Get the final state to extract the answer
+            final_state = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: agent_executor.invoke(
+                    {"messages": history_messages + [("user", user_input)]},
+                    config=config
+                )
+            )
+            
+            # Extract final answer
+            final_message = final_state['messages'][-1]
+            answer = final_message.content if hasattr(final_message, 'content') else str(final_message)
+            
+            # Extract sources from retrieved documents (same format as standard implementation)
+            message_sources = [
+                {'metadata': doc.metadata, 'page_content': doc.page_content}
+                for doc in retrieved_documents_store
+            ]
+            
+            # Log completion
+            print(f"\n{'='*80}")
+            print(f"✅ ADAPTIVE RAG AGENT COMPLETE (WebSocket)")
+            print(f"{'='*80}")
+            print(f"Total sources retrieved: {len(retrieved_documents_store)}")
+            if len(retrieved_documents_store) == 0:
+                print(f"ℹ️  Agent decided NOT to retrieve documents (query didn't require project specs)")
+            print(f"Answer length: {len(answer)} characters")
+            print(f"{'='*80}\n")
+            
+            # Save to chat history
+            await self._save_chat_messages_adaptive(deps['memory'].chat_memory, user_input, answer, message_sources)
+            
+            return {
+                'answer': answer,
+                'sources': message_sources,
+                'chat_id': deps['chat'].id,
+            }
+            
+        except Exception as e:
+            print(f"Error in adaptive streaming agent: {str(e)}")
+            # Fallback to standard streaming if adaptive fails
+            return await self._run_streaming_chain(user_input, chat_id, project_version_id, num_documents)
+    
+    @database_sync_to_async
+    def _save_chat_messages_adaptive(self, chat_memory, user_input, answer, sources):
+        """Save chat messages and sources for adaptive agent."""
+        try:
+            # Add user message
+            chat_memory.add_user_message(user_input)
+            # Add AI response
+            chat_memory.add_ai_message(answer)
+            # Attach sources
+            chat_message = chat_memory.message_db_object
+            chat_message.sources = sources
+            chat_message.save()
+        except Exception as e:
+            print(f"Error saving adaptive chat messages: {str(e)}") 

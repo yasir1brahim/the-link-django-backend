@@ -53,11 +53,15 @@ from apps.deliverables.models import (
     CustomPostgresChatMessageHistory,
     AiGeneratedLog
 )
-from apps.utils.feature_flags import is_specgpt_websockets_feature_flag_active
+from apps.utils.feature_flags import is_specgpt_websockets_feature_flag_active, is_langchain_update_feature_flag_active
 
 from langchain.memory import ConversationBufferMemory
 from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv, merge_tables_from_text, convert_to_markdown_table
 from apps.utils.feature_flags import is_inspection_log_use_data_tables_feature_flag_active
+
+# LangGraph imports for adaptive RAG
+from langgraph.prebuilt import create_react_agent
+from apps.deliverables.tools.adaptive_retrieval import create_retrieval_tool
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
@@ -757,6 +761,35 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class CustomPromptLayerCallbackHandler(PromptLayerCallbackHandler):
+    def on_chat_model_start(
+        self,
+        serialized: dict,
+        messages: list,
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Override to handle tool outputs gracefully."""
+        try:
+            # Filter out tool messages that may cause issues with PromptLayer
+            filtered_messages = []
+            for msg in messages:
+                # Skip tool messages or messages with very long content
+                if hasattr(msg, 'type') and msg.type == 'tool':
+                    continue
+                if hasattr(msg, 'content') and isinstance(msg.content, str) and len(msg.content) > 10000:
+                    # Truncate very long content (like formatted documents)
+                    continue
+                filtered_messages.append(msg)
+            
+            # Call parent with filtered messages
+            super().on_chat_model_start(serialized, filtered_messages, run_id=run_id, parent_run_id=parent_run_id, **kwargs)
+        except Exception as e:
+            # Log error but don't break the chain
+            print(f"Error in CustomPromptLayerCallbackHandler.on_chat_model_start: {str(e)}")
+            pass
+    
     def on_llm_end(
         self,
         response: LLMResult,
@@ -1034,6 +1067,187 @@ class ChatViewSet(viewsets.ModelViewSet):
         chat_message.save()
         return results['answer'], message_sources
     
+    def generate_adaptive_chat_response(self, chat, project_id, project_version_id, user_email, user_input):
+        """Generate chat response using LangGraph adaptive RAG agent.
+        
+        This method uses a ReAct agent that can dynamically decide whether and how to
+        retrieve documents from the vector store based on the user's query.
+        
+        Args:
+            chat: Chat object for conversation history
+            project_id: Project ID for filtering documents
+            project_version_id: Project version ID for filtering documents
+            user_email: User email for logging
+            user_input: User's question/input
+            
+        Returns:
+            tuple: (answer, message_sources) in the same format as generate_standard_chat_response
+        """
+        try:
+            promptlayer_template = self.get_promptlayer_template(settings.SPEC_GPT_PROMPTLAYER_PROMPT_NAME)
+        except Exception as e:
+            print(f"Failed to retrieve PromptLayer template: {str(e)}")
+            raise e
+
+        # Initialize vector store
+        vectorstore = PineconeVectorStore(
+            pinecone_api_key=settings.PINECONE_API_KEY,
+            index_name=settings.PINECONE_INDEX_NAME,
+            embedding=self.embedding_provider(model=self.embedding_model)
+        )
+
+        # Initialize chat memory
+        chat_memory = CustomPostgresChatMessageHistory(chat)
+        memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            chat_memory=chat_memory,
+            input_key='question', 
+            output_key='answer',
+            return_messages=True,
+        )
+
+        # Get model metadata from PromptLayer
+        promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
+
+        # Create retrieval tool with project context
+        # The tool returns both the tool itself and a list that will store retrieved documents
+        retrieved_documents_store = []
+        retrieval_tool, _ = create_retrieval_tool(
+            vectorstore=vectorstore,
+            project_id=project_id,
+            project_version_id=project_version_id,
+            retrieved_documents_store=retrieved_documents_store
+        )
+
+        # Define system message for agent
+        agent_system_message = """You are an AI assistant for a construction project with access to project specifications.
+
+CRITICAL: Your primary role is to answer questions based on THIS PROJECT'S specifications. 
+ALWAYS retrieve and use project documents unless the question is clearly unrelated to the project.
+
+DEFAULT BEHAVIOR - USE retrieve_documents FOR:
+- ANY question that could relate to the project (requirements, materials, procedures, schedules, etc.)
+- Questions about what's in the project or what sections are available
+- Technical questions about construction, design, or specifications
+- Questions about requirements, standards, or guidelines for this project
+- Exploratory questions ("what do you have on...", "tell me about...")
+- When you're uncertain - err on the side of retrieving!
+
+ONLY SKIP retrieve_documents FOR:
+- Pure greetings with no follow-up ("hello", "hi")
+- Questions about YOUR capabilities as an AI ("how do you work?", "what can you do?")
+- Questions about the user themselves ("what's my name?", "who am I?")
+- Completely off-topic questions (weather, sports, etc.)
+
+IMPORTANT: If a question COULD be answered with project data, retrieve documents. 
+Don't rely on general knowledge when project specifications might have specific requirements.
+
+SEARCH STRATEGY:
+- Generate focused, specific queries (e.g., "concrete mix design requirements")
+- For exploratory questions: Use broad queries to discover available content (e.g., "specification", "requirements")
+- Use multiple targeted searches for complex multi-topic questions
+- Include relevant MasterFormat numbers if known
+
+DYNAMIC DOCUMENT RETRIEVAL:
+- Simple, focused questions: 5-8 documents
+- Moderate complexity: 8-15 documents  
+- Complex or exploratory: 15-30 documents
+- "What's available" questions: 30-100 documents to get comprehensive coverage
+- Multi-topic questions: Multiple searches with 10-20 documents each
+- You control num_documents - adjust based on query needs
+
+ALWAYS cite specification sections when providing information. Ground your answers in the actual project specifications."""
+
+        # Initialize LLM with PromptLayer callback
+        llm = ChatOpenAI(
+            temperature=promptlayer_model_metadata['parameters']['temperature'],
+            model_name=promptlayer_model_metadata['name'],
+            callbacks=[
+                CustomPromptLayerCallbackHandler(
+                    pl_tags=[
+                        f"environment: {settings.ENVIRONMENT}",
+                        f"application: deliverables",
+                        f"user: {user_email}",
+                        f"prompt_name: {promptlayer_template['prompt_name']}",
+                        f"prompt_commit_message: {promptlayer_template['commit_message']}",
+                        f"llm_model_name: {promptlayer_model_metadata['name']}",
+                        f"llm_temperature: {promptlayer_model_metadata['parameters']['temperature']}",
+                        "rag_type: adaptive"
+                    ]
+                )
+            ]
+        )
+
+        # Create the ReAct agent with recursion limit
+        agent_executor = create_react_agent(
+            llm,
+            tools=[retrieval_tool],
+            state_modifier=agent_system_message
+        )
+
+        # Get conversation history
+        history_messages = memory.chat_memory.messages if hasattr(memory.chat_memory, 'messages') else []
+
+        # Invoke the agent with conversation history
+        # The agent will decide whether to use the retrieval tool
+        config = {"recursion_limit": 4}
+        
+        print(f"\n{'='*80}")
+        print(f"🤖 ADAPTIVE RAG AGENT START")
+        print(f"{'='*80}")
+        print(f"User query: '{user_input}'")
+        print(f"Chat ID: {chat.id}")
+        print(f"Max iterations: 4")
+        print(f"{'='*80}\n")
+        
+        try:
+            result = agent_executor.invoke(
+                {"messages": history_messages + [("user", user_input)]},
+                config=config
+            )
+            
+            # Extract the final answer from agent result
+            # The result contains a 'messages' list with the conversation
+            final_message = result['messages'][-1]
+            answer = final_message.content if hasattr(final_message, 'content') else str(final_message)
+            
+            # Extract sources from retrieved documents (same format as standard implementation)
+            message_sources = [
+                {'metadata': doc.metadata, 'page_content': doc.page_content}
+                for doc in retrieved_documents_store
+            ]
+            
+            # Log completion
+            print(f"\n{'='*80}")
+            print(f"✅ ADAPTIVE RAG AGENT COMPLETE")
+            print(f"{'='*80}")
+            print(f"Tool calls made: {len(retrieved_documents_store) // max(1, len([msg for msg in result['messages'] if hasattr(msg, 'tool_calls') and msg.tool_calls]))}")
+            print(f"Total sources retrieved: {len(retrieved_documents_store)}")
+            if len(retrieved_documents_store) == 0:
+                print(f"ℹ️  Agent decided NOT to retrieve documents (query didn't require project specs)")
+            print(f"Answer length: {len(answer)} characters")
+            print(f"{'='*80}\n")
+            
+            # Save messages to chat history
+            # Add user message
+            chat_memory.add_user_message(user_input)
+            
+            # Add AI response
+            chat_memory.add_ai_message(answer)
+            
+            # Attach sources to the latest AI message
+            latest_ai_message = chat_memory.message_db_object
+            latest_ai_message.sources = message_sources
+            latest_ai_message.save()
+            
+            return answer, message_sources
+            
+        except Exception as e:
+            print(f"Error in adaptive agent execution: {str(e)}")
+            # Fallback to standard response if agent fails
+            return self.generate_standard_chat_response(
+                chat, project_id, project_version_id, user_email, user_input, num_documents_to_return
+            )
 
     class InspectionLogRow(BaseModel):
         spec_section_number: str = Field(alias="Spec Section #", description="The section this item was found in")
@@ -1448,7 +1662,19 @@ class ChatViewSet(viewsets.ModelViewSet):
             })
 
         if response_type == self.RESPONSE_TYPES.STANDARD:
-            answer, message_sources = self.generate_standard_chat_response(chat, project_id, project_version_id, request.user.email, user_input, num_documents_to_return)
+            # Check if adaptive RAG feature flag is active
+            use_adaptive_rag = is_langchain_update_feature_flag_active(request.user, team, project)
+            
+            if use_adaptive_rag:
+                # Use the new adaptive RAG implementation
+                answer, message_sources = self.generate_adaptive_chat_response(
+                    chat, project_id, project_version_id, request.user.email, user_input
+                )
+            else:
+                # Use the standard RAG implementation
+                answer, message_sources = self.generate_standard_chat_response(
+                    chat, project_id, project_version_id, request.user.email, user_input, num_documents_to_return
+                )
         else:
             return Response(status=status.HTTP_400_BAD_REQUEST, data={
                 'error': 'Invalid response type'

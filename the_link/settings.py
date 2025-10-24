@@ -630,6 +630,7 @@ INSPECTION_LOG_USE_DATA_TABLES_FEATURE_FLAG_NAME = 'inspection_log_use_data_tabl
 QA_PLANNER_FEATURE_FLAG_NAME = 'qa_planner'
 SPEC_CENTERED_VIEW_FEATURE_FLAG_NAME = 'spec_centered_view'
 VERSIONING_PDF_COMPARISON_FEATURE_FLAG_NAME = 'versioning_pdf_comparison'
+LANGCHAIN_UPDATE_FEATURE_FLAG_NAME = 'langchain_update'
 
 PROCORE_CLIENT_ID = os.environ.get("PROCORE_CLIENT_ID", default="")
 PROCORE_CLIENT_SECRET = os.environ.get("PROCORE_CLIENT_SECRET", default="")
