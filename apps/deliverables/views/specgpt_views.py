@@ -1198,10 +1198,16 @@ class ChatViewSet(viewsets.ModelViewSet):
             answer = final_message.content if hasattr(final_message, 'content') else str(final_message)
             
             # Extract sources from retrieved documents (same format as standard implementation)
-            message_sources = [
-                {'metadata': doc.metadata, 'page_content': doc.page_content}
-                for doc in retrieved_documents_store
-            ]
+            # Convert metadata to ensure all values are JSON serializable (convert UUIDs, etc to strings)
+            message_sources = []
+            for doc in retrieved_documents_store:
+                serializable_metadata = {}
+                for key, value in doc.metadata.items():
+                    serializable_metadata[key] = str(value) if value is not None else None
+                message_sources.append({
+                    'metadata': serializable_metadata,
+                    'page_content': doc.page_content
+                })
             
             # Extract and log the queries used
             tool_call_messages = [msg for msg in result['messages'] if hasattr(msg, 'tool_calls') and msg.tool_calls]
