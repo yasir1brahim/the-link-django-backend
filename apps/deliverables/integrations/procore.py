@@ -106,12 +106,14 @@ def get_projects(company_id, procore_token):
     return response
 
 def get_managers(project_id, procore_token):
-    url = settings.PROCORE_BASE_URL + '/rest/v1.0/projects/' + str(project_id) + '/submittals/potential_submittal_managers'
+    url = settings.PROCORE_BASE_URL + '/rest/v1.0/projects/' + str(project_id) + '/submittals/filter_options/submittal_manager_id'
     headers = {'Authorization': "Bearer " + procore_token}
     response = requests.get(url, headers=headers)
+    print("get_managers response", response.json())
     return response
 
 def create_spec_division(project_id, division_number, procore_token):
+    print(f"Creating spec division {division_number} for project {project_id}")
     payload = json.dumps({
         "specification_section_division": {
             "number": str(division_number),

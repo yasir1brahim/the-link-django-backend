@@ -19,6 +19,47 @@ from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 
+
+def clean_excel_content(content):
+    """
+    Clean content for safe Excel/XML export by removing:
+    1. Illegal XML characters (control chars)
+    2. Zero-width characters
+    3. Special Unicode characters that cause XML parsing issues
+    4. All high Unicode characters that might not be XML-safe
+    
+    Uses regex for performance - much faster than looping over every character.
+    """
+    if not content:
+        return ''
+    
+    # Convert to string first
+    content = str(content)
+    
+    # Use regex to keep ONLY XML-safe characters
+    # This pattern matches the INVERSE of what we want to keep, then we remove those characters
+    # 
+    # Pattern explanation:
+    # [^\x09\x0A\x0D\x20-\x7E\xA0-\xFF\u0100-\u024F\u0370-\u03FF\u0400-\u04FF]
+    # ^ = NOT (inverse match)
+    # \x09\x0A\x0D = tab, newline, carriage return
+    # \x20-\x7E = standard ASCII printable (space through tilde)
+    # \xA0-\xFF = extended Latin (Western European)
+    # \u0100-\u024F = Latin Extended-A and Extended-B
+    # \u0370-\u03FF = Greek and Coptic
+    # \u0400-\u04FF = Cyrillic
+    #
+    # So we remove everything that's NOT in these ranges
+    unsafe_pattern = re.compile(r'[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF\u0100-\u024F\u0370-\u03FF\u0400-\u04FF]')
+    content = unsafe_pattern.sub('', content)
+    
+    # Truncate to safe length
+    max_length = 30000
+    if len(content) > max_length:
+        content = content[:max_length]
+    
+    return content
+
 from django.http import HttpResponse
 from django.conf import settings
 from django.shortcuts import get_object_or_404
@@ -750,7 +791,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
                     item.paragraph_number,
                     item.submittal_type,
                     item.submittal_description,
-                    re.sub(ILLEGAL_CHARACTERS_RE, '', item.submittal_content)
+                    clean_excel_content(re.sub(ILLEGAL_CHARACTERS_RE, '', item.submittal_content))
                 ]
                 worksheet.append(row)
                 for col in range(1, len(row) + 1):
@@ -772,7 +813,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
                     elif header_option['name'] == 'Submittal Title':
                         field_value = item.submittal_description
                     elif header_option['name'] == 'Submittal Description':
-                        field_value = re.sub(ILLEGAL_CHARACTERS_RE, '', item.submittal_content)
+                        field_value = clean_excel_content(re.sub(ILLEGAL_CHARACTERS_RE, '', item.submittal_content))
 
                     cell = worksheet.cell(row=row_idx, column=header_option['col'] + 1)
                     cell.value = field_value
@@ -2256,7 +2297,7 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
         spec_section_list = list(set([str(submittal.masterformat_section.masterformat_number) for submittal in submittals]))
         print("procore_token", procore_token.access_token)
 
-        print("company id")
+        print("company id", project.team.procore_id)
         procore_spec_divisions_response = get_spec_divisions(project.procore_id, procore_token.access_token)
         if procore_spec_divisions_response.status_code != 200:
             print("Error getting procore spec divisions")
@@ -2282,7 +2323,7 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
             if spec_section_division == "":
                 continue
             if spec_section_division not in procore_division_numbers:
-                print("Spec section division not in procore division numbers")
+                print(f"Spec section division {spec_section_division} not in procore division numbers")
                 create_div_response = create_spec_division(
                     project_id=project.procore_id,
                     division_number=spec_section_division,
@@ -2292,9 +2333,17 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                     print("Error creating procore spec division")
                     print("create_div_response status code: " + str(create_div_response.status_code))
                     print("create_div_response json: " + str(create_div_response.json()))
+                    
+                    # Check for permission error
+                    if create_div_response.status_code == 403:
+                        return Response(
+                            {"message": "Your current Procore account doesn't have permissions to create spec sections or submittals in the currently mapped project. Please contact your Procore administrator to grant the necessary permissions."},
+                            status=status.HTTP_403_FORBIDDEN
+                        )
                     continue
                 else:
                     procore_division_dict[spec_section_division] = str(create_div_response.json()['id'])
+                    procore_division_numbers.append(spec_section_division)
                     print("updated division dict", procore_division_dict)
             else:
                 print("Division: " + spec_section_division + " already exists")
@@ -2311,9 +2360,17 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                     print("Error creating procore spec section")
                     print("create_spec_response status code: " + str(create_spec_response.status_code))
                     print("create_spec_response json: " + str(create_spec_response.json()))
+                    
+                    # Check for permission error
+                    if create_spec_response.status_code == 403:
+                        return Response(
+                            {"message": "Your current Procore account doesn't have permissions to create spec sections or submittals in the currently mapped project. Please contact your Procore administrator to grant the necessary permissions."},
+                            status=status.HTTP_403_FORBIDDEN
+                        )
                     return Response(create_spec_response.json(), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 else:
                     procore_spec_section_dict[spec_section] = str(create_spec_response.json()['id'])
+                    procore_spec_section_numbers.append(spec_section)
                     print("updated spec section dict", procore_spec_section_dict)
             else:
                 print("Spec: " + spec_section + " already exists")
@@ -2342,6 +2399,12 @@ class CreateProcoreSubmittalsView(generics.CreateAPIView):
                 procore_token=procore_token.access_token
             )
             if submittal_creation_response.status_code != 201:
+                # Check for permission error
+                if submittal_creation_response.status_code == 403:
+                    return Response(
+                        {"message": "Your current Procore account doesn't have permissions to create spec sections or submittals in the currently mapped project. Please contact your Procore administrator to grant the necessary permissions."},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
                 submittals_not_created.append(submittal)
                 continue
             submittals_dict[submittal.id] = submittal_creation_response.json()['id']
@@ -2390,8 +2453,13 @@ class GetProcoreProjectsView(generics.ListAPIView):
         except ProcoreException as e:
             return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
         
+        token_info_response = check_token_info(procore_token.access_token)
+        print("get_projects token_info_response", token_info_response.json())
         response = get_projects(procore_company_id, procore_token.access_token)
         if response.status_code != 200:
+            print("Error getting procore projects")
+            print("response status code: " + str(response.status_code))
+            print("response text: " + response.text)
             return Response(response.text, status=status.HTTP_400_BAD_REQUEST)
         projects_list = []
         for project in response.json():
@@ -2414,16 +2482,24 @@ class GetProcoreManagersView(generics.ListAPIView):
         try:
             procore_token = get_fresh_token_for_user(request.user)
         except ProcoreException as e:
+            print("Error getting fresh token for user: " + str(e))
             return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
+        
+        token_info_response = check_token_info(procore_token.access_token)
+        print("token_info_response", token_info_response.json())
         
         response = get_managers(procore_project_id, procore_token.access_token)
         if response.status_code != 200:
+            print("Error getting procore managers")
+            print("response status code: " + str(response.status_code))
+            print("response text: " + response.text)
             return Response(response.text, status=status.HTTP_400_BAD_REQUEST)
         managers_list = []
+        print("get_managers response", response.json())
         for manager in response.json():
             managers_list.append({
-                'key': manager['id'],
-                'value': manager['name']
+                'key': manager['key'],
+                'value': manager['value']
             })
         response_payload = {
             'message': 'List of managers',
