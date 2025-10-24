@@ -233,6 +233,10 @@ langchain-tests==0.3.19
     # via langchain-pinecone
 langchain-text-splitters==0.3.8
     # via langchain
+langgraph==0.2.69
+    # via -r requirements/requirements.in
+langgraph-checkpoint==2.1.2
+    # via langgraph
 langsmith==0.3.42
     # via
     #   langchain
