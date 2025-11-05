@@ -756,12 +756,13 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             
             # Get headers in the same order as the UI table
             logger.info(f"{log_prefix} Determining headers based on log_type")
-            if log_obj.log_type == 'inspection_log':
+            # Note: Some log_types may not have the _log suffix, so check for both variants
+            if log_obj.log_type in ['inspection_log', 'inspection']:
                 headers = [
                     'Spec Section #', 'Spec Section Name', 'Inspection Type And Requirements',
                     'Inspection Frequency', 'Responsible Party'
                 ]
-            elif log_obj.log_type == 'owner_deliverables_log':
+            elif log_obj.log_type in ['owner_deliverables_log', 'owner_deliverables']:
                 headers = [
                     'Spec Section #', 'Spec Section Name', 'Deliverable Type',
                     'When Due', 'Responsible Party', 'Exact Requirement Text'
@@ -773,8 +774,11 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 ]
             else:
                 # Fallback to dynamic headers if log type is unknown
-                headers = list(filtered_data[0].keys()) if filtered_data else []
-                logger.info(f"{log_prefix} Using dynamic headers: {headers}")
+                # Exclude internal/metadata fields that are not useful in Excel exports
+                excluded_fields = {'pdf_locations', 'metadata', 'internal_id', 'source_data'}
+                all_keys = list(filtered_data[0].keys()) if filtered_data else []
+                headers = [key for key in all_keys if key not in excluded_fields]
+                logger.info(f"{log_prefix} Using dynamic headers (excluded {excluded_fields & set(all_keys)}): {headers}")
             
             logger.info(f"{log_prefix} Headers: {headers}")
             
@@ -791,6 +795,16 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             for row_idx, item in enumerate(filtered_data, 2):
                 for col_idx, header in enumerate(headers, 1):
                     value = item.get(header, '')
+                    
+                    # Convert complex data types (lists, dicts) to JSON strings for Excel compatibility
+                    if isinstance(value, (list, dict)):
+                        try:
+                            value = json.dumps(value, ensure_ascii=False)
+                            logger.debug(f"{log_prefix} Converted complex value to JSON string for row={row_idx}, col={col_idx}")
+                        except (TypeError, ValueError) as e:
+                            logger.warning(f"{log_prefix} Failed to serialize complex value to JSON: {str(e)}")
+                            value = str(value)
+                    
                     cell = worksheet.cell(row=row_idx, column=col_idx, value=value)
                     cell.alignment = text_alignment
             

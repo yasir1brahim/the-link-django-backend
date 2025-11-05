@@ -454,3 +454,94 @@ class AiGeneratedLogExportTests(APITestCase):
         
         # Should work fine with valid project
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+    def test_export_handles_complex_data_types_in_fields(self):
+        """Test that export handles complex data types like lists and dicts in fields"""
+        # Create log with pdf_locations (list of dicts) like in production
+        log_with_complex_data = AiGeneratedLog.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            log_type='owner_deliverables',  # Note: without _log suffix, as seen in QA logs
+            log_status='SUCCESS',
+            log_table='# Test Table',
+            log_data=[
+                {
+                    'Spec Section #': '01 1000',
+                    'Spec Section Name': 'General Requirements',
+                    'Deliverable Type': 'As-Built Drawings',
+                    'When Due': 'At Project Completion',
+                    'Responsible Party': 'Contractor',
+                    'Exact Requirement Text': 'Submit complete as-built drawings',
+                    'pdf_locations': [
+                        {
+                            'x': 180.0019073486328,
+                            'y': 234.852783203125,
+                            'width': 326.7292022705078,
+                            'height': 10.0546875,
+                            'page_no': 3
+                        },
+                        {
+                            'x': 179.99551391601562,
+                            'y': 245.29278564453125,
+                            'width': 354.3271179199219,
+                            'height': 10.0546875,
+                            'page_no': 3
+                        }
+                    ]
+                },
+                {
+                    'Spec Section #': '02 3000',
+                    'Spec Section Name': 'Earthwork',
+                    'Deliverable Type': 'Test Reports',
+                    'When Due': 'Before Final Inspection',
+                    'Responsible Party': 'Testing Agency',
+                    'Exact Requirement Text': 'Provide compaction test reports',
+                    'pdf_locations': []  # Empty list
+                }
+            ]
+        )
+        
+        self.client.force_authenticate(user=self.user)
+        url = reverse('ai-generated-log-export', kwargs={
+            'project_id': self.project.id,
+            'pk': log_with_complex_data.id
+        })
+        response = self.client.get(url)
+        
+        # Should successfully export, converting complex data to strings
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response['content-type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        
+    def test_export_handles_nested_dicts_in_fields(self):
+        """Test that export handles nested dictionary data in fields"""
+        log_with_nested_data = AiGeneratedLog.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            log_type='qa_planner',
+            log_status='SUCCESS',
+            log_data=[
+                {
+                    'Spec Section #': '01 1000',
+                    'Spec Section Name': 'General Requirements',
+                    'item_type': 'Product',
+                    'metadata': {
+                        'source': 'AI',
+                        'confidence': 0.95,
+                        'nested': {'deep': 'value'}
+                    }
+                }
+            ]
+        )
+        
+        self.client.force_authenticate(user=self.user)
+        url = reverse('ai-generated-log-export', kwargs={
+            'project_id': self.project.id,
+            'pk': log_with_nested_data.id
+        })
+        response = self.client.get(url)
+        
+        # Should successfully export
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
