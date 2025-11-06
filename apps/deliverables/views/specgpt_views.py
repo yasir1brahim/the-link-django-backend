@@ -259,6 +259,44 @@ def _process_log_data(log_data, log_type, markdown_table):
         return None, markdown_table
 
 
+def _fuzzy_match_spec_section(spec_section_number, project_id, project_version_id=None):
+    """
+    Find SpecSection by fuzzy matching spec_section_number to masterformat_number.
+    Returns the matching SpecSection or None.
+    """
+    import re
+
+    if not spec_section_number:
+        return None
+
+    # Normalize the input spec section number (remove all non-digits)
+    normalized_input = re.sub(r'[^\d]', '', str(spec_section_number))
+    if not normalized_input:
+        return None
+
+    # Query SpecSections for this project
+    spec_sections = SpecSection.objects.filter(
+        document__project_id=project_id
+    ).select_related('masterformat_section')
+
+    # Filter by project version if provided
+    if project_version_id:
+        spec_sections = spec_sections.filter(
+            document__project_version_id=project_version_id
+        )
+
+    # Find matching spec section by comparing normalized numbers
+    for spec_section in spec_sections:
+        if spec_section.masterformat_section:
+            masterformat_number = spec_section.masterformat_section.masterformat_number
+            normalized_masterformat = re.sub(r'[^\d]', '', str(masterformat_number))
+
+            if normalized_input == normalized_masterformat:
+                return spec_section
+
+    return None
+
+
 def _create_extracted_data_from_log(ai_log):
     """Create ExtractedData records from AiGeneratedLog.log_data"""
     if not ai_log.log_data:
@@ -274,14 +312,24 @@ def _create_extracted_data_from_log(ai_log):
     text_field = text_field_map.get(ai_log.log_type)
 
     for item in ai_log.log_data:
+        spec_section_number = item.get('Spec Section #', '')
+
+        # Resolve spec_section FK using fuzzy matching
+        spec_section = _fuzzy_match_spec_section(
+            spec_section_number,
+            ai_log.project_id,
+            ai_log.project_version_id
+        )
+
         extracted_data = {
             'ai_generated_log': ai_log,
             'project': ai_log.project,
             'project_version': ai_log.project_version,
+            'spec_section': spec_section,  # Set the FK
             'extraction_type': ai_log.log_type,
             'source': 'AI',
             'created_by': created_by,
-            'spec_section_number': item.get('Spec Section #', ''),
+            'spec_section_number': spec_section_number,
             'spec_section_name': item.get('Spec Section Name', ''),
             'responsible_party': item.get('Responsible Party'),
             'pdf_locations': item.get('pdf_locations'),
