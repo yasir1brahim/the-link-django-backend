@@ -2,7 +2,6 @@ from rest_framework import viewsets, status, filters, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Count
 
 from apps.deliverables.models import ExtractedData, Project, ExtractionSource
@@ -17,14 +16,7 @@ from apps.deliverables.permissions import ProjectAccessPermissions
 class ExtractedDataViewSet(viewsets.ModelViewSet):
     """ViewSet for ExtractedData CRUD operations"""
     permission_classes = [IsAuthenticated, ProjectAccessPermissions]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-
-    # Filtering
-    filterset_fields = [
-        'source', 'extraction_type', 'item_type',
-        'spec_section', 'spec_section_number', 'ai_generated_log',
-        'project_version', 'created_by', 'responsible_party'
-    ]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
 
     # Search
     search_fields = [
