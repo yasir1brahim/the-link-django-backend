@@ -427,10 +427,136 @@ class AiGeneratedLog(BaseModel):
     log_data = models.JSONField(blank=True, null=True, help_text="Structured data for inspection logs and owner deliverables logs")
     qa_options_selected = models.JSONField(blank=True, null=True, help_text="Selected QA options for qa_planner log type")
     completion_status = models.JSONField(blank=True, null=True, help_text="Status of each QA option processing")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ai_generated_logs',
+        help_text="User who triggered this AI log generation (null for system-generated)"
+    )
 
     def __str__(self):
         return f"{self.project.name} - {self.project_version.version_number} - {self.log_type} - {self.log_status}"
-    
+
+
+class ExtractionSource(models.TextChoices):
+    """Source of the extracted data"""
+    AI = "AI", "AI Generated"
+    HUMAN = "HUMAN", "Human Created"
+
+
+class ExtractionItemType(models.TextChoices):
+    """Types of extracted items users can categorize"""
+    SUBMITTAL = "submittal", "Submittal"
+    INSPECTION = "inspection", "Inspection"
+    OWNER_DELIVERABLE = "owner_deliverable", "Owner Deliverable"
+    QA_INSPECTION = "qa_inspection", "QA Inspection"
+    QA_WARRANTY = "qa_warranty", "QA Warranty"
+    QA_CERTIFICATE = "qa_certificate", "QA Certificate"
+    QA_CLOSEOUT = "qa_closeout", "QA Closeout"
+    QA_TEST_REPORT = "qa_test_report", "QA Test Report"
+    QA_COMMISSIONING = "qa_commissioning", "QA Commissioning"
+    QA_DELEGATED_DESIGN = "qa_delegated_design", "QA Delegated Design"
+    QA_MOCKUP = "qa_mockup", "QA Mock-up/Sample"
+    QA_PRE_INSTALL = "qa_pre_install", "QA Pre-Installation Meeting"
+
+
+class ExtractedData(BaseModel):
+    """Individual row extracted from AI-generated logs or manually created via Apryse highlights"""
+
+    # Foreign keys
+    ai_generated_log = models.ForeignKey(
+        'AiGeneratedLog',
+        on_delete=models.CASCADE,
+        related_name='extracted_items',
+        null=True,
+        blank=True,
+        help_text="AI log this was extracted from (null for human-created)"
+    )
+    project = models.ForeignKey('Project', on_delete=models.CASCADE)
+    project_version = models.ForeignKey('ProjectVersion', on_delete=models.CASCADE)
+    spec_section = models.ForeignKey(
+        'SpecSection',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+
+    # Creation metadata
+    source = models.CharField(
+        max_length=10,
+        choices=ExtractionSource.choices,
+        default=ExtractionSource.AI,
+        help_text="Whether this was AI-generated or human-created"
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_extractions',
+        help_text="User who created this extraction (for HUMAN source) or triggered AI generation"
+    )
+
+    # Core data fields
+    spec_section_number = models.CharField(max_length=256)
+    spec_section_name = models.CharField(max_length=512)
+    paragraph_number = models.CharField(max_length=256, blank=True, null=True)
+
+    # Type classification
+    extraction_type = models.CharField(
+        max_length=256,
+        help_text="For AI: log type (inspection_log, owner_deliverables_log, qa_planner). For HUMAN: user-selected base type"
+    )
+    item_type = models.CharField(
+        max_length=256,
+        blank=True,
+        null=True,
+        help_text="Specific categorization - for QA planner subtypes or user-selected type for highlights"
+    )
+
+    # Content fields
+    requirement_text = models.TextField()
+    responsible_party = models.CharField(max_length=512, blank=True, null=True)
+    when_due = models.CharField(max_length=512, blank=True, null=True)
+
+    # Inspection-specific
+    inspection_frequency = models.CharField(max_length=256, blank=True, null=True)
+
+    # Owner deliverables-specific
+    deliverable_type = models.CharField(max_length=256, blank=True, null=True)
+
+    # PDF location data
+    pdf_locations = models.JSONField(
+        blank=True,
+        null=True,
+        help_text="PDF coordinate data for highlighting"
+    )
+
+    class Meta:
+        db_table = 'deliverables_extracted_data'
+        indexes = [
+            models.Index(fields=['project', 'project_version']),
+            models.Index(fields=['spec_section_number']),
+            models.Index(fields=['extraction_type', 'item_type']),
+            models.Index(fields=['source']),
+            models.Index(fields=['created_by']),
+        ]
+        ordering = ['spec_section_number', 'id']
+
+    def __str__(self):
+        return f"{self.spec_section_number} - {self.requirement_text[:50]}"
+
+    def save(self, *args, **kwargs):
+        """Override save to set created_by for AI sources from ai_generated_log"""
+        if self.source == ExtractionSource.AI and not self.created_by_id:
+            # Try to get user from ai_generated_log if available
+            if self.ai_generated_log and hasattr(self.ai_generated_log, 'created_by'):
+                self.created_by = self.ai_generated_log.created_by
+
+        super().save(*args, **kwargs)
+
 
 # endregion SpecGPT
 
