@@ -6,7 +6,8 @@ from ..models import (
     Project,
     ProjectVersion,
     UploadedFile,
-    AiGeneratedLog
+    AiGeneratedLog,
+    ExtractedData
 )
 from apps.utils.feature_flags import is_spec_centered_view_feature_flag_active
 

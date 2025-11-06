@@ -12,7 +12,6 @@ from apps.deliverables.serializers.extracted_data import (
     ExtractedDataCreateSerializer
 )
 from apps.deliverables.permissions import ProjectAccessPermissions
-from apps.deliverables.filters import ExtractedDataFilter
 
 
 class ExtractedDataViewSet(viewsets.ModelViewSet):
@@ -21,7 +20,11 @@ class ExtractedDataViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
 
     # Filtering
-    filterset_class = ExtractedDataFilter
+    filterset_fields = [
+        'source', 'extraction_type', 'item_type',
+        'spec_section', 'spec_section_number', 'ai_generated_log',
+        'project_version', 'created_by', 'responsible_party'
+    ]
 
     # Search
     search_fields = [
