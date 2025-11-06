@@ -31,8 +31,10 @@ class TestExtractedDataModel(TestCase):
             extraction_type="inspection_log",
             requirement_text="Visual inspection of formwork",
             responsible_party="QC Inspector",
-            when_due="Daily",
-            inspection_frequency="Daily",
+            metadata={
+                'inspection_frequency': 'Daily',
+                'when_due': 'Daily'
+            },
             source="AI",
             created_by=self.user
         )
@@ -41,6 +43,7 @@ class TestExtractedDataModel(TestCase):
         self.assertEqual(extracted.extraction_type, "inspection_log")
         self.assertEqual(extracted.source, "AI")
         self.assertEqual(extracted.created_by, self.user)
+        self.assertEqual(extracted.metadata['inspection_frequency'], "Daily")
 
     def test_human_created_extraction(self):
         """Test human-created extraction via Apryse highlight"""

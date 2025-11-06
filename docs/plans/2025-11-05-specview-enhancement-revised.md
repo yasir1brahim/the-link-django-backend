@@ -192,8 +192,7 @@ class ExtractedDataAdmin(admin.ModelAdmin):
         ('Extraction Details', {
             'fields': (
                 'extraction_type', 'item_type', 'paragraph_number',
-                'requirement_text', 'responsible_party', 'when_due',
-                'inspection_frequency', 'deliverable_type'
+                'requirement_text', 'responsible_party', 'metadata'
             )
         }),
         ('PDF Data', {
@@ -253,6 +252,12 @@ def migrate_ai_log_data(apps, schema_editor):
     AiGeneratedLog = apps.get_model('deliverables', 'AiGeneratedLog')
     ExtractedData = apps.get_model('deliverables', 'ExtractedData')
 
+    text_field_map = {
+        'inspection_log': 'Inspection Type And Requirements',
+        'owner_deliverables_log': 'Exact Requirement Text',
+        'qa_planner': 'Requirement Text',
+    }
+
     # Process each AI log
     for ai_log in AiGeneratedLog.objects.filter(log_status='SUCCESS').iterator(chunk_size=100):
         if not ai_log.log_data:
@@ -263,43 +268,52 @@ def migrate_ai_log_data(apps, schema_editor):
         try:
             with transaction.atomic():
                 for item in ai_log.log_data:
+                    text_field = text_field_map.get(ai_log.log_type)
+
                     extracted_data = {
                         'ai_generated_log': ai_log,
                         'project': ai_log.project,
                         'project_version': ai_log.project_version,
                         'extraction_type': ai_log.log_type,
-                        'source': 'AI',  # All migrated data is AI-generated
+                        'source': 'AI',
+                        'metadata': {},
                     }
 
-                    # Get created_by from the AI log if available
                     if hasattr(ai_log, 'created_by'):
                         extracted_data['created_by'] = ai_log.created_by
 
-                    # Common fields
                     extracted_data['spec_section_number'] = item.get('Spec Section #', '')
                     extracted_data['spec_section_name'] = item.get('Spec Section Name', '')
                     extracted_data['responsible_party'] = item.get('Responsible Party')
                     extracted_data['pdf_locations'] = item.get('pdf_locations')
 
-                    # Handle different log types
-                    if ai_log.log_type == 'inspection_log':
-                        extracted_data['requirement_text'] = item.get('Inspection Type And Requirements', '')
-                        extracted_data['inspection_frequency'] = item.get('Inspection Frequency')
-                        extracted_data['when_due'] = item.get('Inspection Frequency')
-
-                    elif ai_log.log_type == 'owner_deliverables_log':
-                        extracted_data['requirement_text'] = item.get('Exact Requirement Text', '')
-                        extracted_data['deliverable_type'] = item.get('Deliverable Type')
-                        extracted_data['when_due'] = item.get('When Due')
-
-                    elif ai_log.log_type == 'qa_planner':
-                        extracted_data['requirement_text'] = item.get('Requirement Text', '')
-                        extracted_data['item_type'] = item.get('item_type')
-                        extracted_data['paragraph_number'] = item.get('Paragraph Number')
-                        extracted_data['when_due'] = item.get('When Due')
-
+                    if text_field:
+                        extracted_data['requirement_text'] = item.get(text_field, '')
+                        extracted_data['metadata']['original_text_key'] = text_field
                     else:
                         extracted_data['requirement_text'] = str(item)
+                        extracted_data['metadata']['original_text_key'] = None
+
+                    if ai_log.log_type == 'inspection_log':
+                        extracted_data['metadata'].update({
+                            'inspection_frequency': item.get('Inspection Frequency'),
+                            'when_due': item.get('Inspection Frequency'),
+                        })
+
+                    elif ai_log.log_type == 'owner_deliverables_log':
+                        extracted_data['metadata'].update({
+                            'deliverable_type': item.get('Deliverable Type'),
+                            'when_due': item.get('When Due'),
+                        })
+
+                    elif ai_log.log_type == 'qa_planner':
+                        extracted_data['item_type'] = item.get('item_type')
+                        extracted_data['paragraph_number'] = item.get('Paragraph Number')
+                        extracted_data['metadata'].update({
+                            'when_due': item.get('When Due'),
+                        })
+
+                    extracted_data['metadata']['raw_item'] = item
 
                     extracted_items.append(ExtractedData(**extracted_data))
 
@@ -374,6 +388,12 @@ Add after the `ai_log.log_data = log_data` line:
 if log_data:
     extracted_items = []
     created_by = getattr(ai_log, 'created_by', None)
+    text_field_map = {
+        'inspection_log': 'Inspection Type And Requirements',
+        'owner_deliverables_log': 'Exact Requirement Text',
+        'qa_planner': 'Requirement Text',
+    }
+    text_field = text_field_map.get(ai_log.log_type)
 
     for item in log_data:
         extracted_data = {
@@ -387,26 +407,32 @@ if log_data:
             'spec_section_name': item.get('Spec Section Name', ''),
             'responsible_party': item.get('Responsible Party'),
             'pdf_locations': item.get('pdf_locations'),
+            'metadata': {
+                'original_text_key': text_field,
+                'raw_item': item,
+            },
         }
+
+        if text_field:
+            extracted_data['requirement_text'] = item.get(text_field, '')
+        else:
+            extracted_data['requirement_text'] = str(item)
 
         # Handle different log types
         if ai_log.log_type == 'inspection_log':
-            extracted_data.update({
-                'requirement_text': item.get('Inspection Type And Requirements', ''),
+            extracted_data['metadata'].update({
                 'inspection_frequency': item.get('Inspection Frequency'),
                 'when_due': item.get('Inspection Frequency'),
             })
         elif ai_log.log_type == 'owner_deliverables_log':
-            extracted_data.update({
-                'requirement_text': item.get('Exact Requirement Text', ''),
+            extracted_data['metadata'].update({
                 'deliverable_type': item.get('Deliverable Type'),
                 'when_due': item.get('When Due'),
             })
         elif ai_log.log_type == 'qa_planner':
-            extracted_data.update({
-                'requirement_text': item.get('Requirement Text', ''),
-                'item_type': item.get('item_type'),
-                'paragraph_number': item.get('Paragraph Number'),
+            extracted_data['item_type'] = item.get('item_type')
+            extracted_data['paragraph_number'] = item.get('Paragraph Number')
+            extracted_data['metadata'].update({
                 'when_due': item.get('When Due'),
             })
 
@@ -472,6 +498,7 @@ class ExtractedDataListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'spec_section_number', 'spec_section_name',
             'extraction_type', 'item_type', 'requirement_text',
+            'responsible_party', 'metadata',
             'source', 'source_display', 'created_by_name', 'created_at'
         ]
         read_only_fields = fields
@@ -490,8 +517,7 @@ class ExtractedDataSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'ai_generated_log', 'spec_section_number',
             'spec_section_name', 'extraction_type', 'item_type',
-            'requirement_text', 'responsible_party', 'when_due',
-            'inspection_frequency', 'deliverable_type',
+            'requirement_text', 'responsible_party', 'metadata',
             'pdf_locations', 'paragraph_number',
             'source', 'source_display', 'created_by',
             'created_at', 'updated_at'
@@ -499,8 +525,7 @@ class ExtractedDataSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id', 'ai_generated_log', 'spec_section_number',
             'spec_section_name', 'extraction_type', 'item_type',
-            'requirement_text', 'responsible_party', 'when_due',
-            'inspection_frequency', 'deliverable_type',
+            'requirement_text', 'responsible_party', 'metadata',
             'pdf_locations', 'paragraph_number',
             'source', 'created_by', 'created_at', 'updated_at'
         ]
@@ -515,8 +540,7 @@ class ExtractedDataCreateSerializer(serializers.ModelSerializer):
             'project', 'project_version', 'spec_section',
             'spec_section_number', 'spec_section_name',
             'extraction_type', 'item_type', 'paragraph_number',
-            'requirement_text', 'responsible_party', 'when_due',
-            'inspection_frequency', 'deliverable_type',
+            'requirement_text', 'responsible_party', 'metadata',
             'pdf_locations'
         ]
 
@@ -836,6 +860,7 @@ def get_ai_log_highlights(self, obj):
     # Format results
     results = []
     for item in matching_items:
+        metadata = item.metadata or {}
         result = {
             'id': item.id,
             'extraction_type': item.extraction_type,
@@ -844,7 +869,7 @@ def get_ai_log_highlights(self, obj):
             'spec_section_name': item.spec_section_name,
             'requirement_text': item.requirement_text,
             'responsible_party': item.responsible_party,
-            'when_due': item.when_due,
+            'metadata': metadata,
             'pdf_locations': item.pdf_locations,
 
             # Include source information
@@ -855,110 +880,18 @@ def get_ai_log_highlights(self, obj):
             'created_at': item.created_at
         }
 
-        # Add type-specific fields
+        # Add type-specific convenience fields for backwards compatibility
         if item.extraction_type == 'inspection_log':
-            result['inspection_frequency'] = item.inspection_frequency
+            result['inspection_frequency'] = metadata.get('inspection_frequency')
         elif item.extraction_type == 'owner_deliverables_log':
-            result['deliverable_type'] = item.deliverable_type
+            result['deliverable_type'] = metadata.get('deliverable_type')
         elif item.extraction_type == 'qa_planner':
             result['paragraph_number'] = item.paragraph_number
+
+        # Expose shared metadata convenience fields
+        result['when_due'] = metadata.get('when_due')
 
         results.append(result)
 
     return results
 ```
-
-**Step 2: Commit**
-
-```bash
-git add apps/deliverables/serializers/spec_centric_serializers.py
-git commit -m "feat: update SpecView to use ExtractedData with source tracking"
-```
-
----
-
-## Phase 7: Testing
-
-### Task 10: End-to-End Integration Test
-
-**Files:**
-- Create: `apps/deliverables/tests/test_extracted_data_e2e.py`
-
-**Step 1: Write E2E test**
-
-Create comprehensive test covering:
-- AI log webhook creates ExtractedData
-- Manual creation via API
-- Filtering by source
-- SpecView integration
-- Summary endpoints
-
-**Step 2: Run test**
-
-Run: `docker-compose exec web python manage.py test apps.deliverables.tests.test_extracted_data_e2e --verbosity=2`
-Expected: PASS
-
-**Step 3: Commit**
-
-```bash
-git add apps/deliverables/tests/test_extracted_data_e2e.py
-git commit -m "test: add end-to-end test for ExtractedData workflow"
-```
-
-### Task 11: Performance Optimization Test
-
-**Files:**
-- Create: `apps/deliverables/tests/test_extracted_data_performance.py`
-
-**Step 1: Write performance test**
-
-Test that queries use indexes efficiently for:
-- Source filtering
-- Created by filtering
-- Spec section filtering
-- Extraction type filtering
-
-**Step 2: Run test**
-
-Run: `docker-compose exec web python manage.py test apps.deliverables.tests.test_extracted_data_performance --verbosity=2`
-Expected: PASS with acceptable performance
-
-**Step 3: Final commit**
-
-```bash
-git add apps/deliverables/tests/test_extracted_data_performance.py
-git commit -m "test: add performance tests for ExtractedData"
-
-git commit -m "feat: complete SpecView enhancement with ExtractedData model
-
-- Created ExtractedData model with source (AI/HUMAN) and created_by tracking
-- Added Django migration to convert existing data automatically
-- Updated webhook to create ExtractedData records with source tracking
-- Built full CRUD API for extraction management
-- Added filtering by source and created_by user
-- Integrated with SpecView for highlighting with source information
-- Added comprehensive test coverage including E2E and performance tests
-- Optimized with database indexes on source and created_by fields"
-```
-
----
-
-## Summary
-
-This plan provides a complete backend implementation for the SpecView enhancement feature with:
-
-1. **ExtractedData Model**: Normalized storage with source tracking (AI vs HUMAN) and created_by field
-2. **Data Migration**: Automatic conversion via Django migration file
-3. **Dual Support**: Maintains backwards compatibility with log_data
-4. **CRUD API**: Full REST API for managing extractions (not annotations)
-5. **Human Entry Support**: Users create ExtractedData entries via Apryse highlights marked as HUMAN source
-6. **Source Tracking**: Clear distinction between AI-generated and human-created data
-7. **SpecView Integration**: Seamless replacement using ExtractedData with source information
-8. **Comprehensive Testing**: Model, API, permissions, E2E, and performance tests
-
-**Key Difference from Original Plan**: No "annotation" layer - Apryse highlights directly create ExtractedData entries with `source=HUMAN`.
-
-**Total Tasks**: 11 tasks with TDD approach
-**Deployment**: Migration runs automatically on deploy
-**Backwards Compatible**: Maintains log_data during transition
-**Audit Trail**: Full tracking of who created each extraction

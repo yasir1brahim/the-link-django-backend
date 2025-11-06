@@ -519,19 +519,20 @@ class ExtractedData(BaseModel):
     # Content fields
     requirement_text = models.TextField()
     responsible_party = models.CharField(max_length=512, blank=True, null=True)
-    when_due = models.CharField(max_length=512, blank=True, null=True)
-
-    # Inspection-specific
-    inspection_frequency = models.CharField(max_length=256, blank=True, null=True)
-
-    # Owner deliverables-specific
-    deliverable_type = models.CharField(max_length=256, blank=True, null=True)
 
     # PDF location data
     pdf_locations = models.JSONField(
         blank=True,
         null=True,
         help_text="PDF coordinate data for highlighting"
+    )
+
+    # Flexible metadata for type-specific fields
+    metadata = models.JSONField(
+        blank=True,
+        null=True,
+        default=dict,
+        help_text="Type-specific data: inspection_frequency, when_due, deliverable_type, etc."
     )
 
     class Meta:
