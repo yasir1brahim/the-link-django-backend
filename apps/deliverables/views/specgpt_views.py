@@ -17,6 +17,7 @@ from rest_framework.decorators import action
 import pymupdf
 from openai import OpenAI
 from django.conf import settings
+from django.db import transaction
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 from promptlayer.templates import TemplateManager
@@ -47,11 +48,12 @@ from apps.deliverables.models import Project, ProjectVersion
 from typing import TypedDict, List
 
 from apps.deliverables.models import (
-    UploadedFile, MasterFormatSection, 
-    SpecSection, DocProcessingStatus, 
-    Chat, ChatMessage, 
+    UploadedFile, MasterFormatSection,
+    SpecSection, DocProcessingStatus,
+    Chat, ChatMessage,
     CustomPostgresChatMessageHistory,
-    AiGeneratedLog
+    AiGeneratedLog,
+    ExtractedData
 )
 from apps.utils.feature_flags import is_specgpt_websockets_feature_flag_active, is_langchain_update_feature_flag_active
 
@@ -257,6 +259,71 @@ def _process_log_data(log_data, log_type, markdown_table):
         return None, markdown_table
 
 
+def _create_extracted_data_from_log(ai_log):
+    """Create ExtractedData records from AiGeneratedLog.log_data"""
+    if not ai_log.log_data:
+        return
+
+    extracted_items = []
+    created_by = getattr(ai_log, 'created_by', None)
+    text_field_map = {
+        'inspection_log': 'Inspection Type And Requirements',
+        'owner_deliverables_log': 'Exact Requirement Text',
+        'qa_planner': 'Requirement Text',
+    }
+    text_field = text_field_map.get(ai_log.log_type)
+
+    for item in ai_log.log_data:
+        extracted_data = {
+            'ai_generated_log': ai_log,
+            'project': ai_log.project,
+            'project_version': ai_log.project_version,
+            'extraction_type': ai_log.log_type,
+            'source': 'AI',
+            'created_by': created_by,
+            'spec_section_number': item.get('Spec Section #', ''),
+            'spec_section_name': item.get('Spec Section Name', ''),
+            'responsible_party': item.get('Responsible Party'),
+            'pdf_locations': item.get('pdf_locations'),
+            'metadata': {
+                'original_text_key': text_field,
+                'raw_item': item,
+            },
+        }
+
+        if text_field:
+            extracted_data['requirement_text'] = item.get(text_field, '')
+        else:
+            extracted_data['requirement_text'] = str(item)
+
+        # Handle different log types
+        if ai_log.log_type == 'inspection_log':
+            extracted_data['metadata'].update({
+                'inspection_frequency': item.get('Inspection Frequency'),
+                'when_due': item.get('Inspection Frequency'),
+            })
+        elif ai_log.log_type == 'owner_deliverables_log':
+            extracted_data['metadata'].update({
+                'deliverable_type': item.get('Deliverable Type'),
+                'when_due': item.get('When Due'),
+            })
+        elif ai_log.log_type == 'qa_planner':
+            extracted_data['item_type'] = item.get('item_type')
+            extracted_data['paragraph_number'] = item.get('Paragraph Number')
+            extracted_data['metadata'].update({
+                'when_due': item.get('When Due'),
+            })
+
+        extracted_items.append(ExtractedData(**extracted_data))
+
+    # Bulk create ExtractedData records
+    if extracted_items:
+        with transaction.atomic():
+            ai_log.extracted_items.all().delete()
+            ExtractedData.objects.bulk_create(extracted_items, batch_size=100)
+            print(f"Created {len(extracted_items)} ExtractedData records for log {ai_log.id}")
+
+
 def _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdown_table):
     """Handle webhook response for QA planner logs with merging logic."""
     
@@ -310,8 +377,12 @@ def _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdow
         
         print(f"QA planner log {log_obj.id} completed with status: {log_obj.log_status}")
         print(f"Individual statuses: {log_obj.completion_status}")
-    
+
     log_obj.save()
+
+    # Create ExtractedData records after successful completion
+    if all_complete and log_obj.log_status in ['SUCCESS', 'PARTIAL_SUCCESS']:
+        _create_extracted_data_from_log(log_obj)
 
 
 @api_view(['POST'])
@@ -380,8 +451,12 @@ def ai_log_generation_webhook(request):
                     log_obj.log_data = processed_log_data
                     print(f"Stored structured data for log {log_obj.id}: {len(processed_log_data)} items")
                 log_obj.log_table = processed_markdown
-                
+
                 log_obj.save()
+
+                # Create ExtractedData records for successful logs
+                if new_status == 'SUCCESS':
+                    _create_extracted_data_from_log(log_obj)
         else:
             # Create new log entry
             log_entry_data = {
@@ -399,8 +474,12 @@ def ai_log_generation_webhook(request):
                 log_entry_data['log_data'] = processed_log_data
                 print(f"Created new log with structured data: {len(processed_log_data)} items")
             log_entry_data['log_table'] = processed_markdown
-            
-            AiGeneratedLog.objects.create(**log_entry_data)
+
+            new_log = AiGeneratedLog.objects.create(**log_entry_data)
+
+            # Create ExtractedData records for successful new logs
+            if new_status == 'SUCCESS':
+                _create_extracted_data_from_log(new_log)
         if new_status == 'FAILURE':
             print(f"AI LOG GENERATION WEBHOOK: Failure for {request_data.get('log_type', 'unknown')} log for project {request_data.get('project_id', 'unknown')} project version {request_data.get('project_version_id', 'unknown')}")
     elif new_status == 'PROCESSING':
