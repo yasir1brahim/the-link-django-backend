@@ -24,7 +24,7 @@ from django.conf import settings
 from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
     UploadedFile, SpecSection, MasterFormatSection,
     SubmittalItemList, ExcelExportHeader, ProjectVersion, Chat, ChatMessage,
-    AiGeneratedLog
+    AiGeneratedLog, ExtractedData
 )
 
 
@@ -404,4 +404,50 @@ class AiGeneratedLogAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         """Allow deletion for admin users."""
         return request.user.is_superuser
+
+
+@admin.register(ExtractedData)
+class ExtractedDataAdmin(admin.ModelAdmin):
+    list_display = [
+        'id', 'spec_section_number', 'spec_section_name',
+        'extraction_type', 'source', 'created_by', 'created_at'
+    ]
+    list_filter = [
+        'source', 'extraction_type', 'item_type', 'project'
+    ]
+    search_fields = [
+        'spec_section_number', 'spec_section_name',
+        'requirement_text'
+    ]
+    readonly_fields = ['created_at', 'updated_at']
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': (
+                'source', 'created_by', 'ai_generated_log',
+                'project', 'project_version', 'spec_section',
+                'spec_section_number', 'spec_section_name'
+            )
+        }),
+        ('Extraction Details', {
+            'fields': (
+                'extraction_type', 'item_type', 'paragraph_number',
+                'requirement_text', 'responsible_party', 'metadata'
+            )
+        }),
+        ('PDF Data', {
+            'fields': ('pdf_locations',),
+            'classes': ('collapse',)
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        })
+    )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related(
+            'ai_generated_log', 'project', 'project_version',
+            'spec_section', 'created_by'
+        )
 
