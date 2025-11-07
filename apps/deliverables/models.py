@@ -186,7 +186,7 @@ class BaseSpecItem(BaseModel):
     project_version = models.ForeignKey("ProjectVersion", on_delete=models.CASCADE)
     document = models.ForeignKey("UploadedFile", on_delete=models.CASCADE, blank=True, null=True)
     masterformat_section = models.ForeignKey("MasterFormatSection", on_delete=models.PROTECT)
-    spec_section = models.ForeignKey("SpecSection", on_delete=models.PROTECT, blank=True, null=True)
+    spec_section = models.ForeignKey("SpecSection", on_delete=models.CASCADE, blank=True, null=True)
     paragraph_number = models.CharField(max_length=256)
     heirarchical_paragraph_number = models.CharField(max_length=256, default="", blank=True)
 
