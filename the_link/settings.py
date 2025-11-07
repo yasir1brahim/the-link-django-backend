@@ -630,6 +630,7 @@ INSPECTION_LOG_USE_DATA_TABLES_FEATURE_FLAG_NAME = 'inspection_log_use_data_tabl
 QA_PLANNER_FEATURE_FLAG_NAME = 'qa_planner'
 SPEC_CENTERED_VIEW_FEATURE_FLAG_NAME = 'spec_centered_view'
 VERSIONING_PDF_COMPARISON_FEATURE_FLAG_NAME = 'versioning_pdf_comparison'
+LANGCHAIN_UPDATE_FEATURE_FLAG_NAME = 'langchain_update'
 
 PROCORE_CLIENT_ID = os.environ.get("PROCORE_CLIENT_ID", default="")
 PROCORE_CLIENT_SECRET = os.environ.get("PROCORE_CLIENT_SECRET", default="")
@@ -645,6 +646,7 @@ MAX_CHAT_MESSAGES = 10
 
 PROMPTLAYER_API_KEY = os.environ.get("PROMPTLAYER_API_KEY", default="")
 SPEC_GPT_PROMPTLAYER_PROMPT_NAME = "specgpt"
+SPEC_GPT_V2_PROMPTLAYER_PROMPT_NAME = "specgpt_v2"
 INSPECTION_LOG_PROMPTLAYER_PROMPT_NAME = "inspection_log"
 OWNER_DELIVERABLES_PROMPTLAYER_PROMPT_NAME = "owner_deliverables"
 GENERATE_LOG_LAMBDA_FUNCTION_URL = os.environ.get("GENERATE_LOG_LAMBDA_FUNCTION_URL", default="https://v4aiai3ftopjpvbdtonytus3c40wbojq.lambda-url.us-east-1.on.aws/")

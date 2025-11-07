@@ -10,7 +10,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from django.conf import settings
 from apps.deliverables.models import Project
-from apps.utils.feature_flags import is_specgpt_websockets_feature_flag_active
+from apps.utils.feature_flags import is_specgpt_websockets_feature_flag_active, is_langchain_update_feature_flag_active
 
 # LangChain / LLM imports for streaming
 from langchain_openai import ChatOpenAI
@@ -19,6 +19,10 @@ from langchain.memory import ConversationBufferMemory
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 from langchain.callbacks.base import AsyncCallbackHandler
+
+# LangGraph imports for adaptive RAG
+from langgraph.prebuilt import create_react_agent
+from apps.deliverables.tools.adaptive_retrieval import create_retrieval_tool
 
 # Models used for memory/history
 from apps.deliverables.models import (
@@ -102,8 +106,15 @@ class SpecGptWebSocketConsumer(AsyncWebsocketConsumer):
         }))
 
         try:
-            # Run LLM with real-time streaming
-            results = await self._run_streaming_chain(user_input, chat_id, project_version_id, num_documents)
+            # Check if adaptive RAG is enabled
+            use_adaptive_rag = await self.check_adaptive_rag_flag()
+            
+            if use_adaptive_rag:
+                # Use adaptive RAG with LangGraph agent
+                results = await self._run_adaptive_streaming_chain(user_input, chat_id, project_version_id, num_documents)
+            else:
+                # Use standard RAG with ConversationalRetrievalChain
+                results = await self._run_streaming_chain(user_input, chat_id, project_version_id, num_documents)
 
             # Send completion signal
             await self.send(text_data=json.dumps({
@@ -151,6 +162,16 @@ class SpecGptWebSocketConsumer(AsyncWebsocketConsumer):
             project = Project.objects.get(id=self.project_id)
             team = project.team
             return is_specgpt_websockets_feature_flag_active(self.user, team, project)
+        except Project.DoesNotExist:
+            return False
+    
+    @database_sync_to_async
+    def check_adaptive_rag_flag(self):
+        """Check if the adaptive RAG feature flag is active."""
+        try:
+            project = Project.objects.get(id=self.project_id)
+            team = project.team
+            return is_langchain_update_feature_flag_active(self.user, team, project)
         except Project.DoesNotExist:
             return False
 
@@ -339,4 +360,176 @@ class SpecGptWebSocketConsumer(AsyncWebsocketConsumer):
             chat_message.sources = sources
             chat_message.save()
         except Exception:
-            pass 
+            pass
+    
+    async def _run_adaptive_streaming_chain(self, user_input, chat_id, project_version_id, num_documents):
+        """Run adaptive RAG agent with streaming support.
+        
+        Uses LangGraph ReAct agent that decides dynamically whether to retrieve documents.
+        Streams tokens in the same format as the standard chain for frontend compatibility.
+        """
+        deps = await self._prepare_chain_dependencies(user_input, chat_id, project_version_id, num_documents)
+        
+        # Get model metadata and prompt from PromptLayer
+        viewset = ChatViewSet()
+        promptlayer_template = viewset.get_promptlayer_template(settings.SPEC_GPT_PROMPTLAYER_PROMPT_NAME)
+        model_meta = viewset.get_promptlayer_model_metadata(promptlayer_template)
+        
+        # Fetch the adaptive RAG system prompt from PromptLayer
+        try:
+            adaptive_rag_template = viewset.get_promptlayer_template(settings.SPEC_GPT_V2_PROMPTLAYER_PROMPT_NAME)
+            agent_system_message = viewset.get_promptlayer_system_prompt(adaptive_rag_template)
+        except Exception as e:
+            print(f"Failed to retrieve PromptLayer template for adaptive RAG: {str(e)}")
+            raise e
+        
+        # Create retrieval tool with project context
+        # The tool returns both the tool itself and a list that will store retrieved documents
+        retrieved_documents_store = []
+        retrieval_tool, _ = create_retrieval_tool(
+            vectorstore=deps['retriever'].vectorstore,  # Access vectorstore from retriever
+            project_id=self.project_id,
+            project_version_id=project_version_id,
+            max_documents=int(num_documents),
+            retrieved_documents_store=retrieved_documents_store
+        )
+        
+        # Create streaming token handler
+        token_handler = self._StreamingTokenHandler(self.send)
+        
+        # Initialize LLM with streaming
+        llm = ChatOpenAI(
+            temperature=min(model_meta['parameters'].get('temperature', 0.1), 0.3),
+            model_name=model_meta['name'],
+            streaming=True,
+            callbacks=[
+                CustomPromptLayerCallbackHandler(
+                    pl_tags=[
+                        f"environment: {settings.ENVIRONMENT}",
+                        "application: deliverables",
+                        f"user: {self.user.email}",
+                        f"prompt_name: {adaptive_rag_template['prompt_name']}",
+                        f"prompt_commit_message: {adaptive_rag_template['commit_message']}",
+                        f"llm_model_name: {model_meta['name']}",
+                        f"llm_temperature: {model_meta['parameters'].get('temperature', 0.1)}",
+                        "rag_type: adaptive_streaming"
+                    ]
+                ),
+                token_handler,
+            ]
+        )
+        
+        # Create the ReAct agent
+        agent_executor = create_react_agent(
+            llm,
+            tools=[retrieval_tool],
+            state_modifier=agent_system_message
+        )
+        
+        # Get conversation history
+        history_messages = deps['memory'].chat_memory.messages if hasattr(deps['memory'].chat_memory, 'messages') else []
+        
+        # Stream agent execution
+        # LangGraph's astream_events allows us to capture streaming tokens and tool calls
+        config = {"recursion_limit": 4}
+        
+        print(f"\n{'='*80}")
+        print(f"🤖 ADAPTIVE RAG AGENT START (WebSocket)")
+        print(f"{'='*80}")
+        print(f"User query: '{user_input}'")
+        print(f"Chat ID: {chat_id or 'NEW'}")
+        print(f"Max iterations: 4")
+        print(f"{'='*80}\n")
+        
+        try:
+            # Stream agent execution events
+            async for event in agent_executor.astream_events(
+                {"messages": history_messages + [("user", user_input)]},
+                config=config,
+                version="v2"
+            ):
+                # The events include:
+                # - on_chat_model_stream: streaming tokens from LLM
+                # - on_tool_start: tool is being called
+                # - on_tool_end: tool finished execution
+                
+                # Streaming tokens are handled by the callback handler
+                # Tool calls automatically populate retrieved_documents_store
+                pass
+            
+            # Get the final state to extract the answer
+            final_state = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: agent_executor.invoke(
+                    {"messages": history_messages + [("user", user_input)]},
+                    config=config
+                )
+            )
+            
+            # Extract final answer
+            final_message = final_state['messages'][-1]
+            answer = final_message.content if hasattr(final_message, 'content') else str(final_message)
+            
+            # Extract sources from retrieved documents (same format as standard implementation)
+            # Convert metadata to ensure all values are JSON serializable (convert UUIDs, etc to strings)
+            message_sources = []
+            for doc in retrieved_documents_store:
+                serializable_metadata = {}
+                for key, value in doc.metadata.items():
+                    serializable_metadata[key] = str(value) if value is not None else None
+                message_sources.append({
+                    'metadata': serializable_metadata,
+                    'page_content': doc.page_content
+                })
+            
+            # Extract and log the queries used
+            tool_call_messages = [msg for msg in final_state['messages'] if hasattr(msg, 'tool_calls') and msg.tool_calls]
+            queries_used = []
+            for msg in tool_call_messages:
+                for tool_call in msg.tool_calls:
+                    if 'query' in tool_call.get('args', {}):
+                        queries_used.append(tool_call['args']['query'])
+            
+            # Log completion
+            print(f"\n{'='*80}")
+            print(f"✅ ADAPTIVE RAG AGENT COMPLETE (WebSocket)")
+            print(f"{'='*80}")
+            print(f"Tool calls made: {len(tool_call_messages)}")
+            print(f"Total sources retrieved: {len(retrieved_documents_store)}")
+            if queries_used:
+                print(f"Queries used by agent:")
+                for i, query in enumerate(queries_used, 1):
+                    print(f"  {i}. \"{query}\"")
+            if len(retrieved_documents_store) == 0:
+                print(f"ℹ️  Agent decided NOT to retrieve documents (query didn't require project specs)")
+            print(f"Answer length: {len(answer)} characters")
+            print(f"{'='*80}\n")
+            
+            # Save to chat history
+            await self._save_chat_messages_adaptive(deps['memory'].chat_memory, user_input, answer, message_sources)
+            
+            return {
+                'answer': answer,
+                'sources': message_sources,
+                'chat_id': deps['chat'].id,
+            }
+            
+        except Exception as e:
+            print(f"Error in adaptive streaming agent: {str(e)}")
+            # Fallback to standard streaming if adaptive fails
+            return await self._run_streaming_chain(user_input, chat_id, project_version_id, num_documents)
+    
+    @database_sync_to_async
+    def _save_chat_messages_adaptive(self, chat_memory, user_input, answer, sources):
+        """Save chat messages and sources for adaptive agent."""
+        try:
+            # Add user message
+            chat_memory.add_user_message(user_input)
+            # Add AI response
+            chat_memory.add_ai_message(answer)
+            # Attach sources
+            chat_message = chat_memory.message_db_object
+            chat_message.sources = sources
+            chat_message.save()
+        except Exception as e:
+            print(f"Error saving adaptive chat messages: {str(e)}") 

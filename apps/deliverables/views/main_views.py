@@ -10,6 +10,7 @@ import re
 from enum import Enum
 from datetime import datetime
 from datetime import timezone
+from typing import TypedDict, List
 import ast
 import json
 

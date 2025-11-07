@@ -105,3 +105,20 @@ def is_versioning_pdf_comparison_feature_flag_active(user, team, project=None):
     return (settings.VERSIONING_PDF_COMPARISON_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
             settings.VERSIONING_PDF_COMPARISON_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
             (project and settings.VERSIONING_PDF_COMPARISON_FEATURE_FLAG_NAME in get_active_flags_for_project(project)))
+
+def is_langchain_update_feature_flag_active(user, team, project=None):
+    """
+    Check if the langchain_update feature flag is active for the given user/team/project.
+    This flag enables the adaptive RAG implementation using LangGraph agents.
+    
+    Args:
+        user: User object
+        team: Team object
+        project: Optional Project object
+        
+    Returns:
+        bool: True if flag is active, False otherwise
+    """
+    return (settings.LANGCHAIN_UPDATE_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or 
+            settings.LANGCHAIN_UPDATE_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or 
+            (project and settings.LANGCHAIN_UPDATE_FEATURE_FLAG_NAME in get_active_flags_for_project(project)))

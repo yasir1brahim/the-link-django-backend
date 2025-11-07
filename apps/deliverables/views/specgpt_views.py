@@ -4,6 +4,8 @@ import json
 import csv
 import re
 import requests
+import logging
+import traceback
 from uuid import UUID
 from typing import Any, List, Optional
 from enum import Enum
@@ -53,11 +55,15 @@ from apps.deliverables.models import (
     CustomPostgresChatMessageHistory,
     AiGeneratedLog
 )
-from apps.utils.feature_flags import is_specgpt_websockets_feature_flag_active
+from apps.utils.feature_flags import is_specgpt_websockets_feature_flag_active, is_langchain_update_feature_flag_active
 
 from langchain.memory import ConversationBufferMemory
 from apps.deliverables.utils import extract_and_convert_tables_to_csv, extract_first_table_to_csv, merge_tables_from_text, convert_to_markdown_table
 from apps.utils.feature_flags import is_inspection_log_use_data_tables_feature_flag_active
+
+# LangGraph imports for adaptive RAG
+from langgraph.prebuilt import create_react_agent
+from apps.deliverables.tools.adaptive_retrieval import create_retrieval_tool
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
@@ -622,17 +628,57 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         """
         Export AI generated log data to Excel with optional filters, search, and sorting.
         """
+        logger = logging.getLogger('django')
+        log_prefix = f"[AI_LOG_EXPORT][log_id={pk}]"
+        logger.info(f"{log_prefix} Export request started for log_id={pk}, project_id={project_id}")
+        
         try:
             # Get the log object
+            logger.info(f"{log_prefix} Fetching AiGeneratedLog with id={pk}")
             log_obj = AiGeneratedLog.objects.get(id=pk)
+            logger.info(f"{log_prefix} Log object found: log_type={log_obj.log_type}, log_status={log_obj.log_status}")
             
+            # Defensive check: Ensure related objects exist
+            try:
+                project_name = log_obj.project.name if log_obj.project else 'Unknown Project'
+                logger.info(f"{log_prefix} Project: {project_name}")
+            except Exception as e:
+                logger.error(f"{log_prefix} Error accessing project: {str(e)}")
+                return Response(
+                    {'error': 'Project data is missing or corrupted. The project may have been deleted.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                version_number = log_obj.project_version.version_number if log_obj.project_version else 'Unknown Version'
+                logger.info(f"{log_prefix} Project version: {version_number}")
+            except Exception as e:
+                logger.error(f"{log_prefix} Error accessing project_version: {str(e)}")
+                return Response(
+                    {'error': 'Project version data is missing or corrupted. The version may have been deleted.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check log_type is valid
+            if not log_obj.log_type:
+                logger.error(f"{log_prefix} log_type is None or empty")
+                return Response(
+                    {'error': 'Log type is missing'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            logger.info(f"{log_prefix} Checking log_data availability")
             if not log_obj.log_data:
+                logger.warning(f"{log_prefix} No log_data available for log_id={pk}")
                 return Response(
                     {'error': 'No data available for export'}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
+            logger.info(f"{log_prefix} log_data contains {len(log_obj.log_data)} items")
+            
             # Get filter, search, and sort parameters
+            logger.info(f"{log_prefix} Processing filter parameters")
             filter_params = {}
             for param_name, values in request.query_params.items():
                 if param_name.startswith('filter_'):
@@ -650,35 +696,57 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                     
                     filter_params[column_key] = values.split(',')
             
+            logger.info(f"{log_prefix} Filter params: {filter_params}")
+            
             search_term = request.query_params.get('search', '')
             order_by = request.query_params.get('order_by', 'created_at')
             order_direction = request.query_params.get('order', 'desc')
             
+            logger.info(f"{log_prefix} Search term: '{search_term}', order_by: {order_by}, direction: {order_direction}")
+            
             # Use the serializer to process the data with filters, search, and sorting
+            logger.info(f"{log_prefix} Instantiating serializer")
             serializer = AiGeneratedLogSerializer(log_obj, context={'request': request})
             
             # Apply filters, search, and sorting
             filtered_data = log_obj.log_data
+            logger.info(f"{log_prefix} Initial data count: {len(filtered_data)}")
             
             if filter_params:
+                logger.info(f"{log_prefix} Applying filters")
                 filtered_data = serializer.filter_structured_data(filtered_data, filter_params)
+                logger.info(f"{log_prefix} After filtering: {len(filtered_data)} items")
             
             if search_term:
+                logger.info(f"{log_prefix} Applying search")
                 filtered_data = serializer.search_structured_data(filtered_data, search_term)
+                logger.info(f"{log_prefix} After search: {len(filtered_data)} items")
             
             if order_by != 'created_at':
+                logger.info(f"{log_prefix} Applying sorting")
                 filtered_data = serializer.sort_structured_data(filtered_data, order_by, order_direction)
+                logger.info(f"{log_prefix} After sorting: {len(filtered_data)} items")
             
             if not filtered_data:
+                logger.warning(f"{log_prefix} No data after filtering")
                 return Response(
                     {'error': 'No data matches the specified filters'}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
             # Create Excel workbook
+            logger.info(f"{log_prefix} Creating Excel workbook")
             workbook = Workbook()
             worksheet = workbook.active
-            worksheet.title = f"{log_obj.log_type.replace('_', ' ').title()} Export"
+            
+            # Safe title generation
+            try:
+                log_type_title = log_obj.log_type.replace('_', ' ').title() if log_obj.log_type else 'Export'
+                worksheet.title = f"{log_type_title} Export"[:31]  # Excel sheet names max 31 chars
+                logger.info(f"{log_prefix} Worksheet title: {worksheet.title}")
+            except Exception as e:
+                logger.error(f"{log_prefix} Error setting worksheet title: {str(e)}")
+                worksheet.title = "Export"
             
             # Define styles
             header_font = Font(bold=True, color='FFFFFF')
@@ -687,12 +755,14 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             text_alignment = Alignment(wrap_text=True, vertical='center')
             
             # Get headers in the same order as the UI table
-            if log_obj.log_type == 'inspection_log':
+            logger.info(f"{log_prefix} Determining headers based on log_type")
+            # Note: Some log_types may not have the _log suffix, so check for both variants
+            if log_obj.log_type in ['inspection_log', 'inspection']:
                 headers = [
                     'Spec Section #', 'Spec Section Name', 'Inspection Type And Requirements',
                     'Inspection Frequency', 'Responsible Party'
                 ]
-            elif log_obj.log_type == 'owner_deliverables_log':
+            elif log_obj.log_type in ['owner_deliverables_log', 'owner_deliverables']:
                 headers = [
                     'Spec Section #', 'Spec Section Name', 'Deliverable Type',
                     'When Due', 'Responsible Party', 'Exact Requirement Text'
@@ -704,9 +774,16 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 ]
             else:
                 # Fallback to dynamic headers if log type is unknown
-                headers = list(filtered_data[0].keys()) if filtered_data else []
+                # Exclude internal/metadata fields that are not useful in Excel exports
+                excluded_fields = {'pdf_locations', 'metadata', 'internal_id', 'source_data'}
+                all_keys = list(filtered_data[0].keys()) if filtered_data else []
+                headers = [key for key in all_keys if key not in excluded_fields]
+                logger.info(f"{log_prefix} Using dynamic headers (excluded {excluded_fields & set(all_keys)}): {headers}")
+            
+            logger.info(f"{log_prefix} Headers: {headers}")
             
             # Write headers
+            logger.info(f"{log_prefix} Writing headers to Excel")
             for col_idx, header in enumerate(headers, 1):
                 cell = worksheet.cell(row=1, column=col_idx, value=header)
                 cell.font = header_font
@@ -714,13 +791,25 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 cell.alignment = header_alignment
             
             # Write data rows
+            logger.info(f"{log_prefix} Writing {len(filtered_data)} data rows to Excel")
             for row_idx, item in enumerate(filtered_data, 2):
                 for col_idx, header in enumerate(headers, 1):
                     value = item.get(header, '')
+                    
+                    # Convert complex data types (lists, dicts) to JSON strings for Excel compatibility
+                    if isinstance(value, (list, dict)):
+                        try:
+                            value = json.dumps(value, ensure_ascii=False)
+                            logger.debug(f"{log_prefix} Converted complex value to JSON string for row={row_idx}, col={col_idx}")
+                        except (TypeError, ValueError) as e:
+                            logger.warning(f"{log_prefix} Failed to serialize complex value to JSON: {str(e)}")
+                            value = str(value)
+                    
                     cell = worksheet.cell(row=row_idx, column=col_idx, value=value)
                     cell.alignment = text_alignment
             
             # Auto-adjust column widths
+            logger.info(f"{log_prefix} Adjusting column widths")
             for col_num, col in enumerate(worksheet.columns, 1):
                 max_length = 0
                 column = get_column_letter(col_num)
@@ -734,22 +823,35 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 worksheet.column_dimensions[column].width = adjusted_width
             
             # Create response
+            logger.info(f"{log_prefix} Creating HTTP response")
             response = HttpResponse(
                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             )
-            log_type_display = log_obj.log_type.replace('_', ' ').title()
-            response['Content-Disposition'] = f'attachment; filename={log_type_display}_Export.xlsx'
+            
+            # Safe filename generation
+            try:
+                log_type_display = log_obj.log_type.replace('_', ' ').title() if log_obj.log_type else 'Log'
+                response['Content-Disposition'] = f'attachment; filename={log_type_display}_Export.xlsx'
+            except Exception as e:
+                logger.error(f"{log_prefix} Error setting filename: {str(e)}")
+                response['Content-Disposition'] = 'attachment; filename=Export.xlsx'
             
             # Save workbook to response
+            logger.info(f"{log_prefix} Saving workbook to response")
             workbook.save(response)
+            logger.info(f"{log_prefix} Export completed successfully")
             return response
             
         except AiGeneratedLog.DoesNotExist:
+            logger.error(f"{log_prefix} AiGeneratedLog with id={pk} not found")
             return Response(
                 {'error': 'Log not found'}, 
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
+            # Log the full traceback for debugging
+            logger.error(f"{log_prefix} Error exporting data for log_id={pk}: {str(e)}")
+            logger.error(f"{log_prefix} Full traceback:\n{traceback.format_exc()}")
             return Response(
                 {'error': f'Error exporting data: {str(e)}'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -757,6 +859,51 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class CustomPromptLayerCallbackHandler(PromptLayerCallbackHandler):
+    def on_chat_model_start(
+        self,
+        serialized: dict,
+        messages: list,
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Override to handle tool outputs gracefully."""
+        try:
+            # Filter out tool messages and other problematic message types
+            filtered_messages = []
+            for msg in messages:
+                # Skip if it's a tool message (check multiple attributes)
+                if hasattr(msg, 'type') and msg.type == 'tool':
+                    continue
+                if hasattr(msg, '__class__') and 'Tool' in msg.__class__.__name__:
+                    continue
+                    
+                # Skip messages with very long content (like formatted documents from retrieval)
+                if hasattr(msg, 'content'):
+                    content = msg.content
+                    if isinstance(content, str) and len(content) > 5000:
+                        continue
+                    # Skip if content looks like formatted retrieval results
+                    if isinstance(content, str) and '[Section:' in content and '---' in content:
+                        continue
+                
+                # Only include messages with recognized types (human, ai, system)
+                if hasattr(msg, 'type'):
+                    if msg.type not in ['human', 'ai', 'system', 'assistant', 'user']:
+                        continue
+                        
+                filtered_messages.append(msg)
+            
+            # Only call parent if we have valid messages
+            if filtered_messages:
+                super().on_chat_model_start(serialized, filtered_messages, run_id=run_id, parent_run_id=parent_run_id, **kwargs)
+        except Exception as e:
+            # Silently catch any errors to avoid breaking the chain
+            # This is just for logging to PromptLayer, not critical functionality
+            print(f"PromptLayer logging skipped due to message format incompatibility")
+            pass
+    
     def on_llm_end(
         self,
         response: LLMResult,
@@ -1034,6 +1181,175 @@ class ChatViewSet(viewsets.ModelViewSet):
         chat_message.save()
         return results['answer'], message_sources
     
+    def generate_adaptive_chat_response(self, chat, project_id, project_version_id, user_email, user_input, num_documents_to_return):
+        """Generate chat response using LangGraph adaptive RAG agent.
+        
+        This method uses a ReAct agent that can dynamically decide whether and how to
+        retrieve documents from the vector store based on the user's query.
+        
+        Args:
+            chat: Chat object for conversation history
+            project_id: Project ID for filtering documents
+            project_version_id: Project version ID for filtering documents
+            user_email: User email for logging
+            user_input: User's question/input
+            num_documents_to_return: Maximum documents for fallback error handling (not used by agent; agent decides dynamically)
+            
+        Returns:
+            tuple: (answer, message_sources) in the same format as generate_standard_chat_response
+        """
+        try:
+            promptlayer_template = self.get_promptlayer_template(settings.SPEC_GPT_PROMPTLAYER_PROMPT_NAME)
+        except Exception as e:
+            print(f"Failed to retrieve PromptLayer template: {str(e)}")
+            raise e
+
+        # Initialize vector store
+        vectorstore = PineconeVectorStore(
+            pinecone_api_key=settings.PINECONE_API_KEY,
+            index_name=settings.PINECONE_INDEX_NAME,
+            embedding=self.embedding_provider(model=self.embedding_model)
+        )
+
+        # Initialize chat memory
+        chat_memory = CustomPostgresChatMessageHistory(chat)
+        memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            chat_memory=chat_memory,
+            input_key='question', 
+            output_key='answer',
+            return_messages=True,
+        )
+
+        # Get model metadata from PromptLayer
+        promptlayer_model_metadata = self.get_promptlayer_model_metadata(promptlayer_template)
+
+        # Fetch the adaptive RAG system prompt from PromptLayer
+        try:
+            adaptive_rag_template = self.get_promptlayer_template(settings.SPEC_GPT_V2_PROMPTLAYER_PROMPT_NAME)
+            agent_system_message = self.get_promptlayer_system_prompt(adaptive_rag_template)
+        except Exception as e:
+            print(f"Failed to retrieve PromptLayer template for adaptive RAG: {str(e)}")
+            raise e
+
+        # Create retrieval tool with project context
+        # The tool returns both the tool itself and a list that will store retrieved documents
+        retrieved_documents_store = []
+        retrieval_tool, _ = create_retrieval_tool(
+            vectorstore=vectorstore,
+            project_id=project_id,
+            project_version_id=project_version_id,
+            retrieved_documents_store=retrieved_documents_store
+        )
+
+        # Initialize LLM with PromptLayer callback
+        llm = ChatOpenAI(
+            temperature=promptlayer_model_metadata['parameters']['temperature'],
+            model_name=promptlayer_model_metadata['name'],
+            callbacks=[
+                CustomPromptLayerCallbackHandler(
+                    pl_tags=[
+                        f"environment: {settings.ENVIRONMENT}",
+                        f"application: deliverables",
+                        f"user: {user_email}",
+                        f"prompt_name: {adaptive_rag_template['prompt_name']}",
+                        f"prompt_commit_message: {adaptive_rag_template['commit_message']}",
+                        f"llm_model_name: {promptlayer_model_metadata['name']}",
+                        f"llm_temperature: {promptlayer_model_metadata['parameters']['temperature']}",
+                        "rag_type: adaptive"
+                    ]
+                )
+            ]
+        )
+
+        # Create the ReAct agent with recursion limit
+        agent_executor = create_react_agent(
+            llm,
+            tools=[retrieval_tool],
+            state_modifier=agent_system_message
+        )
+
+        # Get conversation history
+        history_messages = memory.chat_memory.messages if hasattr(memory.chat_memory, 'messages') else []
+
+        # Invoke the agent with conversation history
+        # The agent will decide whether to use the retrieval tool
+        config = {"recursion_limit": 4}
+        
+        print(f"\n{'='*80}")
+        print(f"🤖 ADAPTIVE RAG AGENT START")
+        print(f"{'='*80}")
+        print(f"User query: '{user_input}'")
+        print(f"Chat ID: {chat.id}")
+        print(f"Max iterations: 4")
+        print(f"{'='*80}\n")
+        
+        try:
+            result = agent_executor.invoke(
+                {"messages": history_messages + [("user", user_input)]},
+                config=config
+            )
+            
+            # Extract the final answer from agent result
+            # The result contains a 'messages' list with the conversation
+            final_message = result['messages'][-1]
+            answer = final_message.content if hasattr(final_message, 'content') else str(final_message)
+            
+            # Extract sources from retrieved documents (same format as standard implementation)
+            # Convert metadata to ensure all values are JSON serializable (convert UUIDs, etc to strings)
+            message_sources = []
+            for doc in retrieved_documents_store:
+                serializable_metadata = {}
+                for key, value in doc.metadata.items():
+                    serializable_metadata[key] = str(value) if value is not None else None
+                message_sources.append({
+                    'metadata': serializable_metadata,
+                    'page_content': doc.page_content
+                })
+            
+            # Extract and log the queries used
+            tool_call_messages = [msg for msg in result['messages'] if hasattr(msg, 'tool_calls') and msg.tool_calls]
+            queries_used = []
+            for msg in tool_call_messages:
+                for tool_call in msg.tool_calls:
+                    if 'query' in tool_call.get('args', {}):
+                        queries_used.append(tool_call['args']['query'])
+            
+            # Log completion
+            print(f"\n{'='*80}")
+            print(f"✅ ADAPTIVE RAG AGENT COMPLETE")
+            print(f"{'='*80}")
+            print(f"Tool calls made: {len(tool_call_messages)}")
+            print(f"Total sources retrieved: {len(retrieved_documents_store)}")
+            if queries_used:
+                print(f"Queries used by agent:")
+                for i, query in enumerate(queries_used, 1):
+                    print(f"  {i}. \"{query}\"")
+            if len(retrieved_documents_store) == 0:
+                print(f"ℹ️  Agent decided NOT to retrieve documents (query didn't require project specs)")
+            print(f"Answer length: {len(answer)} characters")
+            print(f"{'='*80}\n")
+            
+            # Save messages to chat history
+            # Add user message
+            chat_memory.add_user_message(user_input)
+            
+            # Add AI response
+            chat_memory.add_ai_message(answer)
+            
+            # Attach sources to the latest AI message
+            latest_ai_message = chat_memory.message_db_object
+            latest_ai_message.sources = message_sources
+            latest_ai_message.save()
+            
+            return answer, message_sources
+            
+        except Exception as e:
+            print(f"Error in adaptive agent execution: {str(e)}")
+            # Fallback to standard response if agent fails
+            return self.generate_standard_chat_response(
+                chat, project_id, project_version_id, user_email, user_input, num_documents_to_return
+            )
 
     class InspectionLogRow(BaseModel):
         spec_section_number: str = Field(alias="Spec Section #", description="The section this item was found in")
@@ -1448,7 +1764,19 @@ class ChatViewSet(viewsets.ModelViewSet):
             })
 
         if response_type == self.RESPONSE_TYPES.STANDARD:
-            answer, message_sources = self.generate_standard_chat_response(chat, project_id, project_version_id, request.user.email, user_input, num_documents_to_return)
+            # Check if adaptive RAG feature flag is active
+            use_adaptive_rag = is_langchain_update_feature_flag_active(request.user, team, project)
+            
+            if use_adaptive_rag:
+                # Use the new adaptive RAG implementation
+                answer, message_sources = self.generate_adaptive_chat_response(
+                    chat, project_id, project_version_id, request.user.email, user_input, num_documents_to_return
+                )
+            else:
+                # Use the standard RAG implementation
+                answer, message_sources = self.generate_standard_chat_response(
+                    chat, project_id, project_version_id, request.user.email, user_input, num_documents_to_return
+                )
         else:
             return Response(status=status.HTTP_400_BAD_REQUEST, data={
                 'error': 'Invalid response type'

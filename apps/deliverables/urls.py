@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from . import views
 from .views.spec_centric_views import SpecCentricViewSet
 from .views import bulk_operations
+from .views.pdf_annotation_views import PDFAnnotationViewSet
 
 
 app_name = "deliverables"
@@ -59,6 +60,12 @@ single_project_router.register(
     basename='spec-section',
 )
 
+#annotation view
+single_project_router.register(
+    'pdf-annotations',
+    PDFAnnotationViewSet,
+    basename="pdf-annotations"
+)
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -103,6 +110,7 @@ urlpatterns = [
     path('documents/download-multiple/', views.bulk_download_documents, name='download-multiple-documents'),
     path('documents/reprocess-multiple/', bulk_operations.bulk_reprocess_documents, name='reprocess-multiple-documents'),
     path('documents/delete-multiple/', bulk_operations.bulk_delete_documents, name='delete-multiple-documents'),
+    path('projects/<int:project_id>/', include(single_project_router.urls)),
 ]
 
 
