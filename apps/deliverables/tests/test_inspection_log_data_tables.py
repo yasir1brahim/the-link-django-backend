@@ -14,7 +14,7 @@ from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
 
 from apps.deliverables.models import (
-    Project, ProjectVersion, AiGeneratedLog, ProjectMembership
+    Project, ProjectVersion, AiGeneratedLog, ProjectMembership, ExtractedData
 )
 from apps.teams.models import Team, Membership
 from apps.utils.feature_flags import is_inspection_log_use_data_tables_feature_flag_active
@@ -22,6 +22,51 @@ from apps.deliverables.serializers.specgpt import AiGeneratedLogSerializer
 from apps.deliverables.views.specgpt_views import AiGeneratedLogViewSet
 
 User = get_user_model()
+
+
+def create_extracted_items_from_rows(log, rows):
+    """Helper to populate ExtractedData records from structured row dictionaries."""
+    text_field_map = {
+        'inspection_log': 'Inspection Type And Requirements',
+        'owner_deliverables_log': 'Exact Requirement Text',
+        'qa_planner': 'Requirement Text',
+    }
+    text_field = text_field_map.get(log.log_type)
+
+    created_items = []
+    for row in rows:
+        metadata = {
+            'original_text_key': text_field,
+            'raw_item': row,
+        }
+
+        if log.log_type == 'inspection_log':
+            metadata['inspection_frequency'] = row.get('Inspection Frequency')
+            metadata['when_due'] = row.get('Inspection Frequency')
+        elif log.log_type == 'owner_deliverables_log':
+            metadata['deliverable_type'] = row.get('Deliverable Type')
+            metadata['when_due'] = row.get('When Due')
+        elif log.log_type == 'qa_planner':
+            metadata['when_due'] = row.get('When Due')
+
+        item = ExtractedData.objects.create(
+            ai_generated_log=log,
+            project=log.project,
+            project_version=log.project_version,
+            extraction_type=log.log_type,
+            source='AI',
+            spec_section_number=row.get('Spec Section #', ''),
+            spec_section_name=row.get('Spec Section Name', ''),
+            requirement_text=row.get(text_field, str(row)) if text_field else str(row),
+            responsible_party=row.get('Responsible Party'),
+            item_type=row.get('item_type'),
+            paragraph_number=row.get('Paragraph Number'),
+            pdf_locations=row.get('pdf_locations'),
+            metadata={k: v for k, v in metadata.items() if v is not None},
+        )
+        created_items.append(item)
+
+    return created_items
 
 
 class FeatureFlagTests(TestCase):
@@ -390,6 +435,43 @@ class AiGeneratedLogSerializerTests(TestCase):
         self.assertEqual(sorted_data[0]['Spec Section #'], '01 1000')  # Lower number first
         self.assertEqual(sorted_data[1]['Spec Section #'], '02 2000')  # Higher number second
 
+    def test_serializer_uses_extracted_data_when_log_data_missing(self):
+        """Serializer should derive rows from ExtractedData when log_data is None."""
+        self.log.log_data = None
+        self.log.save(update_fields=['log_data'])
+        create_extracted_items_from_rows(self.log, self.structured_data)
+
+        mock_request = MagicMock()
+        mock_request.query_params = {}
+
+        serializer = AiGeneratedLogSerializer(
+            self.log,
+            context={'request': mock_request}
+        )
+        data = serializer.data
+
+        self.assertEqual(data['log_data'], self.structured_data)
+
+    @patch('apps.deliverables.serializers.specgpt.is_inspection_log_use_data_tables_feature_flag_active')
+    def test_data_format_structured_with_extracted_data_only(self, mock_flag):
+        """Feature flag should consider ExtractedData rows even without log_data."""
+        mock_flag.return_value = True
+        self.log.log_data = None
+        self.log.save(update_fields=['log_data'])
+        create_extracted_items_from_rows(self.log, self.structured_data)
+
+        mock_request = MagicMock()
+        mock_request.user = self.user
+        mock_request.query_params = {}
+
+        serializer = AiGeneratedLogSerializer(
+            self.log,
+            context={'request': mock_request}
+        )
+        data = serializer.data
+
+        self.assertEqual(data['data_format'], 'structured')
+
 
 class AiGeneratedLogViewSetTests(APITestCase):
     """Test AiGeneratedLogViewSet functionality."""
@@ -569,6 +651,52 @@ class AiGeneratedLogViewSetTests(APITestCase):
         
         # Should default to created_at only
         self.assertEqual(valid_fields, ['created_at'])
+
+    def test_get_log_detail_uses_extracted_data_when_log_data_missing(self):
+        """Detail endpoint should return ExtractedData rows when log_data is None."""
+        log_without_json = AiGeneratedLog.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            log_type='inspection_log',
+            log_status='SUCCESS',
+            log_table='# Test Markdown Table',
+            log_data=None
+        )
+        create_extracted_items_from_rows(log_without_json, self.structured_data)
+
+        url = reverse('ai-generated-log-detail', kwargs={
+            'project_id': self.project.id,
+            'pk': log_without_json.id
+        })
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['log_data'], self.structured_data)
+
+    def test_filter_values_uses_extracted_data(self):
+        """Filter values endpoint should compute options from ExtractedData."""
+        log_without_json = AiGeneratedLog.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            log_type='inspection_log',
+            log_status='SUCCESS',
+            log_table='# Test Markdown Table',
+            log_data=None
+        )
+        create_extracted_items_from_rows(log_without_json, self.structured_data)
+
+        url = reverse('ai-generated-log-filter-values', kwargs={
+            'project_id': self.project.id,
+            'pk': log_without_json.id
+        })
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        filter_values = response.data['filter_values']
+        self.assertEqual(filter_values.get('Spec Section #'), ['01 1000', '02 2000'])
+        self.assertEqual(filter_values.get('Responsible Party'), ['Architect', 'Contractor'])
 
 
 class IntegrationTests(TestCase):

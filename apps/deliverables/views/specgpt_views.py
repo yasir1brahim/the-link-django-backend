@@ -629,7 +629,7 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         # Apply sorting
         queryset = self.apply_sorting(queryset)
         
-        return queryset
+        return queryset.prefetch_related('extracted_items')
     
     def apply_sorting(self, queryset):
         """
@@ -670,18 +670,21 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             # to avoid project_id validation for this specific action
             log_obj = AiGeneratedLog.objects.get(id=pk)
             
-            if not log_obj.log_data:
+            serializer = self.get_serializer(log_obj)
+            structured_data = serializer.build_structured_rows(log_obj)
+
+            if not structured_data:
                 return Response({'filter_values': {}})
-            
+
             # Get filterable columns based on log type
             filterable_columns = self.get_filterable_columns(log_obj.log_type)
-            
+
             filter_values = {}
-            
+
             for column_key in filterable_columns:
                 # Extract unique values for this column
                 values = set()
-                for item in log_obj.log_data:
+                for item in structured_data:
                     value = item.get(column_key)
                     if value is not None and value != '':
                         values.add(str(value))
@@ -757,12 +760,6 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             # Get the log object
             log_obj = AiGeneratedLog.objects.get(id=pk)
             
-            if not log_obj.log_data:
-                return Response(
-                    {'error': 'No data available for export'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
             # Get filter, search, and sort parameters
             filter_params = {}
             for param_name, values in request.query_params.items():
@@ -787,9 +784,16 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             
             # Use the serializer to process the data with filters, search, and sorting
             serializer = AiGeneratedLogSerializer(log_obj, context={'request': request})
+            structured_data = serializer.build_structured_rows(log_obj)
+
+            if not structured_data:
+                return Response(
+                    {'error': 'No data available for export'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             
             # Apply filters, search, and sorting
-            filtered_data = log_obj.log_data
+            filtered_data = structured_data
             
             if filter_params:
                 filtered_data = serializer.filter_structured_data(filtered_data, filter_params)

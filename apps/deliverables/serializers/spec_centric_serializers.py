@@ -1,3 +1,4 @@
+from django.db.models import F, OuterRef, Q, Subquery
 from rest_framework import serializers
 from ..models import (
     SpecSection,
@@ -158,10 +159,20 @@ class SpecSectionContentSerializer(serializers.Serializer):
         if not spec_section_id:
             return []
 
-        # Query ExtractedData directly using spec_section FK
+        # Subquery to fetch the latest AI log per extraction type for this spec section
+        latest_log_subquery = AiGeneratedLog.objects.filter(
+            extracted_items__spec_section_id=spec_section_id,
+            log_type=OuterRef('extraction_type'),
+        ).order_by('-created_at').values('id')[:1]
+
+        # Query ExtractedData directly using spec_section FK and limit AI items to the latest logs
         extracted_items = ExtractedData.objects.filter(
             spec_section_id=spec_section_id,
             pdf_locations__isnull=False  # Only items with PDF locations
+        ).annotate(
+            latest_log_id=Subquery(latest_log_subquery)
+        ).filter(
+            Q(ai_generated_log__isnull=True) | Q(ai_generated_log_id=F('latest_log_id'))
         ).select_related('created_by')
 
         # Format results

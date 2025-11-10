@@ -5,16 +5,20 @@ from rest_framework import status
 from django.contrib.auth import get_user_model
 from apps.teams.models import Team, Flag
 from apps.deliverables.models import (
-    Project, 
-    ProjectVersion, 
-    SpecSection, 
+    Project,
+    ProjectVersion,
+    SpecSection,
     SubmittalItem,
     MasterFormatSection,
     UploadedFile,
-    ProjectMembership
+    ProjectMembership,
+    AiGeneratedLog,
+    ExtractedData,
+    ExtractionSource,
 )
 from apps.deliverables.constants import ROLE_PROJECT_MEMBER
 from apps.utils.feature_flags import is_spec_centered_view_feature_flag_active
+from apps.deliverables.serializers.spec_centric_serializers import SpecSectionContentSerializer
 
 User = get_user_model()
 
@@ -216,3 +220,150 @@ class SpecCentricViewTests(APITestCase):
         response = self.client.get(url)
         
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class SpecSectionContentSerializerTests(TestCase):
+    """Unit tests for SpecSectionContentSerializer data filtering."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email='serializer@example.com',
+            password='testpass123',
+            first_name='Serializer',
+            last_name='User'
+        )
+
+        self.team = Team.objects.create(
+            name='Serializer Team',
+            created_by=self.user
+        )
+
+        self.project = Project.objects.create(
+            name='Serializer Project',
+            project_number='SP-001',
+            team=self.team,
+            created_by=self.user
+        )
+
+        self.project_version = ProjectVersion.objects.create(
+            project=self.project,
+            version_number=1,
+            version_name='Version 1',
+            created_by=self.user
+        )
+
+        self.masterformat_section = MasterFormatSection.objects.create(
+            masterformat_number='01 00 00',
+            masterformat_description='General Requirements'
+        )
+
+        self.uploaded_file = UploadedFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            uploaded_by=self.user,
+            document_path='specs/test.pdf',
+            parsed_document_path='specs/test.pdf',
+            name='test.pdf',
+            md5='dummy-md5',
+            processing_status='PROCESSED',
+            file_s3_key='specs/test.pdf'
+        )
+
+        self.spec_section = SpecSection.objects.create(
+            masterformat_section=self.masterformat_section,
+            document=self.uploaded_file,
+            custom_section_title='General Requirements',
+            processing_status='PROCESSED',
+            processing_method=SpecSection.ProcessingMethod.REGEX_SUCCESS
+        )
+
+        self.serializer = SpecSectionContentSerializer()
+
+    def test_get_ai_log_highlights_only_returns_latest_ai_log_per_type(self):
+        """Ensure only the most recent AI log per type contributes highlights."""
+        older_log = AiGeneratedLog.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            log_type='qa_planner',
+            log_status='COMPLETED',
+            created_by=self.user
+        )
+
+        newer_log = AiGeneratedLog.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            log_type='qa_planner',
+            log_status='COMPLETED',
+            created_by=self.user
+        )
+
+        ExtractedData.objects.create(
+            ai_generated_log=older_log,
+            project=self.project,
+            project_version=self.project_version,
+            spec_section=self.spec_section,
+            source=ExtractionSource.AI,
+            extraction_type='qa_planner',
+            item_type='inspections',
+            spec_section_number='01 00 00',
+            spec_section_name='General Requirements',
+            requirement_text='Older AI requirement',
+            pdf_locations=[{
+                'page_no': 1,
+                'x': 10,
+                'y': 20,
+                'width': 100,
+                'height': 20
+            }],
+            metadata={}
+        )
+
+        ExtractedData.objects.create(
+            ai_generated_log=newer_log,
+            project=self.project,
+            project_version=self.project_version,
+            spec_section=self.spec_section,
+            source=ExtractionSource.AI,
+            extraction_type='qa_planner',
+            item_type='inspections',
+            spec_section_number='01 00 00',
+            spec_section_name='General Requirements',
+            requirement_text='Newer AI requirement',
+            pdf_locations=[{
+                'page_no': 1,
+                'x': 15,
+                'y': 25,
+                'width': 110,
+                'height': 25
+            }],
+            metadata={}
+        )
+
+        ExtractedData.objects.create(
+            ai_generated_log=None,
+            project=self.project,
+            project_version=self.project_version,
+            spec_section=self.spec_section,
+            source=ExtractionSource.HUMAN,
+            extraction_type='manual_highlight',
+            item_type=None,
+            spec_section_number='01 00 00',
+            spec_section_name='General Requirements',
+            requirement_text='Manual requirement',
+            pdf_locations=[{
+                'page_no': 2,
+                'x': 5,
+                'y': 30,
+                'width': 120,
+                'height': 18
+            }],
+            metadata={}
+        )
+
+        highlights = self.serializer.get_ai_log_highlights(self.spec_section)
+
+        self.assertEqual(len(highlights), 2)
+        requirement_texts = {item['requirement_text'] for item in highlights}
+        self.assertIn('Newer AI requirement', requirement_texts)
+        self.assertIn('Manual requirement', requirement_texts)
+        self.assertNotIn('Older AI requirement', requirement_texts)
