@@ -65,14 +65,11 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         ).select_related('created_by', 'spec_section__masterformat_section')
 
         human_items = list(human_items_qs)
-        print("human_items", human_items)
 
         if extracted_items or human_items:
             # Merge and remove duplicates while preserving consistent ordering
             combined_items = []
             seen_ids = set()
-            print("extracted_items length", len(extracted_items))
-            print("human_items length", len(human_items))
 
             for item in extracted_items + human_items:
                 if item.id in seen_ids:
@@ -80,11 +77,7 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
                 seen_ids.add(item.id)
                 combined_items.append(item)
 
-            # Sort by spec section then id for deterministic output
-            combined_items.sort(key=lambda item: ((item.spec_section_number or '').lower(), item.id))
-
             list_to_return = [self._format_extracted_item(item) for item in combined_items]
-            print("list_to_return length", len(list_to_return))
             return list_to_return
 
         original_data = instance.log_data
@@ -232,15 +225,11 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
                 filtered_data = filtered_data
             
             # Get sorting parameters if available
-            sort_field = getattr(request, 'sort_field', None)
-            sort_direction = getattr(request, 'sort_direction', 'desc')
+            sort_field = getattr(request, 'sort_field', 'spec_section_number')
+            sort_direction = getattr(request, 'sort_direction', 'asc')
             
             # Apply sorting if sorting parameters are provided
-            if sort_field and sort_field != 'created_at':
-                sorted_data = self.sort_structured_data(filtered_data, sort_field, sort_direction)
-            else:
-                # No sorting - use filtered data order
-                sorted_data = filtered_data
+            sorted_data = self.sort_structured_data(filtered_data, sort_field, sort_direction)
             
             # Check if pagination parameters are present
             page = None
@@ -337,6 +326,7 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         """
         Sort structured data by the specified field and direction.
         """
+        print("sort_structured_data", sort_field, sort_direction)
         try:
             # Map field names to the actual keys in the structured data
             field_mapping = {

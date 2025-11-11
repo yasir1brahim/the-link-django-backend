@@ -646,20 +646,13 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         For structured data, sorting is done in Python after retrieval.
         """
         # Get sorting parameters
-        order_by = self.request.query_params.get('order_by', 'created_at')
-        order_direction = self.request.query_params.get('order', 'desc')
+        order_by = self.request.query_params.get('order_by', 'spec_section_number')
+        order_direction = self.request.query_params.get('order', 'asc')
         
         # Validate sorting parameters
         valid_sort_fields = self.get_valid_sort_fields()
         if order_by not in valid_sort_fields:
-            order_by = 'created_at'  # Default
-        
-        # Apply database sorting for non-structured fields
-        if order_by == 'created_at':
-            if order_direction == 'desc':
-                return queryset.order_by('-created_at')
-            else:
-                return queryset.order_by('created_at')
+            order_by = 'spec_section_number'  # Default
         
         # For structured data fields, we'll sort in Python after retrieval
         # Store sorting info in request for use in serializer
@@ -791,8 +784,8 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                     filter_params[column_key] = values.split(',')
             
             search_term = request.query_params.get('search', '')
-            order_by = request.query_params.get('order_by', 'created_at')
-            order_direction = request.query_params.get('order', 'desc')
+            order_by = request.query_params.get('order_by', 'spec_section_number')
+            order_direction = request.query_params.get('order', 'asc')
             
             # Use the serializer to process the data with filters, search, and sorting
             serializer = AiGeneratedLogSerializer(log_obj, context={'request': request})
@@ -813,8 +806,7 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             if search_term:
                 filtered_data = serializer.search_structured_data(filtered_data, search_term)
             
-            if order_by != 'created_at':
-                filtered_data = serializer.sort_structured_data(filtered_data, order_by, order_direction)
+            filtered_data = serializer.sort_structured_data(filtered_data, order_by, order_direction)
             
             if not filtered_data:
                 return Response(
