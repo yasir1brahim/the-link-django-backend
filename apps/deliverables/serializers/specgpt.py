@@ -1,5 +1,13 @@
+from collections.abc import Mapping
+
 from rest_framework import serializers
-from apps.deliverables.models import Chat, ChatMessage, AiGeneratedLog
+from apps.deliverables.models import (
+    Chat,
+    ChatMessage,
+    AiGeneratedLog,
+    ExtractedData,
+    ExtractionSource,
+)
 from apps.utils.feature_flags import is_inspection_log_use_data_tables_feature_flag_active
 
 
@@ -37,6 +45,99 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'project_name', 'project_version_number', 'data_format']
     
+    def _coerce_query_params(self, request):
+        query_params = getattr(request, 'query_params', None)
+        if isinstance(query_params, Mapping):
+            return query_params
+        return {}
+
+    def build_structured_rows(self, instance):
+        """Return structured rows for the given log using ExtractedData when available."""
+        extracted_items = list(getattr(instance, 'extracted_items', []).all()) if hasattr(instance, 'extracted_items') else []
+
+        # Always include human-created highlights that match the same context
+        human_items_qs = ExtractedData.objects.filter(
+            ai_generated_log__isnull=True,
+            project=instance.project,
+            project_version=instance.project_version,
+            extraction_type=instance.log_type,
+            source=ExtractionSource.HUMAN,
+        ).select_related('created_by', 'spec_section__masterformat_section')
+
+        human_items = list(human_items_qs)
+
+        if extracted_items or human_items:
+            # Merge and remove duplicates while preserving consistent ordering
+            combined_items = []
+            seen_ids = set()
+
+            for item in extracted_items + human_items:
+                if item.id in seen_ids:
+                    continue
+                seen_ids.add(item.id)
+                combined_items.append(item)
+
+            list_to_return = [self._format_extracted_item(item) for item in combined_items]
+            return list_to_return
+
+        original_data = instance.log_data
+        if isinstance(original_data, list):
+            return [dict(row) for row in original_data]
+
+        return original_data
+
+    def _format_extracted_item(self, item: ExtractedData):
+        """Convert an ExtractedData instance into the legacy structured row format."""
+        metadata = item.metadata or {}
+        row = dict(metadata.get('raw_item', {}))
+        row['extracted_item_id'] = item.id
+        row['source'] = item.source
+        # Determine spec section details with fallbacks
+        spec_section_number = row.get('Spec Section #') or item.spec_section_number
+        spec_section_name = row.get('Spec Section Name') or item.spec_section_name
+
+        spec_section = getattr(item, 'spec_section', None)
+        if spec_section:
+            masterformat_section = getattr(spec_section, 'masterformat_section', None)
+            if masterformat_section and getattr(masterformat_section, 'masterformat_number', None):
+                spec_section_number = masterformat_section.masterformat_number
+
+            if getattr(spec_section, 'custom_section_title', None):
+                spec_section_name = spec_section.custom_section_title
+            elif masterformat_section and getattr(masterformat_section, 'masterformat_description', None):
+                spec_section_name = masterformat_section.masterformat_description
+
+        row['Spec Section #'] = spec_section_number
+        row['Spec Section Name'] = spec_section_name
+
+        if item.responsible_party is not None or 'Responsible Party' in row:
+            row['Responsible Party'] = item.responsible_party
+
+        if item.pdf_locations is not None or 'pdf_locations' in row:
+            row['pdf_locations'] = item.pdf_locations
+
+        if item.extraction_type == 'inspection_log':
+            row['Inspection Type And Requirements'] = item.requirement_text
+            if metadata.get('inspection_frequency') is not None or 'Inspection Frequency' in row:
+                row['Inspection Frequency'] = metadata.get('inspection_frequency')
+        elif item.extraction_type == 'owner_deliverables_log':
+            row['Exact Requirement Text'] = item.requirement_text
+            if metadata.get('deliverable_type') is not None or 'Deliverable Type' in row:
+                row['Deliverable Type'] = metadata.get('deliverable_type')
+            if metadata.get('when_due') is not None or 'When Due' in row:
+                row['When Due'] = metadata.get('when_due')
+        elif item.extraction_type == 'qa_planner':
+            row['Requirement Text'] = item.requirement_text
+            row['item_type'] = item.item_type
+            row['Paragraph Number'] = item.paragraph_number
+            if metadata.get('when_due') is not None or 'When Due' in row:
+                row['When Due'] = metadata.get('when_due')
+        else:
+            # Generic fallback for other extraction types
+            row.setdefault('Requirement Text', item.requirement_text)
+
+        return row
+
     def get_data_format(self, obj):
         """Return appropriate data format based on feature flag status."""
         request = self.context.get('request')
@@ -52,8 +153,11 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
             # Check if feature flag is active
             use_data_tables = is_inspection_log_use_data_tables_feature_flag_active(user, team, project)
             
+            structured_rows = self.build_structured_rows(obj)
+            has_structured_data = bool(structured_rows)
+
             # Return structured format if flag is active and structured data is available
-            if use_data_tables and obj.log_data:
+            if use_data_tables and has_structured_data:
                 return 'structured'
             else:
                 return 'markdown'
@@ -67,40 +171,52 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         Override to_representation to apply sorting and pagination to structured data.
         """
         data = super().to_representation(instance)
-        
-        # Apply filtering, search, sorting and pagination to log_data if it exists
+
+        structured_rows = self.build_structured_rows(instance)
+        data['log_data'] = structured_rows
+
+        # Apply filtering, search, sorting and pagination to structured rows if they exist
         request = self.context.get('request')
-        if data.get('log_data') and request:
+        if structured_rows and request:
+            query_params = self._coerce_query_params(request)
+
             # Get filter parameters if available
             filter_params = {}
-            if hasattr(request, 'query_params'):
-                for param_name, param_value in request.query_params.items():
-                    if param_name.startswith('filter_'):
-                        # Extract column name from parameter name and handle multiple underscores
-                        raw_key = param_name.replace('filter_', '')
-                        # Replace underscores with spaces, but handle multiple consecutive underscores
-                        column_key = ' '.join(part for part in raw_key.split('_') if part).title()
-                        
-                        # Map specific parameter names to correct column keys
-                        if column_key == 'Spec Section':  # This covers both single and double underscore cases
-                            column_key = 'Spec Section #'
-                        elif column_key == 'Item Type':
-                            column_key = 'item_type'
-                        elif column_key == 'Responsible Party':
-                            column_key = 'Responsible Party'
-                        
-                        filter_params[column_key] = param_value.split(',') if param_value else []
-            
+            for param_name, param_value in query_params.items():
+                if not isinstance(param_name, str) or not param_name.startswith('filter_'):
+                    continue
+
+                # Extract column name from parameter name and handle multiple underscores
+                raw_key = param_name.replace('filter_', '')
+                column_key = ' '.join(part for part in raw_key.split('_') if part).title()
+
+                # Map specific parameter names to correct column keys
+                if column_key == 'Spec Section':  # This covers both single and double underscore cases
+                    column_key = 'Spec Section #'
+                elif column_key == 'Item Type':
+                    column_key = 'item_type'
+                elif column_key == 'Responsible Party':
+                    column_key = 'Responsible Party'
+
+                if isinstance(param_value, str):
+                    values = [value for value in param_value.split(',') if value]
+                elif isinstance(param_value, (list, tuple, set)):
+                    values = [str(value) for value in param_value if value is not None]
+                else:
+                    values = []
+
+                filter_params[column_key] = values
+
             # Apply column-based filtering if filter parameters are provided
             if filter_params:
-                filtered_data = self.filter_structured_data(data['log_data'], filter_params)
+                filtered_data = self.filter_structured_data(structured_rows, filter_params)
             else:
-                filtered_data = data['log_data']
+                filtered_data = structured_rows
             
             # Get search parameter if available
             search_term = getattr(request, 'search_term', None)
-            if not search_term and hasattr(request, 'query_params'):
-                search_term = request.query_params.get('search', '')
+            if not search_term and query_params:
+                search_term = query_params.get('search', '')
             
             # Apply search filtering if search term is provided
             if search_term:
@@ -109,22 +225,18 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
                 filtered_data = filtered_data
             
             # Get sorting parameters if available
-            sort_field = getattr(request, 'sort_field', None)
-            sort_direction = getattr(request, 'sort_direction', 'desc')
+            sort_field = getattr(request, 'sort_field', 'spec_section_number')
+            sort_direction = getattr(request, 'sort_direction', 'asc')
             
             # Apply sorting if sorting parameters are provided
-            if sort_field and sort_field != 'created_at':
-                sorted_data = self.sort_structured_data(filtered_data, sort_field, sort_direction)
-            else:
-                # No sorting - use filtered data order
-                sorted_data = filtered_data
+            sorted_data = self.sort_structured_data(filtered_data, sort_field, sort_direction)
             
             # Check if pagination parameters are present
             page = None
             page_size = None
-            if hasattr(request, 'query_params') and request.query_params:
-                page = request.query_params.get('page')
-                page_size = request.query_params.get('page_size')
+            if query_params:
+                page = query_params.get('page')
+                page_size = query_params.get('page_size')
             
             # Always apply pagination for structured data to provide pagination info
             # Use default page=1 and page_size=50 if not specified
@@ -145,9 +257,21 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         Apply pagination to structured data.
         """
         try:
+            query_params = self._coerce_query_params(request)
+
             # Get pagination parameters, use defaults if not provided
-            page = int(request.query_params.get('page', default_page))
-            page_size = int(request.query_params.get('page_size', default_page_size))
+            raw_page = query_params.get('page', default_page)
+            raw_page_size = query_params.get('page_size', default_page_size)
+
+            try:
+                page = int(raw_page)
+            except (TypeError, ValueError):
+                page = int(default_page)
+
+            try:
+                page_size = int(raw_page_size)
+            except (TypeError, ValueError):
+                page_size = int(default_page_size)
             
             # Validate parameters
             page = max(1, page)
@@ -202,6 +326,7 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         """
         Sort structured data by the specified field and direction.
         """
+        print("sort_structured_data", sort_field, sort_direction)
         try:
             # Map field names to the actual keys in the structured data
             field_mapping = {
