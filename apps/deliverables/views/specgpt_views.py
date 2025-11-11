@@ -802,8 +802,6 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-<<<<<<< HEAD
-=======
             logger.info(f"{log_prefix} Checking log_data availability")
             if not log_obj.log_data:
                 logger.warning(f"{log_prefix} No log_data available for log_id={pk}")
@@ -814,7 +812,6 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             
             logger.info(f"{log_prefix} log_data contains {len(log_obj.log_data)} items")
             
->>>>>>> develop
             # Get filter, search, and sort parameters
             logger.info(f"{log_prefix} Processing filter parameters")
             filter_params = {}
@@ -854,12 +851,8 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 )
             
             # Apply filters, search, and sorting
-<<<<<<< HEAD
             filtered_data = structured_data
-=======
-            filtered_data = log_obj.log_data
             logger.info(f"{log_prefix} Initial data count: {len(filtered_data)}")
->>>>>>> develop
             
             if filter_params:
                 logger.info(f"{log_prefix} Applying filters")
@@ -871,14 +864,7 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 filtered_data = serializer.search_structured_data(filtered_data, search_term)
                 logger.info(f"{log_prefix} After search: {len(filtered_data)} items")
             
-<<<<<<< HEAD
             filtered_data = serializer.sort_structured_data(filtered_data, order_by, order_direction)
-=======
-            if order_by != 'created_at':
-                logger.info(f"{log_prefix} Applying sorting")
-                filtered_data = serializer.sort_structured_data(filtered_data, order_by, order_direction)
-                logger.info(f"{log_prefix} After sorting: {len(filtered_data)} items")
->>>>>>> develop
             
             if not filtered_data:
                 logger.warning(f"{log_prefix} No data after filtering")
