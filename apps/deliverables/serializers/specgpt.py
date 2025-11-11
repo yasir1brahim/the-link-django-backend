@@ -1,7 +1,13 @@
 from collections.abc import Mapping
 
 from rest_framework import serializers
-from apps.deliverables.models import Chat, ChatMessage, AiGeneratedLog
+from apps.deliverables.models import (
+    Chat,
+    ChatMessage,
+    AiGeneratedLog,
+    ExtractedData,
+    ExtractionSource,
+)
 from apps.utils.feature_flags import is_inspection_log_use_data_tables_feature_flag_active
 
 
@@ -48,8 +54,38 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
     def build_structured_rows(self, instance):
         """Return structured rows for the given log using ExtractedData when available."""
         extracted_items = list(getattr(instance, 'extracted_items', []).all()) if hasattr(instance, 'extracted_items') else []
-        if extracted_items:
-            return [self._format_extracted_item(item) for item in extracted_items]
+
+        # Always include human-created highlights that match the same context
+        human_items_qs = ExtractedData.objects.filter(
+            ai_generated_log__isnull=True,
+            project=instance.project,
+            project_version=instance.project_version,
+            extraction_type=instance.log_type,
+            source=ExtractionSource.HUMAN,
+        ).select_related('created_by', 'spec_section__masterformat_section')
+
+        human_items = list(human_items_qs)
+        print("human_items", human_items)
+
+        if extracted_items or human_items:
+            # Merge and remove duplicates while preserving consistent ordering
+            combined_items = []
+            seen_ids = set()
+            print("extracted_items length", len(extracted_items))
+            print("human_items length", len(human_items))
+
+            for item in extracted_items + human_items:
+                if item.id in seen_ids:
+                    continue
+                seen_ids.add(item.id)
+                combined_items.append(item)
+
+            # Sort by spec section then id for deterministic output
+            combined_items.sort(key=lambda item: ((item.spec_section_number or '').lower(), item.id))
+
+            list_to_return = [self._format_extracted_item(item) for item in combined_items]
+            print("list_to_return length", len(list_to_return))
+            return list_to_return
 
         original_data = instance.log_data
         if isinstance(original_data, list):
@@ -57,14 +93,29 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
 
         return original_data
 
-    def _format_extracted_item(self, item):
+    def _format_extracted_item(self, item: ExtractedData):
         """Convert an ExtractedData instance into the legacy structured row format."""
         metadata = item.metadata or {}
         row = dict(metadata.get('raw_item', {}))
         row['extracted_item_id'] = item.id
+        row['source'] = item.source
+        # Determine spec section details with fallbacks
+        spec_section_number = row.get('Spec Section #') or item.spec_section_number
+        spec_section_name = row.get('Spec Section Name') or item.spec_section_name
 
-        row['Spec Section #'] = item.spec_section_number
-        row['Spec Section Name'] = item.spec_section_name
+        spec_section = getattr(item, 'spec_section', None)
+        if spec_section:
+            masterformat_section = getattr(spec_section, 'masterformat_section', None)
+            if masterformat_section and getattr(masterformat_section, 'masterformat_number', None):
+                spec_section_number = masterformat_section.masterformat_number
+
+            if getattr(spec_section, 'custom_section_title', None):
+                spec_section_name = spec_section.custom_section_title
+            elif masterformat_section and getattr(masterformat_section, 'masterformat_description', None):
+                spec_section_name = masterformat_section.masterformat_description
+
+        row['Spec Section #'] = spec_section_number
+        row['Spec Section Name'] = spec_section_name
 
         if item.responsible_party is not None or 'Responsible Party' in row:
             row['Responsible Party'] = item.responsible_party

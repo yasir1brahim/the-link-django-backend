@@ -18,6 +18,7 @@ import pymupdf
 from openai import OpenAI
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Prefetch
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 from promptlayer.templates import TemplateManager
@@ -628,8 +629,16 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         
         # Apply sorting
         queryset = self.apply_sorting(queryset)
-        
-        return queryset.prefetch_related('extracted_items')
+
+        extracted_items_prefetch = Prefetch(
+            'extracted_items',
+            queryset=ExtractedData.objects.select_related(
+                'spec_section__masterformat_section',
+                'created_by'
+            )
+        )
+
+        return queryset.prefetch_related(extracted_items_prefetch)
     
     def apply_sorting(self, queryset):
         """
@@ -672,6 +681,7 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             
             serializer = self.get_serializer(log_obj)
             structured_data = serializer.build_structured_rows(log_obj)
+            print("structured_data length", len(structured_data))
 
             if not structured_data:
                 return Response({'filter_values': {}})
@@ -685,6 +695,8 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 # Extract unique values for this column
                 values = set()
                 for item in structured_data:
+                    if item.get('source') == 'human':
+                        print("human item", item)
                     value = item.get(column_key)
                     if value is not None and value != '':
                         values.add(str(value))
