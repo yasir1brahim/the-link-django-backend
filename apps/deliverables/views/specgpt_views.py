@@ -4,6 +4,8 @@ import json
 import csv
 import re
 import requests
+import logging
+import traceback
 from uuid import UUID
 from typing import Any, List, Optional
 from enum import Enum
@@ -761,11 +763,60 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         """
         Export AI generated log data to Excel with optional filters, search, and sorting.
         """
+        logger = logging.getLogger('django')
+        log_prefix = f"[AI_LOG_EXPORT][log_id={pk}]"
+        logger.info(f"{log_prefix} Export request started for log_id={pk}, project_id={project_id}")
+        
         try:
             # Get the log object
+            logger.info(f"{log_prefix} Fetching AiGeneratedLog with id={pk}")
             log_obj = AiGeneratedLog.objects.get(id=pk)
+            logger.info(f"{log_prefix} Log object found: log_type={log_obj.log_type}, log_status={log_obj.log_status}")
             
+            # Defensive check: Ensure related objects exist
+            try:
+                project_name = log_obj.project.name if log_obj.project else 'Unknown Project'
+                logger.info(f"{log_prefix} Project: {project_name}")
+            except Exception as e:
+                logger.error(f"{log_prefix} Error accessing project: {str(e)}")
+                return Response(
+                    {'error': 'Project data is missing or corrupted. The project may have been deleted.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                version_number = log_obj.project_version.version_number if log_obj.project_version else 'Unknown Version'
+                logger.info(f"{log_prefix} Project version: {version_number}")
+            except Exception as e:
+                logger.error(f"{log_prefix} Error accessing project_version: {str(e)}")
+                return Response(
+                    {'error': 'Project version data is missing or corrupted. The version may have been deleted.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check log_type is valid
+            if not log_obj.log_type:
+                logger.error(f"{log_prefix} log_type is None or empty")
+                return Response(
+                    {'error': 'Log type is missing'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+<<<<<<< HEAD
+=======
+            logger.info(f"{log_prefix} Checking log_data availability")
+            if not log_obj.log_data:
+                logger.warning(f"{log_prefix} No log_data available for log_id={pk}")
+                return Response(
+                    {'error': 'No data available for export'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            logger.info(f"{log_prefix} log_data contains {len(log_obj.log_data)} items")
+            
+>>>>>>> develop
             # Get filter, search, and sort parameters
+            logger.info(f"{log_prefix} Processing filter parameters")
             filter_params = {}
             for param_name, values in request.query_params.items():
                 if param_name.startswith('filter_'):
@@ -783,11 +834,16 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                     
                     filter_params[column_key] = values.split(',')
             
+            logger.info(f"{log_prefix} Filter params: {filter_params}")
+            
             search_term = request.query_params.get('search', '')
             order_by = request.query_params.get('order_by', 'spec_section_number')
             order_direction = request.query_params.get('order', 'asc')
             
+            logger.info(f"{log_prefix} Search term: '{search_term}', order_by: {order_by}, direction: {order_direction}")
+            
             # Use the serializer to process the data with filters, search, and sorting
+            logger.info(f"{log_prefix} Instantiating serializer")
             serializer = AiGeneratedLogSerializer(log_obj, context={'request': request})
             structured_data = serializer.build_structured_rows(log_obj)
 
@@ -798,26 +854,52 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 )
             
             # Apply filters, search, and sorting
+<<<<<<< HEAD
             filtered_data = structured_data
+=======
+            filtered_data = log_obj.log_data
+            logger.info(f"{log_prefix} Initial data count: {len(filtered_data)}")
+>>>>>>> develop
             
             if filter_params:
+                logger.info(f"{log_prefix} Applying filters")
                 filtered_data = serializer.filter_structured_data(filtered_data, filter_params)
+                logger.info(f"{log_prefix} After filtering: {len(filtered_data)} items")
             
             if search_term:
+                logger.info(f"{log_prefix} Applying search")
                 filtered_data = serializer.search_structured_data(filtered_data, search_term)
+                logger.info(f"{log_prefix} After search: {len(filtered_data)} items")
             
+<<<<<<< HEAD
             filtered_data = serializer.sort_structured_data(filtered_data, order_by, order_direction)
+=======
+            if order_by != 'created_at':
+                logger.info(f"{log_prefix} Applying sorting")
+                filtered_data = serializer.sort_structured_data(filtered_data, order_by, order_direction)
+                logger.info(f"{log_prefix} After sorting: {len(filtered_data)} items")
+>>>>>>> develop
             
             if not filtered_data:
+                logger.warning(f"{log_prefix} No data after filtering")
                 return Response(
                     {'error': 'No data matches the specified filters'}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
             # Create Excel workbook
+            logger.info(f"{log_prefix} Creating Excel workbook")
             workbook = Workbook()
             worksheet = workbook.active
-            worksheet.title = f"{log_obj.log_type.replace('_', ' ').title()} Export"
+            
+            # Safe title generation
+            try:
+                log_type_title = log_obj.log_type.replace('_', ' ').title() if log_obj.log_type else 'Export'
+                worksheet.title = f"{log_type_title} Export"[:31]  # Excel sheet names max 31 chars
+                logger.info(f"{log_prefix} Worksheet title: {worksheet.title}")
+            except Exception as e:
+                logger.error(f"{log_prefix} Error setting worksheet title: {str(e)}")
+                worksheet.title = "Export"
             
             # Define styles
             header_font = Font(bold=True, color='FFFFFF')
@@ -826,12 +908,14 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             text_alignment = Alignment(wrap_text=True, vertical='center')
             
             # Get headers in the same order as the UI table
-            if log_obj.log_type == 'inspection_log':
+            logger.info(f"{log_prefix} Determining headers based on log_type")
+            # Note: Some log_types may not have the _log suffix, so check for both variants
+            if log_obj.log_type in ['inspection_log', 'inspection']:
                 headers = [
                     'Spec Section #', 'Spec Section Name', 'Inspection Type And Requirements',
                     'Inspection Frequency', 'Responsible Party'
                 ]
-            elif log_obj.log_type == 'owner_deliverables_log':
+            elif log_obj.log_type in ['owner_deliverables_log', 'owner_deliverables']:
                 headers = [
                     'Spec Section #', 'Spec Section Name', 'Deliverable Type',
                     'When Due', 'Responsible Party', 'Exact Requirement Text'
@@ -843,9 +927,16 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 ]
             else:
                 # Fallback to dynamic headers if log type is unknown
-                headers = list(filtered_data[0].keys()) if filtered_data else []
+                # Exclude internal/metadata fields that are not useful in Excel exports
+                excluded_fields = {'pdf_locations', 'metadata', 'internal_id', 'source_data'}
+                all_keys = list(filtered_data[0].keys()) if filtered_data else []
+                headers = [key for key in all_keys if key not in excluded_fields]
+                logger.info(f"{log_prefix} Using dynamic headers (excluded {excluded_fields & set(all_keys)}): {headers}")
+            
+            logger.info(f"{log_prefix} Headers: {headers}")
             
             # Write headers
+            logger.info(f"{log_prefix} Writing headers to Excel")
             for col_idx, header in enumerate(headers, 1):
                 cell = worksheet.cell(row=1, column=col_idx, value=header)
                 cell.font = header_font
@@ -853,13 +944,25 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 cell.alignment = header_alignment
             
             # Write data rows
+            logger.info(f"{log_prefix} Writing {len(filtered_data)} data rows to Excel")
             for row_idx, item in enumerate(filtered_data, 2):
                 for col_idx, header in enumerate(headers, 1):
                     value = item.get(header, '')
+                    
+                    # Convert complex data types (lists, dicts) to JSON strings for Excel compatibility
+                    if isinstance(value, (list, dict)):
+                        try:
+                            value = json.dumps(value, ensure_ascii=False)
+                            logger.debug(f"{log_prefix} Converted complex value to JSON string for row={row_idx}, col={col_idx}")
+                        except (TypeError, ValueError) as e:
+                            logger.warning(f"{log_prefix} Failed to serialize complex value to JSON: {str(e)}")
+                            value = str(value)
+                    
                     cell = worksheet.cell(row=row_idx, column=col_idx, value=value)
                     cell.alignment = text_alignment
             
             # Auto-adjust column widths
+            logger.info(f"{log_prefix} Adjusting column widths")
             for col_num, col in enumerate(worksheet.columns, 1):
                 max_length = 0
                 column = get_column_letter(col_num)
@@ -873,22 +976,35 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 worksheet.column_dimensions[column].width = adjusted_width
             
             # Create response
+            logger.info(f"{log_prefix} Creating HTTP response")
             response = HttpResponse(
                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             )
-            log_type_display = log_obj.log_type.replace('_', ' ').title()
-            response['Content-Disposition'] = f'attachment; filename={log_type_display}_Export.xlsx'
+            
+            # Safe filename generation
+            try:
+                log_type_display = log_obj.log_type.replace('_', ' ').title() if log_obj.log_type else 'Log'
+                response['Content-Disposition'] = f'attachment; filename={log_type_display}_Export.xlsx'
+            except Exception as e:
+                logger.error(f"{log_prefix} Error setting filename: {str(e)}")
+                response['Content-Disposition'] = 'attachment; filename=Export.xlsx'
             
             # Save workbook to response
+            logger.info(f"{log_prefix} Saving workbook to response")
             workbook.save(response)
+            logger.info(f"{log_prefix} Export completed successfully")
             return response
             
         except AiGeneratedLog.DoesNotExist:
+            logger.error(f"{log_prefix} AiGeneratedLog with id={pk} not found")
             return Response(
                 {'error': 'Log not found'}, 
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
+            # Log the full traceback for debugging
+            logger.error(f"{log_prefix} Error exporting data for log_id={pk}: {str(e)}")
+            logger.error(f"{log_prefix} Full traceback:\n{traceback.format_exc()}")
             return Response(
                 {'error': f'Error exporting data: {str(e)}'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
