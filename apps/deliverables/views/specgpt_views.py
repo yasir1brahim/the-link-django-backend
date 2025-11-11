@@ -659,7 +659,7 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         self.request.sort_field = order_by
         self.request.sort_direction = order_direction
         
-        # Default to created_at desc for database query
+        # Default to created_at desc for database query for all AiGeneratedLogs
         return queryset.order_by('-created_at')
     
     @action(detail=True, methods=['get'])
