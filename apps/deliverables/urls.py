@@ -6,6 +6,7 @@ from .views.spec_centric_views import SpecCentricViewSet
 from .views import bulk_operations
 from .views.pdf_annotation_views import PDFAnnotationViewSet
 from .views.extracted_data_views import ExtractedDataViewSet
+from .views.custom_item_type_views import CustomItemTypeViewSet
 
 
 app_name = "deliverables"
@@ -72,6 +73,11 @@ single_project_router.register(
     'extracted-data',
     ExtractedDataViewSet,
     basename='extracted-data'
+)
+single_project_router.register(
+    'custom-item-types',
+    CustomItemTypeViewSet,
+    basename='custom-item-type'
 )
 
 urlpatterns = [
