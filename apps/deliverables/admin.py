@@ -24,7 +24,7 @@ from django.conf import settings
 from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
     UploadedFile, SpecSection, MasterFormatSection,
     SubmittalItemList, ExcelExportHeader, ProjectVersion, Chat, ChatMessage,
-    AiGeneratedLog, ExtractedData
+    AiGeneratedLog, ExtractedData, CustomItemType
 )
 
 
@@ -451,3 +451,11 @@ class ExtractedDataAdmin(admin.ModelAdmin):
             'spec_section', 'created_by'
         )
 
+
+@admin.register(CustomItemType)
+class CustomItemTypeAdmin(admin.ModelAdmin):
+    list_display = ("name", "project", "created_by", "color", "is_active", "created_at")
+    list_filter = ("project", "is_active")
+    search_fields = ("name", "project__name", "project__project_number")
+    autocomplete_fields = ("project", "created_by")
+    readonly_fields = ("created_at", "updated_at")

@@ -1,5 +1,10 @@
 from rest_framework import serializers
-from apps.deliverables.models import ExtractedData, ExtractionItemType, ExtractionSource
+from apps.deliverables.models import (
+    CustomItemType,
+    ExtractedData,
+    ExtractionItemType,
+    ExtractionSource,
+)
 from apps.users.serializers import CustomUserSerializer
 from django.contrib.auth import get_user_model
 
@@ -16,16 +21,26 @@ class ExtractedDataListSerializer(serializers.ModelSerializer):
         source='get_source_display',
         read_only=True
     )
+    custom_item_type = serializers.SerializerMethodField()
 
     class Meta:
         model = ExtractedData
         fields = [
             'id', 'spec_section_number', 'spec_section_name',
             'extraction_type', 'item_type', 'requirement_text',
-            'responsible_party', 'metadata',
+            'responsible_party', 'metadata', 'custom_item_type',
             'source', 'source_display', 'created_by_name', 'created_at'
         ]
         read_only_fields = fields
+
+    def get_custom_item_type(self, obj):
+        if not obj.custom_item_type:
+            return None
+        return {
+            'id': obj.custom_item_type_id,
+            'name': obj.custom_item_type.name,
+            'color': obj.custom_item_type.color,
+        }
 
 
 class ExtractedDataSerializer(serializers.ModelSerializer):
@@ -35,6 +50,14 @@ class ExtractedDataSerializer(serializers.ModelSerializer):
         source='get_source_display',
         read_only=True
     )
+    custom_item_type = serializers.SerializerMethodField()
+    custom_item_type_id = serializers.PrimaryKeyRelatedField(
+        source='custom_item_type',
+        queryset=CustomItemType.objects.filter(is_active=True),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = ExtractedData
@@ -43,6 +66,7 @@ class ExtractedDataSerializer(serializers.ModelSerializer):
             'spec_section_name', 'extraction_type', 'item_type',
             'requirement_text', 'responsible_party', 'metadata',
             'pdf_locations', 'paragraph_number',
+            'custom_item_type', 'custom_item_type_id',
             'source', 'source_display', 'created_by',
             'created_at', 'updated_at'
         ]
@@ -51,12 +75,42 @@ class ExtractedDataSerializer(serializers.ModelSerializer):
             'spec_section_name', 'extraction_type', 'item_type',
             'requirement_text', 'responsible_party', 'metadata',
             'pdf_locations', 'paragraph_number',
+            'custom_item_type',
             'source', 'created_by', 'created_at', 'updated_at'
         ]
+
+    def get_custom_item_type(self, obj):
+        if not obj.custom_item_type:
+            return None
+        return {
+            'id': obj.custom_item_type_id,
+            'name': obj.custom_item_type.name,
+            'color': obj.custom_item_type.color,
+            'description': obj.custom_item_type.description,
+        }
+
+    def validate(self, attrs):
+        custom_type = attrs.get('custom_item_type')
+        extraction_type = attrs.get('extraction_type')
+
+        if custom_type:
+            attrs['extraction_type'] = 'custom_highlights'
+        elif extraction_type == 'custom_highlights':
+            raise serializers.ValidationError({
+                'custom_item_type_id': 'Custom item type is required when extraction_type is "custom_highlights".'
+            })
+
+        return super().validate(attrs)
 
 
 class ExtractedDataCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating new ExtractedData (human-sourced via Apryse highlights)"""
+    custom_item_type_id = serializers.PrimaryKeyRelatedField(
+        source='custom_item_type',
+        queryset=CustomItemType.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = ExtractedData
@@ -65,7 +119,7 @@ class ExtractedDataCreateSerializer(serializers.ModelSerializer):
             'spec_section_number', 'spec_section_name',
             'extraction_type', 'item_type', 'paragraph_number',
             'requirement_text', 'responsible_party', 'metadata',
-            'pdf_locations'
+            'pdf_locations', 'custom_item_type_id'
         ]
 
     def create(self, validated_data):
@@ -78,3 +132,8 @@ class ExtractedDataCreateSerializer(serializers.ModelSerializer):
         validated_data['source'] = ExtractionSource.HUMAN
 
         return super().create(validated_data)
+
+    def validate(self, attrs):
+        if attrs.get('custom_item_type'):
+            attrs['extraction_type'] = 'custom_highlights'
+        return super().validate(attrs)

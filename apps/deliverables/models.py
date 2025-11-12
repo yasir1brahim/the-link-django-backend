@@ -3,6 +3,8 @@ from enum import Enum
 from datetime import datetime, timedelta, timezone
 from typing import List
 
+from django.core.exceptions import ValidationError
+from django.core.validators import RegexValidator
 from django.db import models
 from apps.utils.models import BaseModel
 from django.conf import settings
@@ -482,6 +484,14 @@ class ExtractedData(BaseModel):
         null=True,
         blank=True
     )
+    custom_item_type = models.ForeignKey(
+        'CustomItemType',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='extracted_data_items',
+        help_text="User-defined grouping (only valid for custom highlights)"
+    )
 
     # Creation metadata
     source = models.CharField(
@@ -549,8 +559,40 @@ class ExtractedData(BaseModel):
     def __str__(self):
         return f"{self.spec_section_number} - {self.requirement_text[:50]}"
 
+    def validate_custom_highlight_consistency(self):
+        """
+        Ensure custom tags belong to the same project as the extraction.
+        """
+        if self.custom_item_type and self.custom_item_type.project_id != self.project_id:
+            raise ValidationError(
+                {"custom_item_type": "Custom item type must belong to the same project."}
+            )
+
+    def clean(self):
+        super().clean()
+
+        if self.custom_item_type and self.extraction_type != "custom_highlights":
+            raise ValidationError({
+                "custom_item_type": 'When custom_item_type is set, extraction_type must be "custom_highlights".'
+            })
+
+        if self.extraction_type == "custom_highlights" and not self.custom_item_type:
+            raise ValidationError({
+                "custom_item_type": 'Extraction type "custom_highlights" requires a custom_item_type.'
+            })
+
     def save(self, *args, **kwargs):
         """Override save to set created_by for AI sources from ai_generated_log"""
+        if self.custom_item_type:
+            self.extraction_type = "custom_highlights"
+
+        if self.extraction_type == "custom_highlights" and not self.custom_item_type:
+            raise ValidationError({
+                "custom_item_type": 'Extraction type "custom_highlights" requires a custom_item_type.'
+            })
+
+        self.validate_custom_highlight_consistency()
+
         if self.source == ExtractionSource.AI and not self.created_by_id:
             # Try to get user from ai_generated_log if available
             if self.ai_generated_log and hasattr(self.ai_generated_log, 'created_by'):
@@ -560,6 +602,68 @@ class ExtractedData(BaseModel):
 
 
 # endregion SpecGPT
+
+
+class CustomItemType(BaseModel):
+    """
+    Project-scoped, user-created tags for grouping ExtractedData entries.
+    """
+
+    name = models.CharField(
+        max_length=100,
+        help_text="Readable label (e.g. 'Safety Requirements')."
+    )
+    color = models.CharField(
+        max_length=7,
+        default="#3B82F6",
+        validators=[
+            RegexValidator(
+                regex=r"^#[0-9A-Fa-f]{6}$",
+                message="Color must be in HEX format (#RRGGBB)."
+            )
+        ],
+        help_text="HEX code used by the frontend for highlight color."
+    )
+    description = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional explanation of how this tag should be used."
+    )
+    project = models.ForeignKey(
+        "Project",
+        on_delete=models.CASCADE,
+        related_name="custom_item_types",
+        help_text="Owning project."
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="created_custom_item_types",
+        help_text="User who defined this custom type."
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Soft-delete flag so we can hide a type without losing history."
+    )
+
+    class Meta:
+        db_table = "deliverables_custom_item_type"
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "name"],
+                name="unique_custom_item_type_per_project"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["project", "is_active"]),
+            models.Index(fields=["created_by"]),
+        ]
+
+    def __str__(self) -> str:
+        project_label = self.project.project_number or self.project.name
+        return f"{self.name} ({project_label})"
 
 class PDFAnnotation(BaseModel):
     annotation_id = models.CharField(
