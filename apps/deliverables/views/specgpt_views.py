@@ -676,7 +676,6 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             
             serializer = self.get_serializer(log_obj)
             structured_data = serializer.build_structured_rows(log_obj)
-            print("structured_data length", len(structured_data))
 
             if not structured_data:
                 return Response({'filter_values': {}})
@@ -690,8 +689,6 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 # Extract unique values for this column
                 values = set()
                 for item in structured_data:
-                    if item.get('source') == 'human':
-                        print("human item", item)
                     value = item.get(column_key)
                     if value is not None and value != '':
                         values.add(str(value))
@@ -707,8 +704,13 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
+            import traceback
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in filter_values for log {pk}: {str(e)}")
+            logger.error(traceback.format_exc())
             return Response(
-                {'error': f'Error fetching filter values: {str(e)}'}, 
+                {'error': f'Error fetching filter values: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
