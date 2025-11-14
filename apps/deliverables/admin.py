@@ -31,6 +31,7 @@ from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
 class ProjectMembershipInlineAdmin(admin.TabularInline):
     model = ProjectMembership
     list_display = ["user", "role"]
+    autocomplete_fields = ["user"]
 
 class ProjectVersionInlineAdmin(admin.TabularInline):
     model = ProjectVersion
