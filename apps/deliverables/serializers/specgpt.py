@@ -53,7 +53,7 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
 
     def build_structured_rows(self, instance):
         """Return structured rows for the given log using ExtractedData when available."""
-        extracted_items = list(getattr(instance, 'extracted_items', []).all()) if hasattr(instance, 'extracted_items') else []
+        extracted_items = list(instance.extracted_items.all()) if hasattr(instance, 'extracted_items') else []
 
         # Always include human-created highlights that match the same context
         human_items_qs = ExtractedData.objects.filter(
