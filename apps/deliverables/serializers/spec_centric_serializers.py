@@ -1,3 +1,4 @@
+from django.db.models import F, OuterRef, Q, Subquery
 from rest_framework import serializers
 from ..models import (
     SpecSection,
@@ -6,7 +7,8 @@ from ..models import (
     Project,
     ProjectVersion,
     UploadedFile,
-    AiGeneratedLog
+    AiGeneratedLog,
+    ExtractedData
 )
 from apps.utils.feature_flags import is_spec_centered_view_feature_flag_active
 
@@ -143,60 +145,73 @@ class SpecSectionContentSerializer(serializers.Serializer):
                 ai_log_normalized == spec_section_normalized)
         
     
-    def get_ai_log_highlights(self, instance):
-        """Extract AI log items with pdf_locations that match the current spec section."""
-        ai_logs = self.context.get('ai_log_data', [])
-        print(f"🔍 AI LOGS COUNT: {len(ai_logs)}")
-        
+    def get_ai_log_highlights(self, obj):
+        """Get highlights from ExtractedData model (both AI and human-created)"""
         # Handle both dictionary and model instance formats
-        if isinstance(instance, dict):
+        if isinstance(obj, dict):
             # Instance is a dictionary with 'spec_section' key
-            spec_section = instance.get('spec_section')
-            spec_section_number = spec_section.masterformat_section.masterformat_number if spec_section and spec_section.masterformat_section else None
+            spec_section = obj.get('spec_section')
+            spec_section_id = spec_section.id if spec_section else None
         else:
-            # Instance is a model object
-            spec_section_number = instance.masterformat_section.masterformat_number if instance.masterformat_section else None
-        
-        print(f"🎯 TARGET SPEC SECTION: {spec_section_number}")
-        
-        if not spec_section_number or not ai_logs:
-            print(f"❌ EARLY RETURN: spec_section_number={spec_section_number}, ai_logs_count={len(ai_logs)}")
-            return []
-        
-        # Filter log items that match this spec section and have pdf_locations
-        matching_items = []
-        for log in ai_logs:
-            extraction_type = log.log_type
-            item_data_rows = log.log_data or []
-            print(f"📋 LOG TYPE: {extraction_type}, ITEMS COUNT: {len(item_data_rows)}")
-            
-            for item in item_data_rows:
-                # Check if the item's spec section matches using fuzzy matching
-                item_section = item.get('Spec Section #', item.get('spec_section_number', ''))
-                has_pdf_locations = 'pdf_locations' in item
-                print(f"📄 ITEM: section='{item_section}', has_pdf_locations={has_pdf_locations}")
+            # Instance is a model object (SpecSection)
+            spec_section_id = obj.id
 
-                if self.fuzzy_match_spec_section_number(item_section, spec_section_number):
-                    if has_pdf_locations:
-                        print(f"✅ MATCH FOUND: Adding item with pdf_locations")
-                        
-                        # Get item_type and normalize it to code format (lowercase with underscores)
-                        raw_item_type = item.get('item_type', '')
-                        
-                        matching_items.append({
-                            'pdf_locations': item['pdf_locations'],
-                            'spec_section_number': item_section,
-                            'spec_section_name': item.get('Spec Section Name', item.get('spec_section_name', '')),
-                            # Include relevant fields based on log type
-                            'item_type': raw_item_type,
-                            'extraction_type': extraction_type,
-                            'requirement_text': item.get('Requirement Text', item.get('requirement_text', item.get('Inspection Type And Requirements', item.get('inspection_type_and_requirements', '')))),
-                        })
-                    else:
-                        print(f"⚠️ MATCH BUT NO PDF_LOCATIONS: section matches but no pdf_locations field")
-        
-        print(f"🎉 FINAL MATCHING ITEMS COUNT: {len(matching_items)}")
-        return matching_items
+        if not spec_section_id:
+            return []
+
+        # Subquery to fetch the latest AI log per extraction type for this spec section
+        latest_log_subquery = AiGeneratedLog.objects.filter(
+            extracted_items__spec_section_id=spec_section_id,
+            log_type=OuterRef('extraction_type'),
+        ).order_by('-created_at').values('id')[:1]
+
+        # Query ExtractedData directly using spec_section FK and limit AI items to the latest logs
+        extracted_items = ExtractedData.objects.filter(
+            spec_section_id=spec_section_id,
+            pdf_locations__isnull=False  # Only items with PDF locations
+        ).annotate(
+            latest_log_id=Subquery(latest_log_subquery)
+        ).filter(
+            Q(ai_generated_log__isnull=True) | Q(ai_generated_log_id=F('latest_log_id'))
+        ).select_related('created_by')
+
+        # Format results
+        results = []
+        for item in extracted_items:
+            metadata = item.metadata or {}
+            result = {
+                'id': item.id,
+                'extraction_type': item.extraction_type,
+                'item_type': item.item_type,
+                'spec_section_number': item.spec_section_number,
+                'spec_section_name': item.spec_section_name,
+                'requirement_text': item.requirement_text,
+                'responsible_party': item.responsible_party,
+                'metadata': metadata,
+                'pdf_locations': item.pdf_locations,
+
+                # Include source information
+                'source': item.source,
+                'source_display': item.get_source_display(),
+                'created_by': item.created_by.get_full_name() if item.created_by else None,
+                'created_by_id': item.created_by.id if item.created_by else None,
+                'created_at': item.created_at.isoformat() if item.created_at else None
+            }
+
+            # Add type-specific convenience fields for backwards compatibility
+            if item.extraction_type == 'inspection_log':
+                result['inspection_frequency'] = metadata.get('inspection_frequency')
+            elif item.extraction_type == 'owner_deliverables_log':
+                result['deliverable_type'] = metadata.get('deliverable_type')
+            elif item.extraction_type == 'qa_planner':
+                result['paragraph_number'] = item.paragraph_number
+
+            # Expose shared metadata convenience fields
+            result['when_due'] = metadata.get('when_due')
+
+            results.append(result)
+
+        return results
     
     def to_representation(self, instance):
         """Override to use filtered submittals from context."""

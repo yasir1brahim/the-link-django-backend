@@ -3,6 +3,8 @@ from enum import Enum
 from datetime import datetime, timedelta, timezone
 from typing import List
 
+from django.core.exceptions import ValidationError
+from django.core.validators import RegexValidator
 from django.db import models
 from apps.utils.models import BaseModel
 from django.conf import settings
@@ -427,12 +429,241 @@ class AiGeneratedLog(BaseModel):
     log_data = models.JSONField(blank=True, null=True, help_text="Structured data for inspection logs and owner deliverables logs")
     qa_options_selected = models.JSONField(blank=True, null=True, help_text="Selected QA options for qa_planner log type")
     completion_status = models.JSONField(blank=True, null=True, help_text="Status of each QA option processing")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ai_generated_logs',
+        help_text="User who triggered this AI log generation (null for system-generated)"
+    )
 
     def __str__(self):
         return f"{self.project.name} - {self.project_version.version_number} - {self.log_type} - {self.log_status}"
-    
+
+
+class ExtractionSource(models.TextChoices):
+    """Source of the extracted data"""
+    AI = "AI", "AI Generated"
+    HUMAN = "HUMAN", "Human Created"
+
+
+class ExtractionItemType(models.TextChoices):
+    """Types of extracted items users can categorize"""
+    SUBMITTAL = "submittal", "Submittal"
+    INSPECTION = "inspection", "Inspection"
+    OWNER_DELIVERABLE = "owner_deliverable", "Owner Deliverable"
+    QA_INSPECTION = "qa_inspection", "QA Inspection"
+    QA_WARRANTY = "qa_warranty", "QA Warranty"
+    QA_CERTIFICATE = "qa_certificate", "QA Certificate"
+    QA_CLOSEOUT = "qa_closeout", "QA Closeout"
+    QA_TEST_REPORT = "qa_test_report", "QA Test Report"
+    QA_COMMISSIONING = "qa_commissioning", "QA Commissioning"
+    QA_DELEGATED_DESIGN = "qa_delegated_design", "QA Delegated Design"
+    QA_MOCKUP = "qa_mockup", "QA Mock-up/Sample"
+    QA_PRE_INSTALL = "qa_pre_install", "QA Pre-Installation Meeting"
+
+
+class ExtractedData(BaseModel):
+    """Individual row extracted from AI-generated logs or manually created via Apryse highlights"""
+
+    # Foreign keys
+    ai_generated_log = models.ForeignKey(
+        'AiGeneratedLog',
+        on_delete=models.CASCADE,
+        related_name='extracted_items',
+        null=True,
+        blank=True,
+        help_text="AI log this was extracted from (null for human-created)"
+    )
+    project = models.ForeignKey('Project', on_delete=models.CASCADE)
+    project_version = models.ForeignKey('ProjectVersion', on_delete=models.CASCADE)
+    spec_section = models.ForeignKey(
+        'SpecSection',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+    custom_item_type = models.ForeignKey(
+        'CustomItemType',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='extracted_data_items',
+        help_text="User-defined grouping (only valid for custom highlights)"
+    )
+
+    # Creation metadata
+    source = models.CharField(
+        max_length=10,
+        choices=ExtractionSource.choices,
+        default=ExtractionSource.AI,
+        help_text="Whether this was AI-generated or human-created"
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_extractions',
+        help_text="User who created this extraction (for HUMAN source) or triggered AI generation"
+    )
+
+    # Core data fields
+    spec_section_number = models.CharField(max_length=256)
+    spec_section_name = models.CharField(max_length=512)
+    paragraph_number = models.CharField(max_length=256, blank=True, null=True)
+
+    # Type classification
+    extraction_type = models.CharField(
+        max_length=256,
+        help_text="For AI: log type (inspection_log, owner_deliverables_log, qa_planner). For HUMAN: user-selected base type"
+    )
+    item_type = models.CharField(
+        max_length=256,
+        blank=True,
+        null=True,
+        help_text="Specific categorization - for QA planner subtypes or user-selected type for highlights"
+    )
+
+    # Content fields
+    requirement_text = models.TextField()
+    responsible_party = models.CharField(max_length=512, blank=True, null=True)
+
+    # PDF location data
+    pdf_locations = models.JSONField(
+        blank=True,
+        null=True,
+        help_text="PDF coordinate data for highlighting"
+    )
+
+    # Flexible metadata for type-specific fields
+    metadata = models.JSONField(
+        blank=True,
+        null=True,
+        default=dict,
+        help_text="Type-specific data: inspection_frequency, when_due, deliverable_type, etc."
+    )
+
+    class Meta:
+        db_table = 'deliverables_extracted_data'
+        indexes = [
+            models.Index(fields=['project', 'project_version']),
+            models.Index(fields=['spec_section_number']),
+            models.Index(fields=['extraction_type', 'item_type']),
+            models.Index(fields=['source']),
+            models.Index(fields=['created_by']),
+        ]
+        ordering = ['spec_section_number', 'id']
+
+    def __str__(self):
+        return f"{self.spec_section_number} - {self.requirement_text[:50]}"
+
+    def validate_custom_highlight_consistency(self):
+        """
+        Ensure custom tags belong to the same project as the extraction.
+        """
+        if self.custom_item_type and self.custom_item_type.project_id != self.project_id:
+            raise ValidationError(
+                {"custom_item_type": "Custom item type must belong to the same project."}
+            )
+
+    def clean(self):
+        super().clean()
+
+        if self.custom_item_type and self.extraction_type != "custom_highlights":
+            raise ValidationError({
+                "custom_item_type": 'When custom_item_type is set, extraction_type must be "custom_highlights".'
+            })
+
+        if self.extraction_type == "custom_highlights" and not self.custom_item_type:
+            raise ValidationError({
+                "custom_item_type": 'Extraction type "custom_highlights" requires a custom_item_type.'
+            })
+
+    def save(self, *args, **kwargs):
+        """Override save to set created_by for AI sources from ai_generated_log"""
+        if self.custom_item_type:
+            self.extraction_type = "custom_highlights"
+
+        if self.extraction_type == "custom_highlights" and not self.custom_item_type:
+            raise ValidationError({
+                "custom_item_type": 'Extraction type "custom_highlights" requires a custom_item_type.'
+            })
+
+        self.validate_custom_highlight_consistency()
+
+        if self.source == ExtractionSource.AI and not self.created_by_id:
+            # Try to get user from ai_generated_log if available
+            if self.ai_generated_log and hasattr(self.ai_generated_log, 'created_by'):
+                self.created_by = self.ai_generated_log.created_by
+
+        super().save(*args, **kwargs)
+
 
 # endregion SpecGPT
+
+
+class CustomItemType(BaseModel):
+    """
+    Project-scoped, user-created tags for grouping ExtractedData entries.
+    """
+
+    name = models.CharField(
+        max_length=100,
+        help_text="Readable label (e.g. 'Safety Requirements')."
+    )
+    color = models.CharField(
+        max_length=7,
+        default="#3B82F6",
+        validators=[
+            RegexValidator(
+                regex=r"^#[0-9A-Fa-f]{6}$",
+                message="Color must be in HEX format (#RRGGBB)."
+            )
+        ],
+        help_text="HEX code used by the frontend for highlight color."
+    )
+    description = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional explanation of how this tag should be used."
+    )
+    project = models.ForeignKey(
+        "Project",
+        on_delete=models.CASCADE,
+        related_name="custom_item_types",
+        help_text="Owning project."
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="created_custom_item_types",
+        help_text="User who defined this custom type."
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Soft-delete flag so we can hide a type without losing history."
+    )
+
+    class Meta:
+        db_table = "deliverables_custom_item_type"
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "name"],
+                name="unique_custom_item_type_per_project"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["project", "is_active"]),
+            models.Index(fields=["created_by"]),
+        ]
+
+    def __str__(self) -> str:
+        project_label = self.project.project_number or self.project.name
+        return f"{self.name} ({project_label})"
 
 class PDFAnnotation(BaseModel):
     annotation_id = models.CharField(
