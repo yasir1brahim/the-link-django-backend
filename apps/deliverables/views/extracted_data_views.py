@@ -39,11 +39,13 @@ class ExtractedDataViewSet(viewsets.ModelViewSet):
         # Optimize based on action
         if self.action == 'list':
             queryset = queryset.select_related('created_by', 'ai_generated_log')
+            queryset = queryset.prefetch_related('notes__created_by')
         elif self.action in ['retrieve', 'update', 'partial_update']:
             queryset = queryset.select_related(
                 'created_by', 'ai_generated_log',
                 'project', 'project_version', 'spec_section'
             )
+            queryset = queryset.prefetch_related('notes__created_by')
 
         return queryset
 
