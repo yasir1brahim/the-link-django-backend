@@ -39,3 +39,7 @@ class ExtractionNoteCreateUpdateSerializer(serializers.ModelSerializer):
         if not value or not value.strip():
             raise serializers.ValidationError("Text cannot be empty.")
         return value.strip()
+
+    def to_representation(self, instance):
+        """Use full serializer for response"""
+        return ExtractionNoteSerializer(instance, context=self.context).data

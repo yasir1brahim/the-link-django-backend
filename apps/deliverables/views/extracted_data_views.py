@@ -33,7 +33,7 @@ class ExtractedDataViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Filter by project and optimize queries"""
-        project_id = self.kwargs.get('project_pk')
+        project_id = self.kwargs.get('project_id')
         queryset = ExtractedData.objects.filter(project_id=project_id)
 
         # Optimize based on action

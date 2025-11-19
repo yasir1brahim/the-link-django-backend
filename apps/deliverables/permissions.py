@@ -34,15 +34,20 @@ class ProjectAccessPermissions(permissions.BasePermission):
 
 
     def has_object_permission(self, request, view, obj):
+        # Extract project from obj - handle both Project objects and related objects
+        project = obj if isinstance(obj, Project) else getattr(obj, 'project', None)
+        if project is None:
+            return False
+
         # Read permissions are allowed to any request
         # so we'll always allow GET, HEAD or OPTIONS requests for members
         if request.method == 'DELETE':
-            return request.user.is_admin_for_team(obj.team)
-        
+            return request.user.is_admin_for_team(project.team)
+
         # Allow members to add users to a project
-        if request.path == reverse('deliverables:project-members-add', kwargs={'pk': obj.id}):
+        if isinstance(obj, Project) and request.path == reverse('deliverables:project-members-add', kwargs={'pk': obj.id}):
             return request.user.is_member_of_project(obj)
-        return self._view_for_members_edit_for_admins(request, obj)
+        return self._view_for_members_edit_for_admins(request, project)
     
 
     def _view_for_members_edit_for_admins(self, request: Request, project: Project):
