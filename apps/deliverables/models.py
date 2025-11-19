@@ -601,6 +601,42 @@ class ExtractedData(BaseModel):
         super().save(*args, **kwargs)
 
 
+class ExtractionNote(BaseModel):
+    """Text notes attached to ExtractedData highlights"""
+
+    extracted_data = models.ForeignKey(
+        'ExtractedData',
+        on_delete=models.CASCADE,
+        related_name='notes',
+        help_text="The highlight this note is attached to"
+    )
+
+    text = models.TextField(
+        help_text="Note content"
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='extraction_notes',
+        help_text="User who created this note"
+    )
+
+    class Meta:
+        db_table = 'deliverables_extraction_note'
+        indexes = [
+            models.Index(fields=['extracted_data', 'created_at']),
+            models.Index(fields=['created_by']),
+        ]
+        ordering = ['created_at']
+
+    def __str__(self):
+        preview = self.text[:50] + '...' if len(self.text) > 50 else self.text
+        return f"Note on {self.extracted_data.spec_section_number}: {preview}"
+
+
 # endregion SpecGPT
 
 
