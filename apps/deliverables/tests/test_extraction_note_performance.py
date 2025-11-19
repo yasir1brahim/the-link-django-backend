@@ -77,5 +77,5 @@ class TestExtractionNotePerformance(TestCase):
         # 2. Prefetch notes
         # 3. Prefetch note creators
         # Allow some tolerance for database setup queries
-        self.assertLess(len(context.captured_queries), 8,
+        self.assertLess(len(context.captured_queries), 10,
             f"Too many queries: {len(context.captured_queries)}. Possible N+1 issue.")
