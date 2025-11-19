@@ -107,7 +107,41 @@ class AiGeneratedLogAccessPermissions(permissions.BasePermission):
         if project_id:
             return request.user.is_member_of_project(project_id)
         return True
-    
+
 
     def has_object_permission(self, request, view, obj: AiGeneratedLog):
         return request.user.is_member_of_project(obj.project)
+
+
+class ExtractionNoteAccessPermissions(permissions.BasePermission):
+    """
+    Ensure only project members can access notes and that only the author (or notes without an author)
+    can be modified.
+    """
+
+    def _get_project_id(self, view):
+        project_pk = view.kwargs.get('project_pk')
+        if project_pk:
+            return project_pk
+        extracted_data = getattr(view, 'kwargs', {}).get('extracteddata_pk')
+        if extracted_data:
+            from apps.deliverables.models import ExtractedData
+            try:
+                return ExtractedData.objects.only('project_id').get(id=extracted_data).project_id
+            except ExtractedData.DoesNotExist:
+                return None
+        return None
+
+    def has_permission(self, request, view):
+        project_id = self._get_project_id(view)
+        return (
+            request.user.is_authenticated
+            and project_id is not None
+            and request.user.is_member_of_project(project_id)
+        )
+
+    def has_object_permission(self, request, view, obj):
+        project = obj.extracted_data.project
+        if request.method in permissions.SAFE_METHODS:
+            return request.user.is_member_of_project(project)
+        return obj.created_by is None or obj.created_by_id == request.user.id
