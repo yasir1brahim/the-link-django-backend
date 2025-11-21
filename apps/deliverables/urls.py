@@ -7,6 +7,7 @@ from .views import bulk_operations
 from .views.pdf_annotation_views import PDFAnnotationViewSet
 from .views.extracted_data_views import ExtractedDataViewSet
 from .views.custom_item_type_views import CustomItemTypeViewSet
+from .views.user_highlight_preference_views import UserHighlightPreferenceViewSet
 
 
 app_name = "deliverables"
@@ -78,6 +79,11 @@ single_project_router.register(
     'custom-item-types',
     CustomItemTypeViewSet,
     basename='custom-item-type'
+)
+single_project_router.register(
+    'highlight-preference',
+    UserHighlightPreferenceViewSet,
+    basename='highlight-preference'
 )
 
 urlpatterns = [

@@ -665,6 +665,77 @@ class CustomItemType(BaseModel):
         project_label = self.project.project_number or self.project.name
         return f"{self.name} ({project_label})"
 
+
+class UserHighlightPreference(BaseModel):
+    """
+    Stores the user's last used highlight type per project for quick reuse.
+    Allows cross-device persistence of the "Repeat Last Highlight" feature.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="highlight_preferences",
+        help_text="User who owns this preference."
+    )
+    project = models.ForeignKey(
+        "Project",
+        on_delete=models.CASCADE,
+        related_name="user_highlight_preferences",
+        help_text="Project context for this preference."
+    )
+
+    is_custom_type = models.BooleanField(
+        default=False,
+        help_text="True if last highlight was a custom type, False if standard type."
+    )
+    custom_item_type = models.ForeignKey(
+        "CustomItemType",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="user_preferences",
+        help_text="Reference to custom type if is_custom_type=True."
+    )
+    standard_item_type = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Standard type name (e.g., 'inspections', 'warranties') if is_custom_type=False."
+    )
+    extraction_type = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="The extraction_type used (e.g., 'qa_planner', 'custom_highlights')."
+    )
+
+    # Store display information for quick access
+    type_display_name = models.CharField(
+        max_length=200,
+        help_text="Human-readable name to display (e.g., 'Inspections', 'Safety Requirements')."
+    )
+    type_color = models.CharField(
+        max_length=7,
+        help_text="HEX color code for visual display."
+    )
+
+    class Meta:
+        db_table = "deliverables_user_highlight_preference"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "project"],
+                name="unique_highlight_preference_per_user_project"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["user", "project"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user.email} - {self.project.name}: {self.type_display_name}"
+
+
 class PDFAnnotation(BaseModel):
     annotation_id = models.CharField(
         max_length=255,
