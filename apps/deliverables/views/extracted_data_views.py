@@ -10,12 +10,12 @@ from apps.deliverables.serializers.extracted_data import (
     ExtractedDataListSerializer,
     ExtractedDataCreateSerializer
 )
-from apps.deliverables.permissions import ProjectAccessPermissions
+from apps.deliverables.permissions import ExtractedDataAccessPermissions
 
 
 class ExtractedDataViewSet(viewsets.ModelViewSet):
     """ViewSet for ExtractedData CRUD operations"""
-    permission_classes = [IsAuthenticated, ProjectAccessPermissions]
+    permission_classes = [IsAuthenticated, ExtractedDataAccessPermissions]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
 
     # Search
@@ -58,11 +58,8 @@ class ExtractedDataViewSet(viewsets.ModelViewSet):
         return ExtractedDataSerializer
 
     def perform_create(self, serializer):
-        """Ensure created_by is set for human-sourced entries"""
-        serializer.save(
-            created_by=self.request.user,
-            source=ExtractionSource.HUMAN
-        )
+        """Delegate to serializer for creation logic"""
+        serializer.save()
 
     @action(detail=False, methods=['get'])
     def summary(self, request, project_pk=None):

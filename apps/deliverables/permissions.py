@@ -118,6 +118,29 @@ class AiGeneratedLogAccessPermissions(permissions.BasePermission):
         return request.user.is_member_of_project(obj.project)
 
 
+class ExtractedDataAccessPermissions(permissions.BasePermission):
+    """
+    Permission to only allow project members to access ExtractedData.
+    """
+
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+
+        # Get project_id from URL kwargs (handles both project_id and project_pk)
+        project_id = view.kwargs.get('project_id') or view.kwargs.get('project_pk')
+        if project_id:
+            return request.user.is_member_of_project(project_id)
+        return False
+
+    def has_object_permission(self, request, view, obj):
+        # For object-level permissions, check the project relationship
+        project = getattr(obj, 'project', None)
+        if project is None:
+            return False
+        return request.user.is_member_of_project(project)
+
+
 class ExtractionNoteAccessPermissions(permissions.BasePermission):
     """
     Ensure only project members can access notes and that only the author (or notes without an author)

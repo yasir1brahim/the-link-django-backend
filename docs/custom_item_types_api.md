@@ -156,3 +156,6 @@ Example response:
 3. Smoke-test API routes with an authenticated client (e.g., `curl` or Postman).
 4. Confirm custom types appear and can be edited via the Django admin (`CustomItemType` list).
 
+
+
+
