@@ -69,14 +69,19 @@ class BaseProjectSerializer(serializers.ModelSerializer):
     project_versions = serializers.SerializerMethodField()
     members = ProjectMembershipSerializer(source="project_memberships", many=True, required=False)
     team = serializers.ReadOnlyField(source="team.id")
+    team_name = serializers.ReadOnlyField(source="team.name")
+    team_logo_url = serializers.ReadOnlyField(source="team.legacy_logo_url")
     user_limit = serializers.ReadOnlyField()
     active_flags = serializers.SerializerMethodField(read_only=True)
+    current_user_role = serializers.SerializerMethodField(read_only=True)
+    current_user_team_role = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Project
-        fields = ['id', 'name', 'description', 'team', 'members',
-                   'user_limit', 'start_date', 'end_date', 'is_archived', 
-                   'project_number', 'project_type', 'project_versions', 'active_flags']
+        fields = ['id', 'name', 'description', 'team', 'team_name', 'team_logo_url', 'members',
+                   'user_limit', 'start_date', 'end_date', 'is_archived',
+                   'project_number', 'project_type', 'project_versions', 'active_flags',
+                   'current_user_role', 'current_user_team_role']
         
     def get_project_versions(self, obj):
         versions = obj.versions.filter(is_archived=False)
@@ -94,6 +99,41 @@ class BaseProjectSerializer(serializers.ModelSerializer):
         
     def get_active_flags(self, obj):
         return get_active_flags_for_project(obj)
+
+    def get_current_user_role(self, obj):
+        """
+        Get the current user's role in this project.
+        Returns 'project_admin', 'project_member', or None if not a member.
+        """
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return None
+
+        # Check if user is superuser
+        if request.user.is_superuser:
+            return 'project_admin'
+
+        # Find the user's membership in this project
+        membership = obj.project_memberships.filter(user=request.user).first()
+        if membership:
+            return membership.role
+
+        return None
+
+    def get_current_user_team_role(self, obj):
+        """
+        Get the current user's role in the team that owns this project.
+        Returns 'admin' or 'member'.
+        """
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return 'member'
+
+        # Use the user's team role helper method
+        if request.user.is_admin_for_team(obj.team):
+            return 'admin'
+
+        return 'member'
 
 
 class ProjectWriteSerializer(BaseProjectSerializer):
