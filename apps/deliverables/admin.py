@@ -31,6 +31,7 @@ from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
 class ProjectMembershipInlineAdmin(admin.TabularInline):
     model = ProjectMembership
     list_display = ["user", "role"]
+    autocomplete_fields = ["user"]
 
 class ProjectVersionInlineAdmin(admin.TabularInline):
     model = ProjectVersion
@@ -47,6 +48,7 @@ class ProjectMembershipAdmin(admin.ModelAdmin):
     list_display = ["user", "project", "role"]
     list_filter = ["project", "role"]
     search_fields = ["user__email", "project__name"]
+    autocomplete_fields = ["user"]
 
 
 @admin.register(Entitlement)
@@ -106,6 +108,7 @@ class UploadedFileAdmin(admin.ModelAdmin):
     list_display = ["id", "project", "name", "uploaded_by", "created_at"]
     list_filter = ["project", "uploaded_by"]
     search_fields = ["name", "uploaded_by__email", "project__name"]
+    autocomplete_fields = ["uploaded_by"]
 
     def get_urls(self):
         urls = super().get_urls()
@@ -393,16 +396,20 @@ class SubmittalItemListAdmin(admin.ModelAdmin):
             'project', 'project__team', 'project_version', 'created_by'
         ).prefetch_related('submittals')
 
+    autocomplete_fields = ["created_by"]
+
 @admin.register(ExcelExportHeader)
 class ExcelExportHeaderAdmin(admin.ModelAdmin):
     list_display = ["user", "updated_at"]
     search_fields = ["user__email", ]
+    autocomplete_fields = ["user"]
 
 @admin.register(Chat)
 class ChatAdmin(admin.ModelAdmin):
     list_display = ["id", "user", "created_at"]
     list_filter = ["user"]
     search_fields = ["user__email"]
+    autocomplete_fields = ["user"]
 
 @admin.register(ChatMessage)
 class ChatMessageAdmin(admin.ModelAdmin):
@@ -456,6 +463,7 @@ class ExtractedDataAdmin(admin.ModelAdmin):
         'requirement_text'
     ]
     readonly_fields = ['created_at', 'updated_at']
+    autocomplete_fields = ['created_by']
 
     fieldsets = (
         ('Basic Information', {
