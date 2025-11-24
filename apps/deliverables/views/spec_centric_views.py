@@ -126,8 +126,8 @@ class SpecCentricViewSet(viewsets.ViewSet):
         
         # Filter submittals by project version if provided
         project_version_id = request.query_params.get('project_version_id')
-        submittals = spec_section.submittalitem_set.all()
-        
+        submittals = spec_section.submittalitem_set.exclude(parsing_method='PLACEHOLDER')
+
         if project_version_id:
             submittals = submittals.filter(project_version_id=project_version_id)
         
@@ -196,6 +196,8 @@ class SpecCentricViewSet(viewsets.ViewSet):
         project_version_id = request.query_params.get('project_version_id')
         submittals = SubmittalItem.objects.filter(
             spec_section=spec_section
+        ).exclude(
+            parsing_method='PLACEHOLDER'
         ).select_related(
             'masterformat_section',
             'document'
