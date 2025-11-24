@@ -79,6 +79,20 @@ class SubmittalItemAdmin(admin.ModelAdmin):
     list_filter = ["project", "document", "masterformat_section", "paragraph_number", "submittal_type", "submittal_description"]
     search_fields = ["project__name", "document__name", "masterformat_section__masterformat_number", "paragraph_number", "submittal_type", "submittal_description"]
 
+    # Use raw_id_fields to prevent loading all 42k+ items in dropdowns
+    raw_id_fields = ["project", "project_version", "document", "spec_section", "created_by", "updated_by", "added_under_submittal"]
+
+    # Prevent loading all items in the reverse ManyToMany from SubmittalItemList
+    readonly_fields = []
+
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related(
+            'project', 'project__team', 'project_version',
+            'document', 'masterformat_section', 'spec_section',
+            'created_by', 'updated_by', 'added_under_submittal'
+        )
+
 
 class SubmittalItemInlineAdmin(admin.TabularInline):
     model = SubmittalItem
@@ -341,9 +355,22 @@ Parser Item Classification: {result.get('item', '')}
 
 @admin.register(SpecSection)
 class SpecSectionAdmin(admin.ModelAdmin):
-    list_display = ["id", "masterformat_section"]
-    list_filter = ["masterformat_section"]
-    search_fields = ["masterformat_section__masterformat_number"]
+    list_display = ["id", "project_name", "document", "masterformat_section"]
+    list_filter = ["document__project", "masterformat_section"]
+    search_fields = ["masterformat_section__masterformat_number", "document__project__name", "document__name"]
+
+    def project_name(self, obj):
+        """Display the project name."""
+        return obj.document.project.name if obj.document and obj.document.project else "-"
+    project_name.short_description = "Project"
+    project_name.admin_order_field = "document__project__name"
+
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related(
+            'document', 'document__project', 'document__project__team',
+            'masterformat_section'
+        )
 
 @admin.register(MasterFormatSection)
 class MasterFormatSectionAdmin(admin.ModelAdmin):
@@ -355,7 +382,16 @@ class SubmittalItemListAdmin(admin.ModelAdmin):
     list_display = ["id", "project", "name", "created_by"]
     list_filter = ["project", "created_by"]
     search_fields = ["project__name", "name", "created_by__email"]
-    filter_horizontal = ("submittals",)
+    # Changed from filter_horizontal to prevent loading all 42k+ SubmittalItems
+    # Use the admin list view to add items to lists instead
+    # filter_horizontal = ("submittals",)
+    raw_id_fields = ["project", "project_version", "created_by"]
+
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related(
+            'project', 'project__team', 'project_version', 'created_by'
+        ).prefetch_related('submittals')
 
 @admin.register(ExcelExportHeader)
 class ExcelExportHeaderAdmin(admin.ModelAdmin):
