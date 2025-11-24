@@ -15,8 +15,8 @@ from apps.deliverables.models import (
     AiGeneratedLog,
     ExtractedData,
     ExtractionSource,
+    ROLE_PROJECT_MEMBER,
 )
-from apps.deliverables.constants import ROLE_PROJECT_MEMBER
 from apps.utils.feature_flags import is_spec_centered_view_feature_flag_active
 from apps.deliverables.serializers.spec_centric_serializers import SpecSectionContentSerializer
 
