@@ -123,6 +123,7 @@ class ExtractedDataCreateSerializer(serializers.ModelSerializer):
         write_only=True,
         required=False,
         allow_blank=True,
+        allow_null=True,
         trim_whitespace=False
     )
     notes = ExtractionNoteSerializer(many=True, read_only=True)
