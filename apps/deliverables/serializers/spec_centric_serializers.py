@@ -173,7 +173,7 @@ class SpecSectionContentSerializer(serializers.Serializer):
             latest_log_id=Subquery(latest_log_subquery)
         ).filter(
             Q(ai_generated_log__isnull=True) | Q(ai_generated_log_id=F('latest_log_id'))
-        ).select_related('created_by')
+        ).select_related('created_by').prefetch_related('notes__created_by')
 
         # Format results
         results = []
@@ -195,7 +195,20 @@ class SpecSectionContentSerializer(serializers.Serializer):
                 'source_display': item.get_source_display(),
                 'created_by': item.created_by.get_full_name() if item.created_by else None,
                 'created_by_id': item.created_by.id if item.created_by else None,
-                'created_at': item.created_at.isoformat() if item.created_at else None
+                'created_at': item.created_at.isoformat() if item.created_at else None,
+
+                # Include notes
+                'notes': [
+                    {
+                        'id': note.id,
+                        'text': note.text,
+                        'created_by_id': note.created_by.id if note.created_by else None,
+                        'created_by_name': note.created_by.get_full_name() if note.created_by else None,
+                        'created_at': note.created_at.isoformat() if note.created_at else None,
+                        'updated_at': note.updated_at.isoformat() if note.updated_at else None
+                    }
+                    for note in item.notes.all()
+                ]
             }
 
             # Add type-specific convenience fields for backwards compatibility
