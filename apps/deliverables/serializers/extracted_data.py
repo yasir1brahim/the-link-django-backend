@@ -1,12 +1,15 @@
 from rest_framework import serializers
+from django.db import transaction
+from django.contrib.auth import get_user_model
 from apps.deliverables.models import (
     CustomItemType,
     ExtractedData,
     ExtractionItemType,
     ExtractionSource,
+    ExtractionNote,
 )
+from apps.deliverables.serializers.extraction_note import ExtractionNoteSerializer
 from apps.users.serializers import CustomUserSerializer
-from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
@@ -22,6 +25,7 @@ class ExtractedDataListSerializer(serializers.ModelSerializer):
         read_only=True
     )
     custom_item_type = serializers.SerializerMethodField()
+    notes = ExtractionNoteSerializer(many=True, read_only=True)
 
     class Meta:
         model = ExtractedData
@@ -29,7 +33,8 @@ class ExtractedDataListSerializer(serializers.ModelSerializer):
             'id', 'spec_section_number', 'spec_section_name',
             'extraction_type', 'item_type', 'requirement_text',
             'responsible_party', 'metadata', 'custom_item_type',
-            'source', 'source_display', 'created_by_name', 'created_at'
+            'source', 'source_display', 'created_by_name', 'created_at',
+            'notes'
         ]
         read_only_fields = fields
 
@@ -58,6 +63,7 @@ class ExtractedDataSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    notes = ExtractionNoteSerializer(many=True, read_only=True)
 
     class Meta:
         model = ExtractedData
@@ -68,7 +74,8 @@ class ExtractedDataSerializer(serializers.ModelSerializer):
             'pdf_locations', 'paragraph_number',
             'custom_item_type', 'custom_item_type_id',
             'source', 'source_display', 'created_by',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at',
+            'notes'
         ]
         read_only_fields = [
             'id', 'ai_generated_log', 'spec_section_number',
@@ -76,7 +83,8 @@ class ExtractedDataSerializer(serializers.ModelSerializer):
             'requirement_text', 'responsible_party', 'metadata',
             'pdf_locations', 'paragraph_number',
             'custom_item_type',
-            'source', 'created_by', 'created_at', 'updated_at'
+            'source', 'created_by', 'created_at', 'updated_at',
+            'notes'
         ]
 
     def get_custom_item_type(self, obj):
@@ -111,27 +119,57 @@ class ExtractedDataCreateSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    note_text = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        trim_whitespace=False
+    )
+    notes = ExtractionNoteSerializer(many=True, read_only=True)
 
     class Meta:
         model = ExtractedData
         fields = [
-            'project', 'project_version', 'spec_section',
+            'id', 'project', 'project_version', 'spec_section',
             'spec_section_number', 'spec_section_name',
             'extraction_type', 'item_type', 'paragraph_number',
             'requirement_text', 'responsible_party', 'metadata',
-            'pdf_locations', 'custom_item_type_id'
+            'pdf_locations', 'custom_item_type_id', 'note_text', 'notes'
         ]
+        read_only_fields = ['id']
+
+    def validate_note_text(self, value):
+        """Validate note_text - reject whitespace-only strings"""
+        if value:
+            trimmed = value.strip()
+            if not trimmed:
+                raise serializers.ValidationError('Text cannot be empty.')
+            return trimmed
+        return value
 
     def create(self, validated_data):
-        """Set created_by and source from request context"""
+        """Set created_by and source from request context, create optional note"""
+        note_text = validated_data.pop('note_text', None)
         request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            validated_data['created_by'] = request.user
+        user = request.user if request and request.user.is_authenticated else None
+
+        if user:
+            validated_data['created_by'] = user
 
         # Always HUMAN source for manual creation
         validated_data['source'] = ExtractionSource.HUMAN
 
-        return super().create(validated_data)
+        with transaction.atomic():
+            extracted_data = super().create(validated_data)
+            if note_text and user:
+                ExtractionNote.objects.create(
+                    extracted_data=extracted_data,
+                    text=note_text,
+                    created_by=user
+                )
+
+        return extracted_data
 
     def validate(self, attrs):
         if attrs.get('custom_item_type'):

@@ -335,3 +335,6 @@ class CustomItemTypeAPITests(APITestCase):
         self.assertIn("#EF4444", response.data["used_colors"])
         self.assertNotIn("#EF4444", response.data["available_colors"])
 
+
+
+

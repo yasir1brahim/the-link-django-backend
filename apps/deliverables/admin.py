@@ -24,7 +24,7 @@ from django.conf import settings
 from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
     UploadedFile, SpecSection, MasterFormatSection,
     SubmittalItemList, ExcelExportHeader, ProjectVersion, Chat, ChatMessage,
-    AiGeneratedLog, ExtractedData, CustomItemType
+    AiGeneratedLog, ExtractedData, CustomItemType, ExtractionNote
 )
 
 
@@ -503,3 +503,39 @@ class CustomItemTypeAdmin(admin.ModelAdmin):
     search_fields = ("name", "project__name", "project__project_number")
     autocomplete_fields = ("project", "created_by")
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(ExtractionNote)
+class ExtractionNoteAdmin(admin.ModelAdmin):
+    list_display = [
+        'id', 'extracted_data', 'text_preview', 'created_by', 'created_at'
+    ]
+    list_filter = [
+        'created_at',
+        ('extracted_data__project', admin.RelatedOnlyFieldListFilter)
+    ]
+    search_fields = [
+        'text', 'created_by__email', 'extracted_data__spec_section_number'
+    ]
+    readonly_fields = ['created_at', 'updated_at']
+    raw_id_fields = ['extracted_data', 'created_by']
+
+    fieldsets = (
+        ('Note Information', {
+            'fields': ('extracted_data', 'text', 'created_by')
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        })
+    )
+
+    def text_preview(self, obj):
+        """Show truncated text in list view"""
+        return obj.text[:75] + '...' if len(obj.text) > 75 else obj.text
+    text_preview.short_description = 'Text'
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related(
+            'extracted_data', 'created_by'
+        )
