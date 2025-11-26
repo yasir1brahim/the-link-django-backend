@@ -7,7 +7,7 @@ including model updates, webhook handling, API serializers, and sorting function
 
 import json
 from unittest.mock import patch, MagicMock
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework.test import APITestCase, APIClient
@@ -821,13 +821,198 @@ class IntegrationTests(TestCase):
             log_table='# Test Markdown Table',
             log_data=None
         )
-        
+
         # Test serializer with feature flag inactive
         serializer = AiGeneratedLogSerializer(
             log,
             context={'request': MagicMock(user=self.user)}
         )
         data = serializer.data
-        
+
         self.assertEqual(data['data_format'], 'markdown')
         self.assertIsNone(data['log_data'])
+
+
+class QAPlannerWebhookConcurrencyTests(TransactionTestCase):
+    """Tests for QA planner webhook race condition handling.
+
+    Uses TransactionTestCase to allow threads to see committed database changes.
+    """
+
+    def setUp(self):
+        import uuid
+        unique_suffix = uuid.uuid4().hex[:8]
+        self.user = User.objects.create_user(
+            username=f'testuser_concurrency_{unique_suffix}',
+            email=f'test_concurrency_{unique_suffix}@example.com',
+            password='testpass123'
+        )
+        self.team = Team.objects.create(name=f'Test Team Concurrency {unique_suffix}')
+        self.project = Project.objects.create(
+            name=f'Test Project Concurrency {unique_suffix}',
+            team=self.team
+        )
+        self.project_version = ProjectVersion.objects.create(
+            project=self.project,
+            version_name='v1.0'
+        )
+
+    def test_concurrent_qa_planner_webhooks_preserve_all_completion_statuses(self):
+        """
+        Test that concurrent webhook calls for different QA options
+        don't overwrite each other's completion status.
+
+        This tests the race condition where:
+        1. Webhook A reads log with completion_status={}
+        2. Webhook B reads log with completion_status={}
+        3. Webhook A updates to {inspections: SUCCESS} and saves
+        4. Webhook B updates to {warranties: SUCCESS} and saves
+        5. Result should have BOTH, not just warranties
+        """
+        from apps.deliverables.views.specgpt_views import _handle_qa_planner_webhook
+        from concurrent.futures import ThreadPoolExecutor
+        import threading
+        from django.db import connection
+
+        # Create a QA planner log with multiple options selected
+        qa_options = ['inspections', 'warranties', 'certificates']
+        log = AiGeneratedLog.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            log_type='qa_planner',
+            log_status='PROCESSING',
+            qa_options_selected=qa_options,
+            completion_status={opt: 'PENDING' for opt in qa_options},
+            log_data=[],
+            log_table=''
+        )
+        log_id = log.id
+
+        # Sample data for each option
+        sample_data = {
+            'inspections': [{'Spec Section #': '01 1000', 'item_type': 'inspections'}],
+            'warranties': [{'Spec Section #': '02 2000', 'item_type': 'warranties'}],
+            'certificates': [{'Spec Section #': '03 3000', 'item_type': 'certificates'}],
+        }
+
+        # Use a barrier to ensure all threads start at the same time
+        barrier = threading.Barrier(len(qa_options))
+        errors = []
+
+        def call_webhook(qa_option):
+            try:
+                # Close any existing connection in this thread
+                connection.close()
+
+                # Wait for all threads to be ready
+                barrier.wait()
+
+                # Fetch fresh copy from database (simulating separate webhook calls)
+                fresh_log = AiGeneratedLog.objects.get(id=log_id)
+
+                # Call the handler
+                _handle_qa_planner_webhook(
+                    fresh_log,
+                    qa_option,
+                    'SUCCESS',
+                    sample_data[qa_option],
+                    ''
+                )
+            except Exception as e:
+                import traceback
+                errors.append(f"{qa_option}: {e}\n{traceback.format_exc()}")
+            finally:
+                connection.close()
+
+        # Execute webhooks concurrently
+        with ThreadPoolExecutor(max_workers=len(qa_options)) as executor:
+            futures = [executor.submit(call_webhook, opt) for opt in qa_options]
+            for future in futures:
+                future.result()  # Wait for all to complete
+
+        # Check for any errors during execution
+        self.assertEqual(errors, [], f"Errors during concurrent execution: {errors}")
+
+        # Refresh log from database
+        log = AiGeneratedLog.objects.get(id=log_id)
+
+        # ALL options should have SUCCESS status - this is the key assertion
+        # that will FAIL with the current race condition bug
+        for opt in qa_options:
+            self.assertIn(
+                opt,
+                log.completion_status,
+                f"Option '{opt}' missing from completion_status: {log.completion_status}"
+            )
+            self.assertEqual(
+                log.completion_status[opt],
+                'SUCCESS',
+                f"Option '{opt}' should be SUCCESS but is {log.completion_status.get(opt)}: {log.completion_status}"
+            )
+
+        # Log should be marked as SUCCESS since all options completed
+        self.assertEqual(
+            log.log_status,
+            'SUCCESS',
+            f"Log should be SUCCESS but is {log.log_status}"
+        )
+
+        # All data should be merged
+        self.assertEqual(
+            len(log.log_data),
+            len(qa_options),
+            f"Expected {len(qa_options)} items but got {len(log.log_data)}"
+        )
+
+    def test_sequential_qa_planner_webhooks_work_correctly(self):
+        """
+        Test that sequential webhook calls work correctly (baseline test).
+        This should pass even without the fix.
+        """
+        from apps.deliverables.views.specgpt_views import _handle_qa_planner_webhook
+
+        # Create a QA planner log with multiple options selected
+        qa_options = ['inspections', 'warranties', 'certificates']
+        log = AiGeneratedLog.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            log_type='qa_planner',
+            log_status='PROCESSING',
+            qa_options_selected=qa_options,
+            completion_status={opt: 'PENDING' for opt in qa_options},
+            log_data=[],
+            log_table=''
+        )
+
+        # Sample data for each option
+        sample_data = {
+            'inspections': [{'Spec Section #': '01 1000', 'item_type': 'inspections'}],
+            'warranties': [{'Spec Section #': '02 2000', 'item_type': 'warranties'}],
+            'certificates': [{'Spec Section #': '03 3000', 'item_type': 'certificates'}],
+        }
+
+        # Call webhooks SEQUENTIALLY (not concurrently)
+        for qa_option in qa_options:
+            # Refresh from DB each time (like real webhook calls would)
+            log.refresh_from_db()
+            _handle_qa_planner_webhook(
+                log,
+                qa_option,
+                'SUCCESS',
+                sample_data[qa_option],
+                ''
+            )
+
+        # Refresh log from database
+        log.refresh_from_db()
+
+        # ALL options should have SUCCESS status
+        for opt in qa_options:
+            self.assertIn(opt, log.completion_status)
+            self.assertEqual(log.completion_status[opt], 'SUCCESS')
+
+        # Log should be marked as SUCCESS
+        self.assertEqual(log.log_status, 'SUCCESS')
+
+        # All data should be merged
+        self.assertEqual(len(log.log_data), len(qa_options))
