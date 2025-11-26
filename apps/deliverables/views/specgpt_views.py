@@ -376,76 +376,92 @@ def _create_extracted_data_from_log(ai_log):
 
 
 def _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdown_table):
-    """Handle webhook response for QA planner logs with merging logic."""
-    print(f"_handle_qa_planner_webhook: START - log_id={log_obj.id}, qa_option={qa_option}, new_status={new_status}")
-    print(f"_handle_qa_planner_webhook: BEFORE UPDATE - completion_status={log_obj.completion_status}, qa_options_selected={log_obj.qa_options_selected}")
+    """Handle webhook response for QA planner logs with merging logic.
 
-    # Update completion status for this QA option
-    if log_obj.completion_status is None:
-        log_obj.completion_status = {}
+    Uses select_for_update() to prevent race conditions when multiple webhooks
+    update the same log concurrently.
+    """
+    from django.db import transaction
 
-    log_obj.completion_status[qa_option] = new_status
-    print(f"_handle_qa_planner_webhook: AFTER UPDATE - completion_status={log_obj.completion_status}")
+    log_id = log_obj.id
+    print(f"_handle_qa_planner_webhook: START - log_id={log_id}, qa_option={qa_option}, new_status={new_status}")
 
-    # Add item_type to each data entry if we have structured data
-    if log_data and isinstance(log_data, list):
-        # Tag each item with the QA option type
-        for item in log_data:
-            if isinstance(item, dict):
-                item['item_type'] = qa_option
+    all_complete = False
+    final_status = None
 
-        # Merge with existing log_data
-        if log_obj.log_data is None:
-            log_obj.log_data = []
+    # Use select_for_update to lock the row and prevent race conditions
+    with transaction.atomic():
+        # Re-fetch the log with a lock to get the latest state
+        log_obj = AiGeneratedLog.objects.select_for_update().get(id=log_id)
+        print(f"_handle_qa_planner_webhook: LOCKED & REFRESHED - completion_status={log_obj.completion_status}, qa_options_selected={log_obj.qa_options_selected}")
 
-        log_obj.log_data.extend(log_data)
+        # Update completion status for this QA option
+        if log_obj.completion_status is None:
+            log_obj.completion_status = {}
 
-        # Sort all log_data by spec_section_number (simple string sort works due to leading zeros)
-        log_obj.log_data.sort(key=lambda item: item.get('Spec Section #', ''))
-        print(f"_handle_qa_planner_webhook: Merged and sorted {len(log_data)} items for QA option '{qa_option}' into log {log_obj.id}")
-    else:
-        print(f"_handle_qa_planner_webhook: No log_data to merge for qa_option={qa_option} (log_data={type(log_data).__name__}, length={len(log_data) if log_data else 0})")
+        log_obj.completion_status[qa_option] = new_status
+        print(f"_handle_qa_planner_webhook: AFTER UPDATE - completion_status={log_obj.completion_status}")
 
-    # Merge markdown table data
-    if markdown_table:
-        if log_obj.log_table:
-            log_obj.log_table += f"\n\n## {qa_option.replace('_', ' ').title()}\n\n{markdown_table}"
+        # Add item_type to each data entry if we have structured data
+        if log_data and isinstance(log_data, list):
+            # Tag each item with the QA option type
+            for item in log_data:
+                if isinstance(item, dict):
+                    item['item_type'] = qa_option
+
+            # Merge with existing log_data
+            if log_obj.log_data is None:
+                log_obj.log_data = []
+
+            log_obj.log_data.extend(log_data)
+
+            # Sort all log_data by spec_section_number (simple string sort works due to leading zeros)
+            log_obj.log_data.sort(key=lambda item: item.get('Spec Section #', ''))
+            print(f"_handle_qa_planner_webhook: Merged and sorted {len(log_data)} items for QA option '{qa_option}' into log {log_obj.id}")
         else:
-            log_obj.log_table = f"## {qa_option.replace('_', ' ').title()}\n\n{markdown_table}"
+            print(f"_handle_qa_planner_webhook: No log_data to merge for qa_option={qa_option} (log_data={type(log_data).__name__}, length={len(log_data) if log_data else 0})")
 
-    # Check if all QA options are complete
-    selected_options = log_obj.qa_options_selected or []
-    completed_options = [option_name for option_name in log_obj.completion_status.keys() if log_obj.completion_status[option_name] in ['SUCCESS', 'FAILURE']]
-    all_complete = all(option in completed_options for option in selected_options)
+        # Merge markdown table data
+        if markdown_table:
+            if log_obj.log_table:
+                log_obj.log_table += f"\n\n## {qa_option.replace('_', ' ').title()}\n\n{markdown_table}"
+            else:
+                log_obj.log_table = f"## {qa_option.replace('_', ' ').title()}\n\n{markdown_table}"
 
-    print(f"_handle_qa_planner_webhook: COMPLETION CHECK - selected_options={selected_options}, completed_options={completed_options}, all_complete={all_complete}")
+        # Check if all QA options are complete
+        selected_options = log_obj.qa_options_selected or []
+        completed_options = [option_name for option_name in log_obj.completion_status.keys() if log_obj.completion_status[option_name] in ['SUCCESS', 'FAILURE']]
+        all_complete = all(option in completed_options for option in selected_options)
 
-    # Log which options are still pending
-    if not all_complete:
-        pending_options = [opt for opt in selected_options if opt not in completed_options]
-        print(f"_handle_qa_planner_webhook: STILL PENDING - {pending_options}")
+        print(f"_handle_qa_planner_webhook: COMPLETION CHECK - selected_options={selected_options}, completed_options={completed_options}, all_complete={all_complete}")
 
-    if all_complete:
-        # Determine overall status
-        all_statuses = list(log_obj.completion_status.values())
-        success_count = all_statuses.count('SUCCESS')
-        failure_count = all_statuses.count('FAILURE')
+        # Log which options are still pending
+        if not all_complete:
+            pending_options = [opt for opt in selected_options if opt not in completed_options]
+            print(f"_handle_qa_planner_webhook: STILL PENDING - {pending_options}")
 
-        if failure_count == 0:
-            log_obj.log_status = 'SUCCESS'
-        elif success_count == 0:
-            log_obj.log_status = 'FAILURE'
-        else:
-            log_obj.log_status = 'PARTIAL_SUCCESS'
+        if all_complete:
+            # Determine overall status
+            all_statuses = list(log_obj.completion_status.values())
+            success_count = all_statuses.count('SUCCESS')
+            failure_count = all_statuses.count('FAILURE')
 
-        print(f"_handle_qa_planner_webhook: ALL COMPLETE - log {log_obj.id} final status: {log_obj.log_status}")
-        print(f"_handle_qa_planner_webhook: Individual statuses: {log_obj.completion_status}")
+            if failure_count == 0:
+                log_obj.log_status = 'SUCCESS'
+            elif success_count == 0:
+                log_obj.log_status = 'FAILURE'
+            else:
+                log_obj.log_status = 'PARTIAL_SUCCESS'
 
-    log_obj.save()
-    print(f"_handle_qa_planner_webhook: SAVED log {log_obj.id}")
+            final_status = log_obj.log_status
+            print(f"_handle_qa_planner_webhook: ALL COMPLETE - log {log_obj.id} final status: {log_obj.log_status}")
+            print(f"_handle_qa_planner_webhook: Individual statuses: {log_obj.completion_status}")
 
-    # Create ExtractedData records after successful completion
-    if all_complete and log_obj.log_status in ['SUCCESS', 'PARTIAL_SUCCESS']:
+        log_obj.save()
+        print(f"_handle_qa_planner_webhook: SAVED log {log_obj.id}")
+
+    # Create ExtractedData records after successful completion (outside the lock)
+    if all_complete and final_status in ['SUCCESS', 'PARTIAL_SUCCESS']:
         _create_extracted_data_from_log(log_obj)
 
 
