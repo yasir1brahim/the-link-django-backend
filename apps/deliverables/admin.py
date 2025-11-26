@@ -423,16 +423,15 @@ class AiGeneratedLogAdmin(admin.ModelAdmin):
     list_display = ["id", "project", "project_version", "log_type", "log_status", "created_at"]
     list_filter = ["log_type", "log_status", "created_at", "project", "project_version"]
     search_fields = ["project__name", "project_version__version_name", "log_type"]
-    readonly_fields = ["created_at"]
+    readonly_fields = ["created_at", "qa_options_selected", "completion_status"]
     list_per_page = 50
-    
+
     fieldsets = (
         ('Basic Information', {
             'fields': ('project', 'project_version', 'log_type', 'log_status')
         }),
-        ('Content', {
-            'fields': ('log_table', 'log_data'),
-            'classes': ('collapse',)
+        ('QA Planner Status', {
+            'fields': ('qa_options_selected', 'completion_status'),
         }),
         ('Metadata', {
             'fields': ('created_at',),
