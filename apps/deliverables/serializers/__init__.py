@@ -414,13 +414,26 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
     project_version = serializers.PrimaryKeyRelatedField(queryset=ProjectVersion.objects.all(),
                                                     required=False)
 
-    spec_section = serializers.CharField(required=False)
+    # Accept SpecSection ID and fetch the object
+    spec_section = serializers.PrimaryKeyRelatedField(
+        queryset=SpecSection.objects.all(),
+        required=False,
+        allow_null=True
+    )
     spec_section_title = serializers.CharField(required=False)
     item_desc = serializers.CharField(required=False)
     para_context = serializers.CharField(required=False)
-    para_no = serializers.CharField(required=False)
+    para_no = serializers.CharField(required=False, allow_null=True)
     type = serializers.CharField(required=False)
     added_under_submittal_id = serializers.IntegerField(required=False, allow_null=True)
+
+    # Text location fields for PDF highlighting
+    text_location = serializers.JSONField(required=False, allow_null=True)
+    additional_text_locations = serializers.JSONField(required=False, allow_null=True)
+
+    # Parsing metadata with defaults
+    parsing_method = serializers.CharField(required=False, default='UNKNOWN')
+    parsing_version = serializers.CharField(required=False, default='UNKNOWN')
 
     def get_next_submittal_number(self, project_id):
         current_max_number = (
@@ -437,51 +450,33 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
         return round(current_max_number, 0) + 1
 
     def create(self, validated_data):
-        mf_section, created = MasterFormatSection.objects.get_or_create(
-            masterformat_number=validated_data.get('spec_section')
-        )
+        # Get the spec section (already fetched by PrimaryKeyRelatedField)
+        spec_section = validated_data.get('spec_section')
+
+        # Get masterformat_section and document from the spec_section
+        if spec_section:
+            mf_section = spec_section.masterformat_section
+            document = spec_section.document
+        else:
+            # Fallback: create from masterformat number if no spec_section provided
+            # This maintains backward compatibility with old API calls
+            mf_section, created = MasterFormatSection.objects.get_or_create(
+                masterformat_number=validated_data.get('spec_section_title', 'UNKNOWN')
+            )
+            document = None
+
+        # Handle added_under_submittal_id if provided
+        added_under_submittal = None
         if validated_data.get('added_under_submittal_id'):
             try:
-                added_under_submittal = SubmittalItem.objects.get(id=validated_data.get('added_under_submittal_id'))
+                added_under_submittal = SubmittalItem.objects.get(
+                    id=validated_data.get('added_under_submittal_id')
+                )
                 if added_under_submittal.project_id != validated_data.get('project_id'):
-                    raise SubmittalItem.DoesNotExist
-                document = added_under_submittal.document
-                spec_sections = SpecSection.objects.filter(masterformat_section=mf_section, document=document)
-                if spec_sections.count() > 0:
-                    spec_section = spec_sections.first()
-                else:
-                    spec_section = SpecSection.objects.create(
-                        masterformat_section=mf_section,
-                        document=document,
-                        custom_section_title=validated_data.get('spec_section_title'),
-                    )
+                    added_under_submittal = None
             except SubmittalItem.DoesNotExist:
                 added_under_submittal = None
-                document = None
-                spec_section = None
-        else:
-            added_under_submittal = None
-            document = None
-            spec_section = None
 
-        if not document:
-            sentinel_document = UploadedFile.objects.create(
-                project_id=validated_data.get('project_id'),
-                project_version=validated_data.get('project_version'),
-                name=validated_data.get('spec_section'),
-                document_path=validated_data.get('spec_section'),
-            )
-            document = sentinel_document
-            spec_sections = SpecSection.objects.filter(masterformat_section=mf_section, document=document)
-            if spec_sections.count() > 0:
-                spec_section = spec_sections.first()
-            else:
-                spec_section = SpecSection.objects.create(
-                    masterformat_section=mf_section,
-                    document=document,
-                    custom_section_title=validated_data.get('spec_section_title'),
-                )
-        
         return SubmittalItem.objects.create(
             project_id=validated_data.get('project_id'),
             project_version=validated_data.get('project_version'),
@@ -496,6 +491,10 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             added_under_submittal=added_under_submittal,
             manually_added=True,
             submittal_number=self.get_next_submittal_number(validated_data.get('project_id')),
+            text_location=validated_data.get('text_location'),
+            additional_text_locations=validated_data.get('additional_text_locations', []),
+            parsing_method=validated_data.get('parsing_method', 'UNKNOWN'),
+            parsing_version=validated_data.get('parsing_version', 'UNKNOWN'),
         )
 
     def update(self, instance, validated_data):
@@ -571,6 +570,10 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             'para_no',
             'type',
             'added_under_submittal_id',
+            'text_location',
+            'additional_text_locations',
+            'parsing_method',
+            'parsing_version',
         ]
 
 
