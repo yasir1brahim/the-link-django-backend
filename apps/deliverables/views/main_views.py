@@ -574,6 +574,25 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         project = get_object_or_404(Project, id=project_id)
         serializer.save(updated_by=self.request.user, project_id=self.kwargs.get('project_id'))
 
+    @action(detail=False, methods=['post'], url_path='from-highlight')
+    def create_from_highlight(self, request, project_id=None):
+        """
+        Create a SubmittalItem from a PDF highlight.
+        """
+        from apps.deliverables.serializers import SubmittalItemFromHighlightSerializer
+
+        serializer = SubmittalItemFromHighlightSerializer(
+            data=request.data,
+            context={'request': request, 'project_id': project_id}
+        )
+        serializer.is_valid(raise_exception=True)
+        submittal_item = serializer.save()
+
+        # Return the created item using the read serializer
+        from apps.deliverables.serializers import SubmittalItemReadSerializer
+        read_serializer = SubmittalItemReadSerializer(submittal_item)
+        return Response(read_serializer.data, status=status.HTTP_201_CREATED)
+
     def _get_sel_filter_vals(self, result_queryset):
         return {
             'item_desc': result_queryset.values_list('submittal_description', flat=True).distinct().order_by(),
