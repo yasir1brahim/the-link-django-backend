@@ -375,6 +375,35 @@ def _create_extracted_data_from_log(ai_log):
             print(f"Created {len(extracted_items)} ExtractedData records for log {ai_log.id}")
 
 
+def _check_and_update_log_timeout(log_obj, timeout_seconds=600):
+    """
+    Check if a log has been processing for longer than the timeout threshold.
+    If timed out, update status to TIMEOUT and save.
+
+    Args:
+        log_obj: AiGeneratedLog instance to check
+        timeout_seconds: Timeout threshold in seconds (default: 30 for testing)
+
+    Returns:
+        bool: True if timeout was detected and updated, False otherwise
+    """
+    from datetime import datetime, timedelta, timezone
+
+    if log_obj.log_status != 'PROCESSING':
+        return False
+
+    elapsed_time = datetime.now(timezone.utc) - log_obj.created_at
+    timeout_threshold = timedelta(seconds=timeout_seconds)
+
+    if elapsed_time > timeout_threshold:
+        log_obj.log_status = 'TIMEOUT'
+        log_obj.save(update_fields=['log_status', 'updated_at'])
+        print(f"Log {log_obj.id} timed out after {elapsed_time.total_seconds()} seconds")
+        return True
+
+    return False
+
+
 def _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdown_table):
     """Handle webhook response for QA planner logs with merging logic.
 
@@ -394,6 +423,11 @@ def _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdow
         # Re-fetch the log with a lock to get the latest state
         log_obj = AiGeneratedLog.objects.select_for_update().get(id=log_id)
         print(f"_handle_qa_planner_webhook: LOCKED & REFRESHED - completion_status={log_obj.completion_status}, qa_options_selected={log_obj.qa_options_selected}")
+
+        # If the log has already timed out, ignore this late callback
+        if log_obj.log_status == 'TIMEOUT':
+            print(f"_handle_qa_planner_webhook: TIMEOUT detected - ignoring late callback for log {log_id}, qa_option={qa_option}")
+            return
 
         # Update completion status for this QA option
         if log_obj.completion_status is None:
@@ -525,6 +559,11 @@ def ai_log_generation_webhook(request):
                 print(f"AI LOG GENERATION WEBHOOK: Fallback found no matching log")
 
         if log_obj:
+            # If the log has already timed out, ignore this late callback
+            if log_obj.log_status == 'TIMEOUT':
+                print(f"AI LOG GENERATION WEBHOOK: TIMEOUT detected - ignoring late callback for log {log_obj.id}")
+                return Response(status=status.HTTP_200_OK)
+
             # Handle QA planner logs differently (they need merging)
             if log_obj.log_type == 'qa_planner' and qa_option:
                 print(f"AI LOG GENERATION WEBHOOK: Handling QA planner webhook for option '{qa_option}', current completion_status={log_obj.completion_status}, qa_options_selected={log_obj.qa_options_selected}")
@@ -670,6 +709,10 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         
         # Apply sorting
         queryset = self.apply_sorting(queryset)
+
+        processing_logs = queryset.filter(log_status='PROCESSING')
+        for log in processing_logs:
+            _check_and_update_log_timeout(log)
 
         extracted_items_prefetch = Prefetch(
             'extracted_items',
