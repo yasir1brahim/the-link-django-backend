@@ -14,6 +14,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    networks:
+      - app-network
   # redis:
   #   image: redis
   #   # persistent storage
@@ -39,6 +41,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - app-network
       # redis:
       #   condition: service_healthy
   # celery:
@@ -59,3 +63,7 @@ services:
 volumes:
   postgres_data:
   # redis_data:
+
+networks:
+  app-network:
+    driver: bridge
