@@ -3,7 +3,7 @@ services:
     image: postgres
     # persist data beyond lifetime of container
     volumes:
-      - postgres_data:/var/lib/postgresql/data/
+      - postgres_data:/var/lib/postgresql
     environment:
       - POSTGRES_DB=the_link
       - POSTGRES_USER=postgres
