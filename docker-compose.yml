@@ -11,7 +11,9 @@ services:
     healthcheck:
       test: pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}
       interval: 2s
+      timeout: 5s
       retries: 10
+      start_period: 10s
   # redis:
   #   image: redis
   #   # persistent storage
