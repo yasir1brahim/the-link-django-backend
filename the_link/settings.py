@@ -42,7 +42,7 @@ else:
 ENABLE_DEBUG_TOOLBAR = os.environ.get("ENABLE_DEBUG_TOOLBAR", default=False) and "test" not in sys.argv
 
 # Note: It is not recommended to set ALLOWED_HOSTS to "*" in production
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", default=["*"])
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", default="*").split(",")
 print(f"DEBUG: {DEBUG}")
 print(f"ENABLE_DEBUG_TOOLBAR: {ENABLE_DEBUG_TOOLBAR}")
 
