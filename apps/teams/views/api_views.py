@@ -12,6 +12,7 @@ from apps.api.permissions import IsAuthenticatedOrHasUserAPIKey
 from rest_framework.decorators import action
 from django.core.files.storage import default_storage
 from apps.utils.constants import WELCOME_RESET_SUBJECT
+from apps.utils.feature_flags import get_active_flags_for_team
 
 from ..invitations import send_invitation, process_invitation
 from ..models import Team, Invitation, Membership
@@ -90,8 +91,35 @@ class TeamViewSet(
         team.save()
 
         return Response({'file_url': file_url}, status=status.HTTP_201_CREATED)
-            
-    
+
+    @action(detail=True, methods=['get'], url_path='logo')
+    def logo(self, request, pk=None):
+        """
+        Lightweight endpoint to fetch only team logo and name.
+        Used by components that need company branding without full team details.
+        """
+        team = self.get_object()
+        return Response({
+            'id': team.id,
+            'name': team.name,
+            'logo_url': team.legacy_logo_url
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='flags')
+    def flags(self, request, pk=None):
+        """
+        Lightweight endpoint to fetch only team feature flags.
+        Used by feature flag contexts without requiring full team data.
+        """
+        team = self.get_object()
+        # Use the same helper function as TeamSerializer for consistency
+        active_flags = get_active_flags_for_team(team)
+        return Response({
+            'id': team.id,
+            'active_flags': active_flags
+        }, status=status.HTTP_200_OK)
+
+
 @extend_schema_view(
     update=extend_schema(operation_id="memberships_update"),
     partial_update=extend_schema(operation_id="memberships_partial_update"),

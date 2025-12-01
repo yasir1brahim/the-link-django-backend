@@ -63,7 +63,7 @@ def clean_excel_content(content):
 from django.http import HttpResponse
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from django.db.models import Q, Case, When, IntegerField
+from django.db.models import Q, Case, When, IntegerField, Count
 from django.db import connection, transaction, IntegrityError
 from django.core.exceptions import TooManyFilesSent
 from rest_framework.decorators import api_view, permission_classes
@@ -96,6 +96,7 @@ from ..serializers import (
     ProjectVersionSerializer,
     ProjectMembershipAddSerializer,
     ProjectListSerializer,
+    ProjectOverviewSerializer,
     ProjectWriteSerializer,
     FileUploadSerializer,
     SubmittalItemReadSerializer,
@@ -245,6 +246,8 @@ class ProjectViewSet(viewsets.ModelViewSet):
             return ProjectDetailsSerializer
         if self.action == 'list':
             return ProjectListSerializer
+        if self.action == 'overview':
+            return ProjectOverviewSerializer
         return ProjectWriteSerializer
     
 
@@ -289,6 +292,59 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 queryset = self.queryset.filter(members=self.request.user)
 
         return queryset.select_related('team').prefetch_related('members').prefetch_related('versions').order_by('name')
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='team_id',
+                description='ID of the team to filter projects',
+                required=False,
+                type=OpenApiTypes.INT
+            )
+        ],
+        description="Get a lightweight overview of projects with minimal data for list views. "
+    )
+    @action(detail=False, methods=['get'], url_path='overview')
+    def overview(self, request, *args, **kwargs):
+        """
+        Lightweight endpoint for project list/overview pages.
+        Returns minimal project data.
+        """
+
+        team_id = request.query_params.get('team_id', None)
+
+        if team_id is not None:
+            try:
+                team_id = int(team_id)
+                team = get_object_or_404(Team, id=team_id)
+
+                # Check if the user is a member of the team
+                if not request.user.is_member_of_team(team):
+                    raise PermissionDenied("You don't have permission to access projects for this team.")
+
+                # Filter based on user role
+                if request.user.is_admin_for_team(team):
+                    queryset = self.queryset.filter(team_id=team_id)
+                else:
+                    queryset = self.queryset.filter(team_id=team_id, members=request.user)
+            except ValueError:
+                raise DRFValidationError("Invalid team_id. Must be an integer.")
+        else:
+            if request.user.is_superuser:
+                queryset = self.queryset
+            else:
+                queryset = self.queryset.filter(members=request.user)
+
+        queryset = queryset.annotate(_members_count=Count('members')).order_by('name')
+
+        # Paginate if pagination is enabled
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
     def perform_create(self, serializer):
         print(f"serializer.validated_data: {serializer.validated_data}")
