@@ -79,14 +79,11 @@ ENV BACKEND_BASE_URL=$BACKEND_BASE_URL
 
 RUN apt-get update && apt-get install -y apt-transport-https gnupg
 
-# install node/npm
+# install node/npm using NodeSource's current setup script
 RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     --mount=target=/var/cache/apt,type=cache,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
-    mkdir -p /etc/apt/keyrings && \
-    wget -qO- https://deb.nodesource.com/gpgkey/nodesource.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x bookworm main" > /etc/apt/sources.list.d/nodesource.list && \
-    apt-get update && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -yqq nodejs \
     # install gettext for translations
     gettext
