@@ -5,7 +5,7 @@ from rest_framework import status
 from django.contrib.auth import get_user_model
 from apps.teams.models import Team, Membership as TeamMembership
 from apps.deliverables.models import (
-    Project, ProjectMembership, ProjectVersion, AiGeneratedLog,
+    Project, ProjectMembership, ProjectVersion, AiGeneratedLog, ExtractedData,
     ROLE_PROJECT_ADMIN, ROLE_PROJECT_MEMBER
 )
 
@@ -542,6 +542,86 @@ class AiGeneratedLogExportTests(APITestCase):
             'pk': log_with_nested_data.id
         })
         response = self.client.get(url)
-        
+
         # Should successfully export
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_export_uses_extracted_data_when_log_data_is_empty(self):
+        """Test that export works when data is in ExtractedData model but log_data is empty.
+
+        This tests the migration scenario where data was moved from the legacy log_data
+        JSON field to the new ExtractedData model via FK relationship.
+        """
+        # Create a log with NO log_data (simulating post-migration state)
+        log_with_extracted_data = AiGeneratedLog.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            log_type='owner_deliverables_log',
+            log_status='SUCCESS',
+            log_table='# Test Table',
+            log_data=None  # Empty - data is in ExtractedData instead
+        )
+
+        # Create ExtractedData records linked to this log (as migration would do)
+        ExtractedData.objects.create(
+            ai_generated_log=log_with_extracted_data,
+            project=self.project,
+            project_version=self.project_version,
+            spec_section_number='01 1000',
+            spec_section_name='General Requirements',
+            extraction_type='owner_deliverables_log',
+            requirement_text='Submit complete as-built drawings',
+            responsible_party='Contractor',
+            source='AI',
+            metadata={
+                'deliverable_type': 'As-Built Drawings',
+                'when_due': 'At Project Completion',
+                'raw_item': {
+                    'Spec Section #': '01 1000',
+                    'Spec Section Name': 'General Requirements',
+                    'Deliverable Type': 'As-Built Drawings',
+                    'When Due': 'At Project Completion',
+                    'Responsible Party': 'Contractor',
+                    'Exact Requirement Text': 'Submit complete as-built drawings'
+                }
+            }
+        )
+
+        ExtractedData.objects.create(
+            ai_generated_log=log_with_extracted_data,
+            project=self.project,
+            project_version=self.project_version,
+            spec_section_number='02 3000',
+            spec_section_name='Earthwork',
+            extraction_type='owner_deliverables_log',
+            requirement_text='Provide compaction test reports',
+            responsible_party='Testing Agency',
+            source='AI',
+            metadata={
+                'deliverable_type': 'Test Reports',
+                'when_due': 'Before Final Inspection',
+                'raw_item': {
+                    'Spec Section #': '02 3000',
+                    'Spec Section Name': 'Earthwork',
+                    'Deliverable Type': 'Test Reports',
+                    'When Due': 'Before Final Inspection',
+                    'Responsible Party': 'Testing Agency',
+                    'Exact Requirement Text': 'Provide compaction test reports'
+                }
+            }
+        )
+
+        self.client.force_authenticate(user=self.user)
+        url = reverse('ai-generated-log-export', kwargs={
+            'project_id': self.project.id,
+            'pk': log_with_extracted_data.id
+        })
+        response = self.client.get(url)
+
+        # Should successfully export using ExtractedData records
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response['content-type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        self.assertIn('Owner Deliverables Log_Export.xlsx', response['Content-Disposition'])
