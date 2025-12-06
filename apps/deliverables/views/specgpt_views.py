@@ -843,15 +843,23 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            logger.info(f"{log_prefix} Checking log_data availability")
-            if not log_obj.log_data:
-                logger.warning(f"{log_prefix} No log_data available for log_id={pk}")
+            # Check for data availability - either ExtractedData records or legacy log_data
+            has_extracted_items = log_obj.extracted_items.exists() if hasattr(log_obj, 'extracted_items') else False
+            has_log_data = bool(log_obj.log_data)
+
+            logger.info(f"{log_prefix} Data availability: extracted_items={has_extracted_items}, log_data={has_log_data}")
+
+            if not has_extracted_items and not has_log_data:
+                logger.warning(f"{log_prefix} No data available for log_id={pk}")
                 return Response(
-                    {'error': 'No data available for export'}, 
+                    {'error': 'No data available for export'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
-            logger.info(f"{log_prefix} log_data contains {len(log_obj.log_data)} items")
+
+            if has_extracted_items:
+                logger.info(f"{log_prefix} Using ExtractedData records: {log_obj.extracted_items.count()} items")
+            elif has_log_data:
+                logger.info(f"{log_prefix} log_data contains {len(log_obj.log_data)} items")
             
             # Get filter, search, and sort parameters
             logger.info(f"{log_prefix} Processing filter parameters")
