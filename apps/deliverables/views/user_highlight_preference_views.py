@@ -42,9 +42,12 @@ class UserHighlightPreferenceViewSet(viewsets.ViewSet):
         Returns 404 if no preference exists yet.
         """
         project = self._get_project()
+        self.check_object_permissions(request, project)
 
         try:
-            preference = UserHighlightPreference.objects.get(
+            preference = UserHighlightPreference.objects.select_related(
+                'custom_item_type', 'project', 'user'
+            ).get(
                 user=request.user,
                 project=project
             )
@@ -62,6 +65,7 @@ class UserHighlightPreferenceViewSet(viewsets.ViewSet):
         Uses upsert logic - only one preference per user per project.
         """
         project = self._get_project()
+        self.check_object_permissions(request, project)
 
         serializer = UserHighlightPreferenceSerializer(
             data=request.data,

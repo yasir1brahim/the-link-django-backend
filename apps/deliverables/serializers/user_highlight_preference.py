@@ -1,3 +1,4 @@
+from django.core.validators import RegexValidator
 from rest_framework import serializers
 
 from apps.deliverables.models import UserHighlightPreference, CustomItemType
@@ -23,16 +24,38 @@ class UserHighlightPreferenceSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
+    def validate_type_color(self, value):
+        """Validate that type_color is in HEX format (#RRGGBB)."""
+        validator = RegexValidator(
+            regex=r"^#[0-9A-Fa-f]{6}$",
+            message="Color must be in HEX format (#RRGGBB).",
+        )
+        validator(value)
+        return value.upper()
+
     def validate(self, data):
         """
         Validate that either custom_item_type or standard_item_type is set based on is_custom_type.
+        Also validates that custom_item_type belongs to the correct project and is active.
         """
         is_custom = data.get("is_custom_type", False)
 
         if is_custom:
-            if not data.get("custom_item_type"):
+            custom_item_type = data.get("custom_item_type")
+            if not custom_item_type:
                 raise serializers.ValidationError(
                     "custom_item_type is required when is_custom_type is True."
+                )
+            # Validate custom_item_type belongs to the correct project
+            project = self.context.get("project")
+            if project and custom_item_type.project_id != project.id:
+                raise serializers.ValidationError(
+                    "custom_item_type must belong to the same project."
+                )
+            # Validate custom_item_type is active
+            if not custom_item_type.is_active:
+                raise serializers.ValidationError(
+                    "custom_item_type must be active."
                 )
         else:
             if not data.get("standard_item_type"):
