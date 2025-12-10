@@ -110,26 +110,17 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         logger.info(f"Starting DB-level query for log {instance.id} (type: {instance.log_type})")
         logger.debug(f"Filter params: {filter_params}, Search: {search_term}, Sort: {sort_field} {sort_direction}")
 
-        # Start with base queryset for this log's extracted items
+        # Combine AI-generated items for this log with human-created highlights
+        # Using Q objects with | operator instead of union() to avoid intermediate query evaluation
         queryset = ExtractedData.objects.filter(
-            ai_generated_log=instance
-        ).select_related('created_by', 'spec_section__masterformat_section')
-
-        # Always include human-created highlights that match the same context
-        human_items_qs = ExtractedData.objects.filter(
-            ai_generated_log__isnull=True,
-            project=instance.project,
-            project_version=instance.project_version,
-            extraction_type=instance.log_type,
-            source=ExtractionSource.HUMAN,
-        ).select_related('created_by', 'spec_section__masterformat_section')
-
-        # Combine querysets
-        queryset = queryset.union(human_items_qs)
-
-        # Need to re-wrap in queryset for further operations
-        queryset = ExtractedData.objects.filter(
-            id__in=queryset.values_list('id', flat=True)
+            Q(ai_generated_log=instance) |
+            Q(
+                ai_generated_log__isnull=True,
+                project=instance.project,
+                project_version=instance.project_version,
+                extraction_type=instance.log_type,
+                source=ExtractionSource.HUMAN,
+            )
         ).select_related('created_by', 'spec_section__masterformat_section')
 
         logger.debug(f"Base queryset count (before filters): {queryset.count()}")
