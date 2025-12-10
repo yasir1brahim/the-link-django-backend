@@ -219,9 +219,163 @@ class ProjectViewSetQuerySetTests(APITestCase):
     def test_unauthenticated_user_denied(self):
         """Test that unauthenticated users cannot access projects"""
         response = self.client.get(self.url)
-        
+
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+
+class ProjectOverviewEndpointTests(APITestCase):
+    """Tests for the lightweight project overview endpoint."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.User = get_user_model()
+
+        # Create users
+        self.team_admin = self.User.objects.create_user(
+            username='team_admin',
+            password='password123'
+        )
+        self.team_member = self.User.objects.create_user(
+            username='team_member',
+            password='password123'
+        )
+        self.other_user = self.User.objects.create_user(
+            username='other_user',
+            password='password123'
+        )
+        self.superuser = self.User.objects.create_superuser(
+            username='superuser',
+            password='password123'
+        )
+
+        # Create teams
+        self.team = Team.objects.create(name='Test Team', slug='test-team')
+        self.other_team = Team.objects.create(name='Other Team', slug='other-team')
+
+        # Set up team memberships
+        TeamMembership.objects.create(
+            user=self.team_admin,
+            team=self.team,
+            role=ROLE_ADMIN
+        )
+        TeamMembership.objects.create(
+            user=self.team_member,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+
+        # Create projects
+        self.project1 = Project.objects.create(name='Project A', team=self.team)
+        self.project2 = Project.objects.create(name='Project B', team=self.team)
+        self.project3 = Project.objects.create(name='Project C', team=self.other_team)
+
+        # Add team_member to project1 only
+        ProjectMembership.objects.create(
+            user=self.team_member,
+            project=self.project1,
+            role=ROLE_PROJECT_MEMBER
+        )
+        # Add team_member as admin to project2
+        ProjectMembership.objects.create(
+            user=self.team_member,
+            project=self.project2,
+            role=ROLE_PROJECT_ADMIN
+        )
+
+        self.url = reverse('deliverables:project-overview')
+
+    def test_overview_returns_lightweight_fields(self):
+        """Test that overview endpoint returns only essential fields."""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Check that only lightweight fields are returned
+        project = response.data['results'][0]
+        expected_fields = {'id', 'name', 'project_number', 'start_date', 'end_date',
+                          'is_archived', 'members_count', 'current_user_role'}
+        self.assertEqual(set(project.keys()), expected_fields)
+
+    def test_overview_includes_members_count(self):
+        """Test that members_count is included and accurate."""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # project1 has 1 member, project2 has 1 member
+        results_by_name = {p['name']: p for p in response.data['results']}
+        self.assertEqual(results_by_name['Project A']['members_count'], 1)
+        self.assertEqual(results_by_name['Project B']['members_count'], 1)
+
+    def test_overview_includes_current_user_role(self):
+        """Test that current_user_role is included and correct."""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results_by_name = {p['name']: p for p in response.data['results']}
+        # team_member is project_member in project1, project_admin in project2
+        self.assertEqual(results_by_name['Project A']['current_user_role'], ROLE_PROJECT_MEMBER)
+        self.assertEqual(results_by_name['Project B']['current_user_role'], ROLE_PROJECT_ADMIN)
+
+    def test_overview_superuser_is_project_admin(self):
+        """Test that superusers get project_admin role."""
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        for project in response.data['results']:
+            self.assertEqual(project['current_user_role'], 'project_admin')
+
+    def test_overview_team_admin_sees_all_team_projects(self):
+        """Test that team admins see all projects in their team."""
+        self.client.force_authenticate(user=self.team_admin)
+        response = self.client.get(f"{self.url}?team_id={self.team.id}")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 2)
+        project_names = {p['name'] for p in response.data['results']}
+        self.assertEqual(project_names, {'Project A', 'Project B'})
+
+    def test_overview_non_member_gets_404(self):
+        """Test that non-members get 404 when filtering by team they're not in."""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(f"{self.url}?team_id={self.other_team.id}")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_overview_non_existent_team_gets_404(self):
+        """Test that non-existent team_id returns 404."""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(f"{self.url}?team_id=99999")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_overview_invalid_team_id_returns_400(self):
+        """Test that invalid team_id returns 400."""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(f"{self.url}?team_id=invalid")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_overview_unauthenticated_user_denied(self):
+        """Test that unauthenticated users cannot access overview."""
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_overview_ordered_by_name_and_id(self):
+        """Test that results are ordered deterministically by name then id."""
+        # Create projects with same name
+        Project.objects.create(name='Project A', team=self.team)
+
+        self.client.force_authenticate(user=self.team_admin)
+        response = self.client.get(f"{self.url}?team_id={self.team.id}")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Should be ordered by name, then by id for deterministic pagination
+        names = [p['name'] for p in response.data['results']]
+        self.assertEqual(names, sorted(names))
 
 
 class ProjectViewSetTests(APITestCase):

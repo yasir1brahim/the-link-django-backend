@@ -250,6 +250,60 @@ class ProjectListSerializer(BaseProjectSerializer):
         model = Project
         fields = BaseProjectSerializer.Meta.fields
 
+
+class ProjectOverviewSerializer(serializers.ModelSerializer):
+    """
+    Lightweight serializer for project list/overview pages.
+    Returns only essential fields to minimize payload size and improve performance.
+    """
+    members_count = serializers.SerializerMethodField()
+    current_user_role = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Project
+        fields = ['id', 'name', 'project_number', 'start_date', 'end_date',
+                  'is_archived', 'members_count', 'current_user_role']
+
+    def get_members_count(self, obj):
+        """
+        Return the count of members without fetching member details.
+        Uses prefetched data if available to avoid N+1 queries.
+        """
+        # Check if members are prefetched (will be an attribute)
+        if hasattr(obj, '_members_count'):
+            return obj._members_count
+        # Fallback to counting related objects
+        return obj.project_memberships.count()
+
+    def get_current_user_role(self, obj):
+        """
+        Get the current user's role in this project.
+        Returns 'project_admin', 'project_member', or None if not a member.
+        Uses prefetched data if available to avoid N+1 queries.
+        """
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return None
+
+        # Check if user is superuser
+        if request.user.is_superuser:
+            return 'project_admin'
+
+        # Use prefetched data if available (set by overview endpoint)
+        if hasattr(obj, '_current_user_memberships'):
+            memberships = obj._current_user_memberships
+            if memberships:
+                return memberships[0].role
+            return None
+
+        # Fallback to querying if not prefetched
+        membership = obj.project_memberships.filter(user=request.user).first()
+        if membership:
+            return membership.role
+
+        return None
+
+
 class ProjectDetailsSerializer(BaseProjectSerializer):
     doc_parsed = serializers.SerializerMethodField()
     document_details = serializers.SerializerMethodField()

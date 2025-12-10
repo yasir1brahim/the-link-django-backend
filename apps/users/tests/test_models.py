@@ -107,3 +107,47 @@ class CustomUserModelTest(TestCase):
         self.assertTrue(self.team_member.is_member_of_project(self.project))
         self.assertFalse(self.not_team_member.is_member_of_project(self.project))
         self.assertFalse(self.team_member_not_project_member.is_member_of_project(self.project))
+
+    def test_get_all_team_roles_returns_correct_roles(self):
+        """Test that get_all_team_roles returns correct mapping of team_id to role."""
+        roles = self.team_admin.get_all_team_roles()
+        self.assertEqual(roles, {self.team.id: ROLE_ADMIN})
+
+        roles = self.team_member.get_all_team_roles()
+        self.assertEqual(roles, {self.team.id: ROLE_MEMBER})
+
+    def test_get_all_team_roles_returns_empty_for_no_teams(self):
+        """Test that get_all_team_roles returns empty dict for user with no teams."""
+        roles = self.not_team_member.get_all_team_roles()
+        self.assertEqual(roles, {})
+
+    def test_get_all_team_roles_multiple_teams(self):
+        """Test that get_all_team_roles handles users in multiple teams."""
+        # Create another team and add team_member
+        team2 = Team.objects.create(name="Test Team 2", slug="test-team-2")
+        TeamMembership.objects.create(
+            user=self.team_member,
+            team=team2,
+            role=ROLE_ADMIN
+        )
+
+        roles = self.team_member.get_all_team_roles()
+        self.assertEqual(roles, {
+            self.team.id: ROLE_MEMBER,
+            team2.id: ROLE_ADMIN
+        })
+
+    def test_get_all_team_roles_superuser(self):
+        """Test that superusers get admin role for all their teams."""
+        superuser = CustomUser.objects.create_superuser(
+            username="superuser",
+            password="password"
+        )
+        TeamMembership.objects.create(
+            user=superuser,
+            team=self.team,
+            role=ROLE_MEMBER  # Even though role is member, superuser should get admin
+        )
+
+        roles = superuser.get_all_team_roles()
+        self.assertEqual(roles, {self.team.id: ROLE_ADMIN})
