@@ -60,10 +60,10 @@ def clean_excel_content(content):
     
     return content
 
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from django.db.models import Q, Case, When, IntegerField, Count
+from django.db.models import Q, Case, When, IntegerField, Count, Prefetch
 from django.db import connection, transaction, IntegrityError
 from django.core.exceptions import TooManyFilesSent
 from rest_framework.decorators import api_view, permission_classes
@@ -319,8 +319,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 team = get_object_or_404(Team, id=team_id)
 
                 # Check if the user is a member of the team
+                # Return 404 instead of 403 to avoid disclosing team existence to non-members
                 if not request.user.is_member_of_team(team):
-                    raise PermissionDenied("You don't have permission to access projects for this team.")
+                    raise Http404()
 
                 # Filter based on user role
                 if request.user.is_admin_for_team(team):
@@ -335,7 +336,14 @@ class ProjectViewSet(viewsets.ModelViewSet):
             else:
                 queryset = self.queryset.filter(members=request.user)
 
-        queryset = queryset.annotate(_members_count=Count('members')).order_by('name')
+        # Prefetch only the current user's membership to avoid N+1 queries in serializer
+        queryset = queryset.prefetch_related(
+            Prefetch(
+                'project_memberships',
+                queryset=ProjectMembership.objects.filter(user=request.user),
+                to_attr='_current_user_memberships'
+            )
+        ).annotate(_members_count=Count('members')).order_by('name', 'id')
 
         # Paginate if pagination is enabled
         page = self.paginate_queryset(queryset)

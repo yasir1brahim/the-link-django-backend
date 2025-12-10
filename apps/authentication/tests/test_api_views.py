@@ -35,7 +35,82 @@ class TestLogin(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['status'], 'success')
 
-        
+
+class TestLoginTeamRoles(APITestCase):
+    """Tests for team_roles inclusion in authentication responses."""
+
+    def setUp(self):
+        self.user = CustomUser.objects.create_user(
+            username='testuser',
+            email='testuser@example.com',
+            password='testpassword'
+        )
+        self.team1 = Team.objects.create(name='Team 1', slug='team-1')
+        self.team2 = Team.objects.create(name='Team 2', slug='team-2')
+
+    def test_login_includes_team_roles(self):
+        """Test that login response includes team_roles at root level."""
+        TeamMembership.objects.create(
+            user=self.user,
+            team=self.team1,
+            role=ROLE_ADMIN
+        )
+        TeamMembership.objects.create(
+            user=self.user,
+            team=self.team2,
+            role=ROLE_MEMBER
+        )
+
+        url = reverse('authentication:rest_login')
+        response = self.client.post(url, data={
+            'email': 'testuser@example.com',
+            'password': 'testpassword'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # team_roles is at root level, not inside jwt.user
+        self.assertIn('team_roles', response.data)
+        team_roles = response.data['team_roles']
+        self.assertEqual(team_roles[self.team1.id], ROLE_ADMIN)
+        self.assertEqual(team_roles[self.team2.id], ROLE_MEMBER)
+
+    def test_login_team_roles_empty_for_no_teams(self):
+        """Test that team_roles is empty dict for user with no teams."""
+        url = reverse('authentication:rest_login')
+        response = self.client.post(url, data={
+            'email': 'testuser@example.com',
+            'password': 'testpassword'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # team_roles is at root level
+        self.assertIn('team_roles', response.data)
+        self.assertEqual(response.data['team_roles'], {})
+
+    def test_login_superuser_gets_admin_roles(self):
+        """Test that superuser gets admin role for all their teams."""
+        superuser = CustomUser.objects.create_superuser(
+            username='superuser',
+            email='super@example.com',
+            password='superpassword'
+        )
+        TeamMembership.objects.create(
+            user=superuser,
+            team=self.team1,
+            role=ROLE_MEMBER  # Even though role is member
+        )
+
+        url = reverse('authentication:rest_login')
+        response = self.client.post(url, data={
+            'email': 'super@example.com',
+            'password': 'superpassword'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        team_roles = response.data['team_roles']
+        # Superuser should get admin role
+        self.assertEqual(team_roles[self.team1.id], ROLE_ADMIN)
+
 
 class UserStatusUpdateViewTests(APITestCase):
 

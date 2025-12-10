@@ -79,9 +79,9 @@ class CustomUser(AbstractUser):
             # For superusers, return all teams as admin
             return {team.id: ROLE_ADMIN for team in self.teams.all()}
 
-        # Get all memberships for this user efficiently
-        memberships = self.teams.through.objects.filter(user=self).select_related('team')
-        return {membership.team_id: membership.role for membership in memberships}
+        # Get all memberships for this user efficiently using .values() to avoid loading full objects
+        memberships = self.teams.through.objects.filter(user=self).values('team_id', 'role')
+        return {membership['team_id']: membership['role'] for membership in memberships}
 
     def is_admin_for_project(self, project):
         from apps.deliverables.models import ROLE_PROJECT_ADMIN, Project

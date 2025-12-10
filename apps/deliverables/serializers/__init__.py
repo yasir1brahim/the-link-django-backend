@@ -279,6 +279,7 @@ class ProjectOverviewSerializer(serializers.ModelSerializer):
         """
         Get the current user's role in this project.
         Returns 'project_admin', 'project_member', or None if not a member.
+        Uses prefetched data if available to avoid N+1 queries.
         """
         request = self.context.get('request')
         if not request or not request.user or not request.user.is_authenticated:
@@ -288,7 +289,14 @@ class ProjectOverviewSerializer(serializers.ModelSerializer):
         if request.user.is_superuser:
             return 'project_admin'
 
-        # Find the user's membership in this project
+        # Use prefetched data if available (set by overview endpoint)
+        if hasattr(obj, '_current_user_memberships'):
+            memberships = obj._current_user_memberships
+            if memberships:
+                return memberships[0].role
+            return None
+
+        # Fallback to querying if not prefetched
         membership = obj.project_memberships.filter(user=request.user).first()
         if membership:
             return membership.role
