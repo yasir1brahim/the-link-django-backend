@@ -1,6 +1,8 @@
 from collections.abc import Mapping
+import logging
 
 from rest_framework import serializers
+from django.db.models import Q
 from apps.deliverables.models import (
     Chat,
     ChatMessage,
@@ -9,6 +11,8 @@ from apps.deliverables.models import (
     ExtractionSource,
 )
 from apps.utils.feature_flags import is_inspection_log_use_data_tables_feature_flag_active
+
+logger = logging.getLogger(__name__)
 
 
 class ChatMessageSerializer(serializers.ModelSerializer):
@@ -85,6 +89,149 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
             return [dict(row) for row in original_data]
 
         return original_data
+
+    def query_extracted_data_with_filters(self, instance, filter_params=None, search_term=None, sort_field='spec_section_number', sort_direction='asc', page=1, page_size=50):
+        """
+        Query ExtractedData at DB level with filtering, searching, sorting, and pagination.
+        This replaces the Python-level data processing for better performance.
+
+        Args:
+            instance: AiGeneratedLog instance
+            filter_params: Dict of column names to lists of filter values
+            search_term: String to search across text fields
+            sort_field: Field name to sort by
+            sort_direction: 'asc' or 'desc'
+            page: Page number (1-indexed)
+            page_size: Number of items per page
+
+        Returns:
+            Dict with 'data' (list of formatted items) and 'pagination' (metadata)
+        """
+        logger.info(f"Starting DB-level query for log {instance.id} (type: {instance.log_type})")
+        logger.debug(f"Filter params: {filter_params}, Search: {search_term}, Sort: {sort_field} {sort_direction}")
+
+        # Combine AI-generated items for this log with human-created highlights
+        # Using Q objects with | operator instead of union() to avoid intermediate query evaluation
+        queryset = ExtractedData.objects.filter(
+            Q(ai_generated_log=instance) |
+            Q(
+                ai_generated_log__isnull=True,
+                project=instance.project,
+                project_version=instance.project_version,
+                extraction_type=instance.log_type,
+                source=ExtractionSource.HUMAN,
+            )
+        ).select_related('created_by', 'spec_section__masterformat_section')
+
+        logger.debug(f"Base queryset count (before filters): {queryset.count()}")
+
+        # Apply filters
+        if filter_params:
+            filter_q = Q()
+            for column_key, values in filter_params.items():
+                if not values:
+                    continue
+
+                # Map UI column names to database field names
+                if column_key == 'Spec Section #':
+                    # OR logic within the same column
+                    column_q = Q(spec_section_number__in=values)
+                elif column_key == 'item_type':
+                    column_q = Q(item_type__in=values)
+                elif column_key == 'Responsible Party':
+                    column_q = Q(responsible_party__in=values)
+                elif column_key == 'Deliverable Type':
+                    # For owner_deliverables_log
+                    column_q = Q(metadata__deliverable_type__in=values)
+                else:
+                    # Skip unknown columns
+                    logger.warning(f"Unknown filter column: {column_key}")
+                    continue
+
+                # AND logic across different columns
+                filter_q &= column_q
+
+            if filter_q:
+                queryset = queryset.filter(filter_q)
+                logger.debug(f"Queryset count after filtering: {queryset.count()}")
+
+        # Apply search
+        if search_term:
+            search_q = Q(
+                Q(spec_section_number__icontains=search_term) |
+                Q(spec_section_name__icontains=search_term) |
+                Q(requirement_text__icontains=search_term) |
+                Q(responsible_party__icontains=search_term) |
+                Q(paragraph_number__icontains=search_term) |
+                Q(item_type__icontains=search_term)
+            )
+            queryset = queryset.filter(search_q)
+            logger.debug(f"Queryset count after search: {queryset.count()}")
+
+        # Apply sorting
+        # Map UI sort field names to database field names
+        sort_field_mapping = {
+            'spec_section_number': 'spec_section_number',
+            'spec_section_name': 'spec_section_name',
+            'paragraph_number': 'paragraph_number',
+            'item_type': 'item_type',
+            'requirement_text': 'requirement_text',
+            'responsible_party': 'responsible_party',
+            'when_due': 'metadata__when_due',
+            'created_at': 'created_at',
+            'inspection_type_and_requirements': 'requirement_text',
+            'inspection_frequency': 'metadata__inspection_frequency',
+            'deliverable_type': 'metadata__deliverable_type',
+        }
+
+        db_sort_field = sort_field_mapping.get(sort_field, 'spec_section_number')
+        sort_prefix = '-' if sort_direction == 'desc' else ''
+
+        # Handle None values in sorting by using multiple order_by clauses
+        # Always add 'id' as final sort to ensure consistent ordering
+        queryset = queryset.order_by(f'{sort_prefix}{db_sort_field}', 'id')
+        logger.debug(f"Sorting by: {sort_prefix}{db_sort_field}")
+
+        # Get total count before pagination
+        total_items = queryset.count()
+        logger.info(f"Total items after all filters: {total_items}")
+
+        # Apply pagination
+        page = max(1, page)
+        page_size = max(1, min(page_size, 100))  # Limit page size to 100
+
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
+
+        # Get paginated items
+        paginated_items = queryset[start_index:end_index]
+        logger.debug(f"Fetching items {start_index} to {end_index}")
+
+        # Format items using existing format method
+        formatted_data = [self._format_extracted_item(item) for item in paginated_items]
+
+        # Calculate pagination metadata
+        total_pages = (total_items + page_size - 1) // page_size
+        has_next = page < total_pages
+        has_previous = page > 1
+
+        pagination_info = {
+            'current_page': page,
+            'page_size': page_size,
+            'total_items': total_items,
+            'total_pages': total_pages,
+            'has_next': has_next,
+            'has_previous': has_previous,
+            'next_page': page + 1 if has_next else None,
+            'previous_page': page - 1 if has_previous else None,
+        }
+
+        logger.info(f"Returning {len(formatted_data)} items (page {page}/{total_pages})")
+
+        return {
+            'data': formatted_data,
+            'pagination': pagination_info
+        }
 
     def _format_extracted_item(self, item: ExtractedData):
         """Convert an ExtractedData instance into the legacy structured row format."""
@@ -169,15 +316,28 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         """
         Override to_representation to apply sorting and pagination to structured data.
+        Now using DB-level queries for better performance.
         """
         data = super().to_representation(instance)
 
-        structured_rows = self.build_structured_rows(instance)
-        data['log_data'] = structured_rows
-
-        # Apply filtering, search, sorting and pagination to structured rows if they exist
         request = self.context.get('request')
-        if structured_rows and request:
+
+        # Check if we have ExtractedData records available
+        has_extracted_data = hasattr(instance, 'extracted_items') and instance.extracted_items.exists()
+
+        # Also check for human-created highlights
+        has_human_highlights = ExtractedData.objects.filter(
+            ai_generated_log__isnull=True,
+            project=instance.project,
+            project_version=instance.project_version,
+            extraction_type=instance.log_type,
+            source=ExtractionSource.HUMAN,
+        ).exists()
+
+        # Use DB-level query if we have ExtractedData records
+        if (has_extracted_data or has_human_highlights) and request:
+            logger.info(f"Using DB-level query for log {instance.id}")
+
             query_params = self._coerce_query_params(request)
 
             # Get filter parameters if available
@@ -197,6 +357,8 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
                     column_key = 'item_type'
                 elif column_key == 'Responsible Party':
                     column_key = 'Responsible Party'
+                elif column_key == 'Deliverable Type':
+                    column_key = 'Deliverable Type'
 
                 if isinstance(param_value, str):
                     values = [value for value in param_value.split(',') if value]
@@ -207,49 +369,123 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
 
                 filter_params[column_key] = values
 
-            # Apply column-based filtering if filter parameters are provided
-            if filter_params:
-                filtered_data = self.filter_structured_data(structured_rows, filter_params)
-            else:
-                filtered_data = structured_rows
-            
             # Get search parameter if available
             search_term = getattr(request, 'search_term', None)
             if not search_term and query_params:
                 search_term = query_params.get('search', '')
-            
-            # Apply search filtering if search term is provided
-            if search_term:
-                filtered_data = self.search_structured_data(filtered_data, search_term)
-            else:
-                filtered_data = filtered_data
-            
+
             # Get sorting parameters if available
             sort_field = getattr(request, 'sort_field', 'spec_section_number')
             sort_direction = getattr(request, 'sort_direction', 'asc')
-            
-            # Apply sorting if sorting parameters are provided
-            sorted_data = self.sort_structured_data(filtered_data, sort_field, sort_direction)
-            
-            # Check if pagination parameters are present
-            page = None
-            page_size = None
-            if query_params:
-                page = query_params.get('page')
-                page_size = query_params.get('page_size')
-            
-            # Always apply pagination for structured data to provide pagination info
-            # Use default page=1 and page_size=50 if not specified
-            if not page:
+
+            # Get pagination parameters
+            page = query_params.get('page', 1)
+            page_size = query_params.get('page_size', 50)
+
+            try:
+                page = int(page)
+            except (TypeError, ValueError):
                 page = 1
-            if not page_size:
+
+            try:
+                page_size = int(page_size)
+            except (TypeError, ValueError):
                 page_size = 50
-            
-            # Apply pagination to sorted data
-            paginated_data = self.paginate_structured_data(sorted_data, request, default_page=page, default_page_size=page_size)
-            data['log_data'] = paginated_data['data']
-            data['pagination'] = paginated_data['pagination']
-        
+
+            # Use the new DB-level query method
+            result = self.query_extracted_data_with_filters(
+                instance,
+                filter_params=filter_params if filter_params else None,
+                search_term=search_term if search_term else None,
+                sort_field=sort_field,
+                sort_direction=sort_direction,
+                page=page,
+                page_size=page_size
+            )
+
+            data['log_data'] = result['data']
+            data['pagination'] = result['pagination']
+        else:
+            # Fallback to old method for logs without ExtractedData records
+            logger.info(f"Falling back to Python-level processing for log {instance.id} (no ExtractedData records)")
+
+            structured_rows = self.build_structured_rows(instance)
+            data['log_data'] = structured_rows
+
+            # Apply filtering, search, sorting and pagination to structured rows if they exist
+            if structured_rows and request:
+                query_params = self._coerce_query_params(request)
+
+                # Get filter parameters if available
+                filter_params = {}
+                for param_name, param_value in query_params.items():
+                    if not isinstance(param_name, str) or not param_name.startswith('filter_'):
+                        continue
+
+                    # Extract column name from parameter name and handle multiple underscores
+                    raw_key = param_name.replace('filter_', '')
+                    column_key = ' '.join(part for part in raw_key.split('_') if part).title()
+
+                    # Map specific parameter names to correct column keys
+                    if column_key == 'Spec Section':  # This covers both single and double underscore cases
+                        column_key = 'Spec Section #'
+                    elif column_key == 'Item Type':
+                        column_key = 'item_type'
+                    elif column_key == 'Responsible Party':
+                        column_key = 'Responsible Party'
+
+                    if isinstance(param_value, str):
+                        values = [value for value in param_value.split(',') if value]
+                    elif isinstance(param_value, (list, tuple, set)):
+                        values = [str(value) for value in param_value if value is not None]
+                    else:
+                        values = []
+
+                    filter_params[column_key] = values
+
+                # Apply column-based filtering if filter parameters are provided
+                if filter_params:
+                    filtered_data = self.filter_structured_data(structured_rows, filter_params)
+                else:
+                    filtered_data = structured_rows
+
+                # Get search parameter if available
+                search_term = getattr(request, 'search_term', None)
+                if not search_term and query_params:
+                    search_term = query_params.get('search', '')
+
+                # Apply search filtering if search term is provided
+                if search_term:
+                    filtered_data = self.search_structured_data(filtered_data, search_term)
+                else:
+                    filtered_data = filtered_data
+
+                # Get sorting parameters if available
+                sort_field = getattr(request, 'sort_field', 'spec_section_number')
+                sort_direction = getattr(request, 'sort_direction', 'asc')
+
+                # Apply sorting if sorting parameters are provided
+                sorted_data = self.sort_structured_data(filtered_data, sort_field, sort_direction)
+
+                # Check if pagination parameters are present
+                page = None
+                page_size = None
+                if query_params:
+                    page = query_params.get('page')
+                    page_size = query_params.get('page_size')
+
+                # Always apply pagination for structured data to provide pagination info
+                # Use default page=1 and page_size=50 if not specified
+                if not page:
+                    page = 1
+                if not page_size:
+                    page_size = 50
+
+                # Apply pagination to sorted data
+                paginated_data = self.paginate_structured_data(sorted_data, request, default_page=page, default_page_size=page_size)
+                data['log_data'] = paginated_data['data']
+                data['pagination'] = paginated_data['pagination']
+
         return data
     
     def paginate_structured_data(self, log_data, request, default_page=1, default_page_size=50):

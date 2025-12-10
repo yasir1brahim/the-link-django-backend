@@ -56,7 +56,8 @@ from apps.deliverables.models import (
     Chat, ChatMessage,
     CustomPostgresChatMessageHistory,
     AiGeneratedLog,
-    ExtractedData
+    ExtractedData,
+    ExtractionSource
 )
 from apps.utils.feature_flags import is_specgpt_websockets_feature_flag_active, is_langchain_update_feature_flag_active
 
@@ -67,6 +68,8 @@ from apps.utils.feature_flags import is_inspection_log_use_data_tables_feature_f
 # LangGraph imports for adaptive RAG
 from langgraph.prebuilt import create_react_agent
 from apps.deliverables.tools.adaptive_retrieval import create_retrieval_tool
+
+logger = logging.getLogger(__name__)
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
@@ -712,40 +715,108 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             # Get the log object directly without going through get_queryset 
             # to avoid project_id validation for this specific action
             log_obj = AiGeneratedLog.objects.get(id=pk)
-            
-            serializer = self.get_serializer(log_obj)
-            structured_data = serializer.build_structured_rows(log_obj)
 
-            if not structured_data:
-                return Response({'filter_values': {}})
+            logger.info(f"Fetching filter values for log {pk} (type: {log_obj.log_type})")
+
+            # Check if we have ExtractedData records available
+            has_extracted_data = log_obj.extracted_items.exists()
+
+            # Also check for human-created highlights
+            has_human_highlights = ExtractedData.objects.filter(
+                ai_generated_log__isnull=True,
+                project=log_obj.project,
+                project_version=log_obj.project_version,
+                extraction_type=log_obj.log_type,
+                source=ExtractionSource.HUMAN,
+            ).exists()
 
             # Get filterable columns based on log type
             filterable_columns = self.get_filterable_columns(log_obj.log_type)
 
             filter_values = {}
 
-            for column_key in filterable_columns:
-                # Extract unique values for this column
-                values = set()
-                for item in structured_data:
-                    value = item.get(column_key)
-                    if value is not None and value != '':
-                        values.add(str(value))
-                
-                # Sort the values
-                filter_values[column_key] = sorted(list(values))
-            
+            # Use DB-level query if we have ExtractedData records
+            if has_extracted_data or has_human_highlights:
+                logger.info(f"Using DB-level query for filter values on log {pk}")
+
+                # Build base queryset
+                queryset = ExtractedData.objects.filter(
+                    ai_generated_log=log_obj
+                )
+
+                # Include human-created highlights
+                human_items_qs = ExtractedData.objects.filter(
+                    ai_generated_log__isnull=True,
+                    project=log_obj.project,
+                    project_version=log_obj.project_version,
+                    extraction_type=log_obj.log_type,
+                    source=ExtractionSource.HUMAN,
+                )
+
+                # Combine querysets
+                combined_qs = queryset.union(human_items_qs)
+                combined_ids = combined_qs.values_list('id', flat=True)
+                final_qs = ExtractedData.objects.filter(id__in=combined_ids)
+
+                # Extract unique values for each column using DB queries
+                for column_key in filterable_columns:
+                    # Map UI column names to database field names
+                    if column_key == 'Spec Section #':
+                        field_name = 'spec_section_number'
+                    elif column_key == 'item_type':
+                        field_name = 'item_type'
+                    elif column_key == 'Responsible Party':
+                        field_name = 'responsible_party'
+                    elif column_key == 'Deliverable Type':
+                        # Special case: JSON field
+                        # Fallback to Python for JSON fields
+                        values = set()
+                        for item in final_qs:
+                            if item.metadata and 'deliverable_type' in item.metadata:
+                                value = item.metadata['deliverable_type']
+                                if value is not None and value != '':
+                                    values.add(str(value))
+                        filter_values[column_key] = sorted(list(values))
+                        continue
+                    else:
+                        logger.warning(f"Unknown filterable column: {column_key}")
+                        continue
+
+                    # Use distinct() and values_list to get unique values from DB
+                    values = final_qs.filter(**{f'{field_name}__isnull': False}).exclude(**{field_name: ''}).values_list(field_name, flat=True).distinct()
+                    filter_values[column_key] = sorted([str(v) for v in values])
+                    logger.debug(f"Found {len(filter_values[column_key])} unique values for {column_key}")
+
+            else:
+                # Fallback to old Python-level method for logs without ExtractedData
+                logger.info(f"Falling back to Python-level processing for filter values on log {pk}")
+
+                serializer = self.get_serializer(log_obj)
+                structured_data = serializer.build_structured_rows(log_obj)
+
+                if not structured_data:
+                    return Response({'filter_values': {}})
+
+                for column_key in filterable_columns:
+                    # Extract unique values for this column
+                    values = set()
+                    for item in structured_data:
+                        value = item.get(column_key)
+                        if value is not None and value != '':
+                            values.add(str(value))
+
+                    # Sort the values
+                    filter_values[column_key] = sorted(list(values))
+
+            logger.info(f"Returning filter values for {len(filter_values)} columns")
             return Response({'filter_values': filter_values})
-            
+
         except AiGeneratedLog.DoesNotExist:
             return Response(
-                {'error': 'Log not found'}, 
+                {'error': 'Log not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
-            import traceback
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error(f"Error in filter_values for log {pk}: {str(e)}")
             logger.error(traceback.format_exc())
             return Response(
