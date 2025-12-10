@@ -376,63 +376,92 @@ def _create_extracted_data_from_log(ai_log):
 
 
 def _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdown_table):
-    """Handle webhook response for QA planner logs with merging logic."""
-    
-    # Update completion status for this QA option
-    if log_obj.completion_status is None:
-        log_obj.completion_status = {}
-    
-    log_obj.completion_status[qa_option] = new_status
-    
-    # Add item_type to each data entry if we have structured data
-    if log_data and isinstance(log_data, list):
-        # Tag each item with the QA option type
-        for item in log_data:
-            if isinstance(item, dict):
-                item['item_type'] = qa_option
-        
-        # Merge with existing log_data
-        if log_obj.log_data is None:
-            log_obj.log_data = []
-        
-        log_obj.log_data.extend(log_data)
-        
-        # Sort all log_data by spec_section_number (simple string sort works due to leading zeros)
-        log_obj.log_data.sort(key=lambda item: item.get('Spec Section #', ''))
-        print(f"Merged and sorted {len(log_data)} items for QA option '{qa_option}' into log {log_obj.id}")
-    
-    # Merge markdown table data
-    if markdown_table:
-        if log_obj.log_table:
-            log_obj.log_table += f"\n\n## {qa_option.replace('_', ' ').title()}\n\n{markdown_table}"
-        else:
-            log_obj.log_table = f"## {qa_option.replace('_', ' ').title()}\n\n{markdown_table}"
-    
-    # Check if all QA options are complete
-    selected_options = log_obj.qa_options_selected or []
-    completed_options = [option_name for option_name in log_obj.completion_status.keys() if log_obj.completion_status[option_name] in ['SUCCESS', 'FAILURE']]
-    all_complete = all(option in completed_options for option in selected_options)
-    
-    if all_complete:
-        # Determine overall status
-        all_statuses = list(log_obj.completion_status.values())
-        success_count = all_statuses.count('SUCCESS')
-        failure_count = all_statuses.count('FAILURE')
-        
-        if failure_count == 0:
-            log_obj.log_status = 'SUCCESS'
-        elif success_count == 0:
-            log_obj.log_status = 'FAILURE'
-        else:
-            log_obj.log_status = 'PARTIAL_SUCCESS'
-        
-        print(f"QA planner log {log_obj.id} completed with status: {log_obj.log_status}")
-        print(f"Individual statuses: {log_obj.completion_status}")
+    """Handle webhook response for QA planner logs with merging logic.
 
-    log_obj.save()
+    Uses select_for_update() to prevent race conditions when multiple webhooks
+    update the same log concurrently.
+    """
+    from django.db import transaction
 
-    # Create ExtractedData records after successful completion
-    if all_complete and log_obj.log_status in ['SUCCESS', 'PARTIAL_SUCCESS']:
+    log_id = log_obj.id
+    print(f"_handle_qa_planner_webhook: START - log_id={log_id}, qa_option={qa_option}, new_status={new_status}")
+
+    all_complete = False
+    final_status = None
+
+    # Use select_for_update to lock the row and prevent race conditions
+    with transaction.atomic():
+        # Re-fetch the log with a lock to get the latest state
+        log_obj = AiGeneratedLog.objects.select_for_update().get(id=log_id)
+        print(f"_handle_qa_planner_webhook: LOCKED & REFRESHED - completion_status={log_obj.completion_status}, qa_options_selected={log_obj.qa_options_selected}")
+
+        # Update completion status for this QA option
+        if log_obj.completion_status is None:
+            log_obj.completion_status = {}
+
+        log_obj.completion_status[qa_option] = new_status
+        print(f"_handle_qa_planner_webhook: AFTER UPDATE - completion_status={log_obj.completion_status}")
+
+        # Add item_type to each data entry if we have structured data
+        if log_data and isinstance(log_data, list):
+            # Tag each item with the QA option type
+            for item in log_data:
+                if isinstance(item, dict):
+                    item['item_type'] = qa_option
+
+            # Merge with existing log_data
+            if log_obj.log_data is None:
+                log_obj.log_data = []
+
+            log_obj.log_data.extend(log_data)
+
+            # Sort all log_data by spec_section_number (simple string sort works due to leading zeros)
+            log_obj.log_data.sort(key=lambda item: item.get('Spec Section #', ''))
+            print(f"_handle_qa_planner_webhook: Merged and sorted {len(log_data)} items for QA option '{qa_option}' into log {log_obj.id}")
+        else:
+            print(f"_handle_qa_planner_webhook: No log_data to merge for qa_option={qa_option} (log_data={type(log_data).__name__}, length={len(log_data) if log_data else 0})")
+
+        # Merge markdown table data
+        if markdown_table:
+            if log_obj.log_table:
+                log_obj.log_table += f"\n\n## {qa_option.replace('_', ' ').title()}\n\n{markdown_table}"
+            else:
+                log_obj.log_table = f"## {qa_option.replace('_', ' ').title()}\n\n{markdown_table}"
+
+        # Check if all QA options are complete
+        selected_options = log_obj.qa_options_selected or []
+        completed_options = [option_name for option_name in log_obj.completion_status.keys() if log_obj.completion_status[option_name] in ['SUCCESS', 'FAILURE']]
+        all_complete = all(option in completed_options for option in selected_options)
+
+        print(f"_handle_qa_planner_webhook: COMPLETION CHECK - selected_options={selected_options}, completed_options={completed_options}, all_complete={all_complete}")
+
+        # Log which options are still pending
+        if not all_complete:
+            pending_options = [opt for opt in selected_options if opt not in completed_options]
+            print(f"_handle_qa_planner_webhook: STILL PENDING - {pending_options}")
+
+        if all_complete:
+            # Determine overall status
+            all_statuses = list(log_obj.completion_status.values())
+            success_count = all_statuses.count('SUCCESS')
+            failure_count = all_statuses.count('FAILURE')
+
+            if failure_count == 0:
+                log_obj.log_status = 'SUCCESS'
+            elif success_count == 0:
+                log_obj.log_status = 'FAILURE'
+            else:
+                log_obj.log_status = 'PARTIAL_SUCCESS'
+
+            final_status = log_obj.log_status
+            print(f"_handle_qa_planner_webhook: ALL COMPLETE - log {log_obj.id} final status: {log_obj.log_status}")
+            print(f"_handle_qa_planner_webhook: Individual statuses: {log_obj.completion_status}")
+
+        log_obj.save()
+        print(f"_handle_qa_planner_webhook: SAVED log {log_obj.id}")
+
+    # Create ExtractedData records after successful completion (outside the lock)
+    if all_complete and final_status in ['SUCCESS', 'PARTIAL_SUCCESS']:
         _create_extracted_data_from_log(log_obj)
 
 
@@ -452,17 +481,19 @@ def ai_log_generation_webhook(request):
     if log_type.startswith('qa_planner__'):
         qa_option = log_type.split('qa_planner__')[1]
 
+    print(f"AI LOG GENERATION WEBHOOK: log_type={log_type}, qa_option={qa_option}, new_status={new_status}, ai_generated_log_id={ai_generated_log_id}")
+
     if new_status in ['SUCCESS', 'FAILURE']:
         # Prefer updating by explicit log id if provided
         log_obj = None
-        
+
         # Handle data from Lambda (could be markdown string or structured data)
         table_data = request_data.get('table', '')
-        
+
         # Determine if we have structured data or markdown
         log_data = None
         markdown_table = ''
-        
+
         if isinstance(table_data, list):
             # Structured data received
             log_data = table_data
@@ -471,24 +502,32 @@ def ai_log_generation_webhook(request):
             # Markdown string received
             markdown_table = table_data.decode("utf-8", errors="replace").replace("\x00", "\uFFFD") if isinstance(table_data, bytes) else str(table_data)
             print(f"Received markdown data: {len(markdown_table)} characters")
-        
+
         if ai_generated_log_id:
             try:
                 log_obj = AiGeneratedLog.objects.get(id=int(ai_generated_log_id))
-            except Exception:
+                print(f"AI LOG GENERATION WEBHOOK: Found log by ID: {log_obj.id}, log_type={log_obj.log_type}, log_status={log_obj.log_status}")
+            except Exception as e:
+                print(f"AI LOG GENERATION WEBHOOK: Failed to find log by ID {ai_generated_log_id}: {e}")
                 log_obj = None
         if not log_obj:
             # Fallback: try to update the latest PROCESSING record for this context
+            print(f"AI LOG GENERATION WEBHOOK: Attempting fallback lookup with project_id={request_data['project_id']}, project_version_id={request_data['project_version_id']}, log_type={request_data['log_type']}")
             log_obj = AiGeneratedLog.objects.filter(
                 project_id=request_data['project_id'],
                 project_version_id=request_data['project_version_id'],
                 log_type=request_data['log_type'],
                 log_status='PROCESSING',
             ).order_by('-created_at').first()
+            if log_obj:
+                print(f"AI LOG GENERATION WEBHOOK: Fallback found log: {log_obj.id}")
+            else:
+                print(f"AI LOG GENERATION WEBHOOK: Fallback found no matching log")
 
         if log_obj:
             # Handle QA planner logs differently (they need merging)
             if log_obj.log_type == 'qa_planner' and qa_option:
+                print(f"AI LOG GENERATION WEBHOOK: Handling QA planner webhook for option '{qa_option}', current completion_status={log_obj.completion_status}, qa_options_selected={log_obj.qa_options_selected}")
                 _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdown_table)
             else:
                 # Handle regular logs (inspection, owner_deliverables)
@@ -804,15 +843,23 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            logger.info(f"{log_prefix} Checking log_data availability")
-            if not log_obj.log_data:
-                logger.warning(f"{log_prefix} No log_data available for log_id={pk}")
+            # Check for data availability - either ExtractedData records or legacy log_data
+            has_extracted_items = log_obj.extracted_items.exists() if hasattr(log_obj, 'extracted_items') else False
+            has_log_data = bool(log_obj.log_data)
+
+            logger.info(f"{log_prefix} Data availability: extracted_items={has_extracted_items}, log_data={has_log_data}")
+
+            if not has_extracted_items and not has_log_data:
+                logger.warning(f"{log_prefix} No data available for log_id={pk}")
                 return Response(
-                    {'error': 'No data available for export'}, 
+                    {'error': 'No data available for export'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
-            logger.info(f"{log_prefix} log_data contains {len(log_obj.log_data)} items")
+
+            if has_extracted_items:
+                logger.info(f"{log_prefix} Using ExtractedData records: {log_obj.extracted_items.count()} items")
+            elif has_log_data:
+                logger.info(f"{log_prefix} log_data contains {len(log_obj.log_data)} items")
             
             # Get filter, search, and sort parameters
             logger.info(f"{log_prefix} Processing filter parameters")

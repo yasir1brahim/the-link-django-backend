@@ -14,6 +14,7 @@ from .emails import send_team_added_notification
 class MembershipAdmin(admin.ModelAdmin):
     list_display = ["user", "team", "role", "created_at"]
     list_filter = ["team"]
+    autocomplete_fields = ["user"]
 
     def save_model(self, request, obj, form, change):
         is_new = obj.pk is None
@@ -50,6 +51,7 @@ class InvitationAdmin(admin.ModelAdmin):
 class MembershipInlineAdmin(admin.TabularInline):
     model = Membership
     list_display = ["user", "role"]
+    autocomplete_fields = ["user"]
 
 
 @admin.register(Team)
@@ -131,6 +133,7 @@ class UserInlineAdmin(admin.TabularInline):
     extra = 1
     verbose_name = "User"
     verbose_name_plural = "Users"
+    autocomplete_fields = ["customuser"]
 
 @admin.display(description="Active Teams")
 def active_teams_count(flag):

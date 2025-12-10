@@ -2,13 +2,13 @@
 FROM python:3.11-bookworm
 ENV PYTHONUNBUFFERED=1
 
-# install node/npm
+# install node/npm using NodeSource's current setup script
 RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     --mount=target=/var/cache/apt,type=cache,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
-    echo "deb https://deb.nodesource.com/node_20.x bookworm main" > /etc/apt/sources.list.d/nodesource.list && \
-    wget -qO- https://deb.nodesource.com/gpgkey/nodesource.gpg.key | apt-key add - && \
     apt-get update && \
+    apt-get install -yqq curl && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -yqq nodejs \
     # install gettext for translations
     gettext

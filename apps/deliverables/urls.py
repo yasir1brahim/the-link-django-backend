@@ -8,6 +8,7 @@ from .views.pdf_annotation_views import PDFAnnotationViewSet
 from .views.extracted_data_views import ExtractedDataViewSet
 from .views.custom_item_type_views import CustomItemTypeViewSet
 from .views.user_highlight_preference_views import UserHighlightPreferenceViewSet
+from .views import extraction_note_views
 
 
 app_name = "deliverables"
@@ -130,6 +131,14 @@ urlpatterns = [
     path('documents/reprocess-multiple/', bulk_operations.bulk_reprocess_documents, name='reprocess-multiple-documents'),
     path('documents/delete-multiple/', bulk_operations.bulk_delete_documents, name='delete-multiple-documents'),
     path('projects/<int:project_id>/', include(single_project_router.urls)),
+
+    # Extraction notes (manual nested routes)
+    path('projects/<int:project_pk>/extracted-data/<int:extracteddata_pk>/notes/',
+         extraction_note_views.ExtractionNoteViewSet.as_view({'get': 'list', 'post': 'create'}),
+         name='extractionnote-list'),
+    path('projects/<int:project_pk>/extracted-data/<int:extracteddata_pk>/notes/<int:pk>/',
+         extraction_note_views.ExtractionNoteViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update', 'put': 'update', 'delete': 'destroy'}),
+         name='extractionnote-detail'),
 ]
 
 

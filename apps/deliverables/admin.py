@@ -24,7 +24,7 @@ from django.conf import settings
 from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
     UploadedFile, SpecSection, MasterFormatSection,
     SubmittalItemList, ExcelExportHeader, ProjectVersion, Chat, ChatMessage,
-    AiGeneratedLog, ExtractedData, CustomItemType
+    AiGeneratedLog, ExtractedData, CustomItemType, ExtractionNote
 )
 
 
@@ -48,6 +48,7 @@ class ProjectMembershipAdmin(admin.ModelAdmin):
     list_display = ["user", "project", "role"]
     list_filter = ["project", "role"]
     search_fields = ["user__email", "project__name"]
+    autocomplete_fields = ["user"]
 
 
 @admin.register(Entitlement)
@@ -80,6 +81,20 @@ class SubmittalItemAdmin(admin.ModelAdmin):
     list_filter = ["project", "document", "masterformat_section", "paragraph_number", "submittal_type", "submittal_description"]
     search_fields = ["project__name", "document__name", "masterformat_section__masterformat_number", "paragraph_number", "submittal_type", "submittal_description"]
 
+    # Use raw_id_fields to prevent loading all 42k+ items in dropdowns
+    raw_id_fields = ["project", "project_version", "document", "spec_section", "created_by", "updated_by", "added_under_submittal"]
+
+    # Prevent loading all items in the reverse ManyToMany from SubmittalItemList
+    readonly_fields = []
+
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related(
+            'project', 'project__team', 'project_version',
+            'document', 'masterformat_section', 'spec_section',
+            'created_by', 'updated_by', 'added_under_submittal'
+        )
+
 
 class SubmittalItemInlineAdmin(admin.TabularInline):
     model = SubmittalItem
@@ -93,6 +108,7 @@ class UploadedFileAdmin(admin.ModelAdmin):
     list_display = ["id", "project", "name", "uploaded_by", "created_at"]
     list_filter = ["project", "uploaded_by"]
     search_fields = ["name", "uploaded_by__email", "project__name"]
+    autocomplete_fields = ["uploaded_by"]
 
     def get_urls(self):
         urls = super().get_urls()
@@ -342,9 +358,22 @@ Parser Item Classification: {result.get('item', '')}
 
 @admin.register(SpecSection)
 class SpecSectionAdmin(admin.ModelAdmin):
-    list_display = ["id", "masterformat_section"]
-    list_filter = ["masterformat_section"]
-    search_fields = ["masterformat_section__masterformat_number"]
+    list_display = ["id", "project_name", "document", "masterformat_section"]
+    list_filter = ["document__project", "masterformat_section"]
+    search_fields = ["masterformat_section__masterformat_number", "document__project__name", "document__name"]
+
+    def project_name(self, obj):
+        """Display the project name."""
+        return obj.document.project.name if obj.document and obj.document.project else "-"
+    project_name.short_description = "Project"
+    project_name.admin_order_field = "document__project__name"
+
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related(
+            'document', 'document__project', 'document__project__team',
+            'masterformat_section'
+        )
 
 @admin.register(MasterFormatSection)
 class MasterFormatSectionAdmin(admin.ModelAdmin):
@@ -356,18 +385,31 @@ class SubmittalItemListAdmin(admin.ModelAdmin):
     list_display = ["id", "project", "name", "created_by"]
     list_filter = ["project", "created_by"]
     search_fields = ["project__name", "name", "created_by__email"]
-    filter_horizontal = ("submittals",)
+    # Changed from filter_horizontal to prevent loading all 42k+ SubmittalItems
+    # Use the admin list view to add items to lists instead
+    # filter_horizontal = ("submittals",)
+    raw_id_fields = ["project", "project_version", "created_by"]
+
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related(
+            'project', 'project__team', 'project_version', 'created_by'
+        ).prefetch_related('submittals')
+
+    autocomplete_fields = ["created_by"]
 
 @admin.register(ExcelExportHeader)
 class ExcelExportHeaderAdmin(admin.ModelAdmin):
     list_display = ["user", "updated_at"]
     search_fields = ["user__email", ]
+    autocomplete_fields = ["user"]
 
 @admin.register(Chat)
 class ChatAdmin(admin.ModelAdmin):
     list_display = ["id", "user", "created_at"]
     list_filter = ["user"]
     search_fields = ["user__email"]
+    autocomplete_fields = ["user"]
 
 @admin.register(ChatMessage)
 class ChatMessageAdmin(admin.ModelAdmin):
@@ -381,16 +423,15 @@ class AiGeneratedLogAdmin(admin.ModelAdmin):
     list_display = ["id", "project", "project_version", "log_type", "log_status", "created_at"]
     list_filter = ["log_type", "log_status", "created_at", "project", "project_version"]
     search_fields = ["project__name", "project_version__version_name", "log_type"]
-    readonly_fields = ["created_at"]
+    readonly_fields = ["created_at", "qa_options_selected", "completion_status"]
     list_per_page = 50
-    
+
     fieldsets = (
         ('Basic Information', {
             'fields': ('project', 'project_version', 'log_type', 'log_status')
         }),
-        ('Content', {
-            'fields': ('log_table', 'log_data'),
-            'classes': ('collapse',)
+        ('QA Planner Status', {
+            'fields': ('qa_options_selected', 'completion_status'),
         }),
         ('Metadata', {
             'fields': ('created_at',),
@@ -421,6 +462,7 @@ class ExtractedDataAdmin(admin.ModelAdmin):
         'requirement_text'
     ]
     readonly_fields = ['created_at', 'updated_at']
+    autocomplete_fields = ['created_by']
 
     fieldsets = (
         ('Basic Information', {
@@ -460,3 +502,39 @@ class CustomItemTypeAdmin(admin.ModelAdmin):
     search_fields = ("name", "project__name", "project__project_number")
     autocomplete_fields = ("project", "created_by")
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(ExtractionNote)
+class ExtractionNoteAdmin(admin.ModelAdmin):
+    list_display = [
+        'id', 'extracted_data', 'text_preview', 'created_by', 'created_at'
+    ]
+    list_filter = [
+        'created_at',
+        ('extracted_data__project', admin.RelatedOnlyFieldListFilter)
+    ]
+    search_fields = [
+        'text', 'created_by__email', 'extracted_data__spec_section_number'
+    ]
+    readonly_fields = ['created_at', 'updated_at']
+    raw_id_fields = ['extracted_data', 'created_by']
+
+    fieldsets = (
+        ('Note Information', {
+            'fields': ('extracted_data', 'text', 'created_by')
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        })
+    )
+
+    def text_preview(self, obj):
+        """Show truncated text in list view"""
+        return obj.text[:75] + '...' if len(obj.text) > 75 else obj.text
+    text_preview.short_description = 'Text'
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related(
+            'extracted_data', 'created_by'
+        )

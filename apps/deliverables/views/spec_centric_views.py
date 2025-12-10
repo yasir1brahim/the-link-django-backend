@@ -35,15 +35,16 @@ class SpecCentricViewSet(viewsets.ViewSet):
         """Get queryset with proper filtering and prefetching."""
         project_id = self.kwargs.get('project_id')
         project = get_object_or_404(Project, id=project_id)
-        
-        # Check feature flag
+
+        # Check feature flag - use project.team instead of request.team
+        # since the endpoint URL doesn't include team_slug
         if not is_spec_centered_view_feature_flag_active(
-            self.request.user, 
-            getattr(self.request, 'team', None), 
+            self.request.user,
+            project.team,
             project
         ):
             return SpecSection.objects.none()
-        
+
         return SpecSection.objects.filter(
             document__project=project
         ).select_related(
@@ -126,8 +127,8 @@ class SpecCentricViewSet(viewsets.ViewSet):
         
         # Filter submittals by project version if provided
         project_version_id = request.query_params.get('project_version_id')
-        submittals = spec_section.submittalitem_set.all()
-        
+        submittals = spec_section.submittalitem_set.exclude(parsing_method='PLACEHOLDER')
+
         if project_version_id:
             submittals = submittals.filter(project_version_id=project_version_id)
         
@@ -196,6 +197,8 @@ class SpecCentricViewSet(viewsets.ViewSet):
         project_version_id = request.query_params.get('project_version_id')
         submittals = SubmittalItem.objects.filter(
             spec_section=spec_section
+        ).exclude(
+            parsing_method='PLACEHOLDER'
         ).select_related(
             'masterformat_section',
             'document'
