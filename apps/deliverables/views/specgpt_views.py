@@ -783,7 +783,9 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                         continue
 
                     # Use distinct() and values_list to get unique values from DB
-                    values = final_qs.filter(**{f'{field_name}__isnull': False}).exclude(**{field_name: ''}).values_list(field_name, flat=True).distinct()
+                    # Note: order_by() clears default model ordering which would otherwise
+                    # include 'id' in the SELECT, breaking DISTINCT on the field value
+                    values = final_qs.filter(**{f'{field_name}__isnull': False}).exclude(**{field_name: ''}).order_by().values_list(field_name, flat=True).distinct()
                     filter_values[column_key] = sorted([str(v) for v in values])
                     logger.debug(f"Found {len(filter_values[column_key])} unique values for {column_key}")
 
