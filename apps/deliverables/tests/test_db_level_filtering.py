@@ -416,6 +416,38 @@ class DBLevelFilteringTests(APITestCase):
         self.assertEqual(filter_values['Spec Section #'], sorted(filter_values['Spec Section #']))
         self.assertEqual(filter_values['item_type'], sorted(filter_values['item_type']))
 
+    def test_db_filter_values_returns_no_duplicates(self):
+        """Test that filter_values endpoint returns unique values without duplicates.
+
+        Regression test for TBL-765: The filter dropdown was showing duplicate entries
+        because the Django distinct() wasn't working correctly due to default model ordering
+        including the 'id' field in the SELECT clause.
+        """
+        self.client.force_authenticate(user=self.user)
+
+        url = reverse('ai-generated-log-filter-values', kwargs={
+            'project_id': self.project.id,
+            'pk': self.qa_log.id
+        })
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        filter_values = response.data['filter_values']
+
+        # Verify NO duplicate values in any filter column
+        # This is the key assertion - the list length should equal the set length
+        for column_key, values in filter_values.items():
+            unique_count = len(set(values))
+            actual_count = len(values)
+            self.assertEqual(
+                actual_count,
+                unique_count,
+                f"Filter column '{column_key}' contains duplicates: "
+                f"got {actual_count} values but only {unique_count} unique. "
+                f"Values: {values}"
+            )
+
     def test_db_filtering_with_human_highlights(self):
         """Test that DB queries include human-created highlights"""
         # Create a human-created highlight
