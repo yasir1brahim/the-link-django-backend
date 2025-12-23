@@ -81,6 +81,14 @@ class TeamAdmin(admin.ModelAdmin):
                 obj.save()
                 if is_new:
                     new_memberships.append(obj)
+            try:
+                for obj in getattr(formset, "deleted_objects", []) or []:
+                    print(f"Deleting Membership instance: {obj}")
+                    obj.delete()
+            except Exception:
+                # If something goes wrong during deletion, don't block rest of save
+                pass
+
             formset.save_m2m()
 
             # Send emails for newly created memberships via Team admin
