@@ -2170,7 +2170,15 @@ class TestDrawingNoteViewSet(TestCase):
 
         self.assertIn('all_filter_vals', response.data)
         self.assertIn('category', response.data['all_filter_vals'])
-        self.assertIn('drawing_file', response.data['all_filter_vals'])
+        self.assertIn('drawing_files', response.data['all_filter_vals'])
+
+        # drawing_files should be array of {id, name} objects
+        drawing_files = response.data['all_filter_vals']['drawing_files']
+        self.assertTrue(len(drawing_files) > 0)
+        self.assertIn('id', drawing_files[0])
+        self.assertIn('name', drawing_files[0])
+        self.assertEqual(drawing_files[0]['id'], self.drawing_file.id)
+        self.assertEqual(drawing_files[0]['name'], "Mechanical.pdf")
 
     def test_processing_status_returned(self):
         """Test that processing_status is included in response"""
@@ -2346,11 +2354,14 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = self.filter_queryset(self.get_queryset())
 
         # Get filter values for UI dropdowns
+        # Get unique drawing files with id and name
+        drawing_files_qs = DrawingFile.objects.filter(
+            pages__note_sections__notes__in=queryset
+        ).distinct().values('id', 'file_name')
+
         all_filter_vals = {
             'category': list(queryset.values_list('category', flat=True).distinct()),
-            'drawing_file': list(queryset.values_list(
-                'section__page__drawing_file__file_name', flat=True
-            ).distinct()),
+            'drawing_files': [{'id': df['id'], 'name': df['file_name']} for df in drawing_files_qs],
         }
 
         # Get processing status
