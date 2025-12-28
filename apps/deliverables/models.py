@@ -927,4 +927,36 @@ class DrawingExtraction(BaseModel):
         return f"Extraction {self.id} for {self.drawing_file.file_name} ({self.status})"
 
 
+class DrawingPage(BaseModel):
+    """Individual page from a drawing file"""
+
+    drawing_file = models.ForeignKey(
+        "DrawingFile",
+        on_delete=models.CASCADE,
+        related_name="pages"
+    )
+    extraction = models.ForeignKey(
+        "DrawingExtraction",
+        on_delete=models.CASCADE,
+        related_name="pages"
+    )
+
+    page_number = models.IntegerField()
+    page_type = models.CharField(
+        max_length=32,
+        choices=DrawingPageType.choices
+    )
+    extraction_status = models.CharField(
+        max_length=32,
+        choices=DrawingPageExtractionStatus.choices
+    )
+    spec_content = models.TextField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['page_number']
+
+    def __str__(self):
+        return f"Page {self.page_number} of {self.drawing_file.file_name}"
+
+
 # endregion Drawing Parser Models

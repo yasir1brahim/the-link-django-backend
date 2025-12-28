@@ -6,6 +6,7 @@ from apps.deliverables.models import (
     Project,
     DrawingFile,
     DrawingExtraction,
+    DrawingPage,
     DrawingExtractionStatus,
     DrawingPageType,
     DrawingPageExtractionStatus,
@@ -125,3 +126,77 @@ class TestDrawingExtractionModel(TestCase):
 
         self.assertEqual(self.drawing_file.latest_extraction, extraction2)
         self.assertEqual(self.drawing_file.extraction_status, DrawingExtractionStatus.SUCCESS)
+
+
+class TestDrawingPageModel(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('test@example.com')
+        self.team = Team.objects.create(name="Test Team", slug="test-team")
+        self.project = Project.objects.create(
+            name="Test Project",
+            project_number="P-001",
+            team=self.team,
+            created_by=self.user
+        )
+        self.project_version = self.project.versions.first()
+        self.drawing_file = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name="Mechanical.pdf",
+            file_s3_key="drawings/test.pdf",
+            md5="abc123",
+        )
+        self.extraction = DrawingExtraction.objects.create(
+            drawing_file=self.drawing_file,
+            status=DrawingExtractionStatus.SUCCESS,
+        )
+
+    def test_drawing_page_creation(self):
+        """Test DrawingPage creation for drawing type"""
+        page = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=1,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+        )
+
+        self.assertEqual(page.page_number, 1)
+        self.assertEqual(page.page_type, DrawingPageType.DRAWING)
+        self.assertEqual(page.extraction_status, DrawingPageExtractionStatus.SUCCESS)
+        self.assertIsNone(page.spec_content)
+
+    def test_spec_page_with_content(self):
+        """Test DrawingPage for spec type with content"""
+        page = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=13,
+            page_type=DrawingPageType.SPEC,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+            spec_content="Long specification text content...",
+        )
+
+        self.assertEqual(page.page_type, DrawingPageType.SPEC)
+        self.assertEqual(page.spec_content, "Long specification text content...")
+
+    def test_page_ordering(self):
+        """Test pages are ordered by page_number"""
+        DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=3,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+        )
+        DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=1,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+        )
+
+        pages = list(DrawingPage.objects.filter(extraction=self.extraction))
+        self.assertEqual(pages[0].page_number, 1)
+        self.assertEqual(pages[1].page_number, 3)
