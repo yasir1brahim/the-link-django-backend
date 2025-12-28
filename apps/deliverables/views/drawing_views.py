@@ -302,7 +302,7 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         ).distinct().values('id', 'file_name')
 
         all_filter_vals = {
-            'category': list(queryset.values_list('category', flat=True).distinct()),
+            'category': list(set(queryset.values_list('category', flat=True))),
             'drawing_files': [{'id': df['id'], 'name': df['file_name']} for df in drawing_files_qs],
         }
 
