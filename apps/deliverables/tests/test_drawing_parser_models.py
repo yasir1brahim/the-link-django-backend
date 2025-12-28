@@ -2,6 +2,7 @@ from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from apps.teams.models import Team
+from django.db import IntegrityError
 from apps.deliverables.models import (
     Project,
     DrawingFile,
@@ -9,6 +10,7 @@ from apps.deliverables.models import (
     DrawingPage,
     DrawingNoteSection,
     DrawingNote,
+    DrawingExtractionWebhookEvent,
     DrawingExtractionStatus,
     DrawingPageType,
     DrawingPageExtractionStatus,
@@ -333,3 +335,54 @@ class TestDrawingNoteModel(TestCase):
         self.page.delete()
         self.assertEqual(DrawingNote.objects.count(), 0)
         self.assertEqual(DrawingNoteSection.objects.count(), 0)
+
+
+class TestDrawingExtractionWebhookEventModel(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('test@example.com')
+        self.team = Team.objects.create(name="Test Team", slug="test-team")
+        self.project = Project.objects.create(
+            name="Test Project",
+            project_number="P-001",
+            team=self.team,
+            created_by=self.user
+        )
+        self.project_version = self.project.versions.first()
+        self.drawing_file = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name="Mechanical.pdf",
+            file_s3_key="drawings/test.pdf",
+            md5="abc123",
+        )
+        self.extraction = DrawingExtraction.objects.create(
+            drawing_file=self.drawing_file,
+            status=DrawingExtractionStatus.PENDING,
+        )
+
+    def test_webhook_event_creation(self):
+        """Test webhook event creation"""
+        event = DrawingExtractionWebhookEvent.objects.create(
+            extraction=self.extraction,
+            event_id="evt_12345",
+            new_status=DrawingExtractionStatus.PROCESSING,
+            payload={"test": "data"},
+        )
+
+        self.assertEqual(event.event_id, "evt_12345")
+        self.assertEqual(event.new_status, DrawingExtractionStatus.PROCESSING)
+
+    def test_event_id_uniqueness(self):
+        """Test event_id must be unique for idempotency"""
+        DrawingExtractionWebhookEvent.objects.create(
+            extraction=self.extraction,
+            event_id="evt_12345",
+            new_status=DrawingExtractionStatus.PROCESSING,
+        )
+
+        with self.assertRaises(IntegrityError):
+            DrawingExtractionWebhookEvent.objects.create(
+                extraction=self.extraction,
+                event_id="evt_12345",  # Same event_id
+                new_status=DrawingExtractionStatus.SUCCESS,
+            )

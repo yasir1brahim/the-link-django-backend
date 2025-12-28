@@ -1005,4 +1005,33 @@ class DrawingNote(BaseModel):
         return f"Note {self.note_number}: {preview}"
 
 
+class DrawingExtractionWebhookEvent(BaseModel):
+    """
+    Store each webhook delivery for idempotency and retry safety.
+    The unique event_id ensures duplicate deliveries are ignored.
+    """
+
+    extraction = models.ForeignKey(
+        "DrawingExtraction",
+        on_delete=models.CASCADE,
+        related_name="webhook_events",
+    )
+
+    # Provided by the caller; unique per webhook delivery
+    event_id = models.CharField(max_length=128, unique=True)
+
+    # Helps debug ordering/retries without storing entire payload forever
+    new_status = models.CharField(max_length=32)
+    output_s3_key = models.CharField(max_length=1024, null=True, blank=True)
+    payload = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["extraction", "new_status"]),
+        ]
+
+    def __str__(self):
+        return f"Webhook {self.event_id} -> {self.new_status}"
+
+
 # endregion Drawing Parser Models
