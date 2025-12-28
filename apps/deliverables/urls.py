@@ -10,6 +10,7 @@ from .views.custom_item_type_views import CustomItemTypeViewSet
 from .views.user_highlight_preference_views import UserHighlightPreferenceViewSet
 from .views import extraction_note_views
 from .views import drawing_views
+from .views.drawing_views import DrawingNoteViewSet
 
 
 app_name = "deliverables"
@@ -86,6 +87,11 @@ single_project_router.register(
     'highlight-preference',
     UserHighlightPreferenceViewSet,
     basename='highlight-preference'
+)
+single_project_router.register(
+    'drawing-notes',
+    DrawingNoteViewSet,
+    basename='drawing-note',
 )
 
 urlpatterns = [

@@ -1,9 +1,11 @@
 from django.db import transaction, IntegrityError
+from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, viewsets
+from rest_framework.pagination import PageNumberPagination
 
 from ..models import (
     DrawingExtraction,
@@ -12,7 +14,10 @@ from ..models import (
     DrawingPage,
     DrawingNoteSection,
     DrawingNote,
+    DrawingFile,
 )
+from ..serializers.drawing_serializers import DrawingNoteReadSerializer
+from ..permissions import DrawingNoteAccessPermissions
 
 
 @api_view(['POST'])
@@ -177,3 +182,146 @@ def _create_drawing_records(extraction, data):
             ))
 
     DrawingNote.objects.bulk_create(note_objects)
+
+
+class DrawingNotePagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = 'limit'
+    max_page_size = 100
+
+
+class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Read-only ViewSet for listing drawing notes.
+    Mirrors SubmittalItemViewSet pattern with filtering and pagination.
+    """
+    permission_classes = [IsAuthenticated, DrawingNoteAccessPermissions]
+    pagination_class = DrawingNotePagination
+    serializer_class = DrawingNoteReadSerializer
+
+    def get_queryset(self):
+        project_id = self.kwargs['project_id']
+        queryset = DrawingNote.objects.filter(
+            section__page__drawing_file__project_id=project_id
+        ).select_related(
+            'section__page__drawing_file',
+            'section__page__extraction',
+        )
+
+        # Filter by project_version_id
+        version_id = self.request.query_params.get('project_version_id')
+        if version_id:
+            queryset = queryset.filter(
+                section__page__drawing_file__project_version_id=version_id
+            )
+
+        # Filter by category
+        category = self.request.query_params.get('category')
+        if category:
+            queryset = queryset.filter(category=category)
+
+        # Filter by drawing_file_id
+        drawing_file_id = self.request.query_params.get('drawing_file_id')
+        if drawing_file_id:
+            queryset = queryset.filter(
+                section__page__drawing_file_id=drawing_file_id
+            )
+
+        # Search in text (case-insensitive substring)
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(text__icontains=search)
+
+        return queryset
+
+    def _get_processing_status(self, project_id, version_id=None):
+        """
+        Get processing status for all drawing files in the project/version.
+        Returns status object with file counts and details for files still processing.
+        """
+        # Get all drawing files for this project/version
+        files_qs = DrawingFile.objects.filter(project_id=project_id)
+        if version_id:
+            files_qs = files_qs.filter(project_version_id=version_id)
+
+        # Annotate with latest extraction status
+        latest_extraction = DrawingExtraction.objects.filter(
+            drawing_file=OuterRef('pk')
+        ).order_by('-created_at')
+
+        files_with_status = files_qs.annotate(
+            latest_status=Subquery(latest_extraction.values('status')[:1])
+        )
+
+        # Count by status
+        files_processing = 0
+        files_completed = 0
+        files_failed = 0
+        processing_files = []
+
+        for f in files_with_status:
+            file_status = f.latest_status
+            if file_status in [DrawingExtractionStatus.PENDING, DrawingExtractionStatus.PROCESSING]:
+                files_processing += 1
+                processing_files.append({
+                    'id': f.id,
+                    'name': f.file_name,
+                    'status': file_status or DrawingExtractionStatus.PENDING,
+                })
+            elif file_status in [DrawingExtractionStatus.SUCCESS, DrawingExtractionStatus.PARTIAL_SUCCESS]:
+                files_completed += 1
+            elif file_status == DrawingExtractionStatus.FAILED:
+                files_failed += 1
+            elif file_status is None:
+                # No extraction yet - treat as pending
+                files_processing += 1
+                processing_files.append({
+                    'id': f.id,
+                    'name': f.file_name,
+                    'status': DrawingExtractionStatus.PENDING,
+                })
+
+        return {
+            'is_processing': files_processing > 0,
+            'files_processing': files_processing,
+            'files_completed': files_completed,
+            'files_failed': files_failed,
+            'files': processing_files,
+        }
+
+    def list(self, request, *args, **kwargs):
+        project_id = self.kwargs['project_id']
+        version_id = request.query_params.get('project_version_id')
+
+        queryset = self.filter_queryset(self.get_queryset())
+
+        # Get filter values for UI dropdowns
+        # Get unique drawing files with id and name
+        drawing_files_qs = DrawingFile.objects.filter(
+            pages__note_sections__notes__in=queryset
+        ).distinct().values('id', 'file_name')
+
+        all_filter_vals = {
+            'category': list(queryset.values_list('category', flat=True).distinct()),
+            'drawing_files': [{'id': df['id'], 'name': df['file_name']} for df in drawing_files_qs],
+        }
+
+        # Get processing status
+        processing_status = self._get_processing_status(project_id, version_id)
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            response = self.get_paginated_response(serializer.data)
+            response.data['all_filter_vals'] = all_filter_vals
+            response.data['total_count'] = queryset.count()
+            response.data['processing_status'] = processing_status
+            return response
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            'results': serializer.data,
+            'all_filter_vals': all_filter_vals,
+            'total_count': queryset.count(),
+            'processing_status': processing_status,
+        })
