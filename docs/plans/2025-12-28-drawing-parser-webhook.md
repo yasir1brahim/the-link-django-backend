@@ -6,7 +6,7 @@
 
 **Architecture:** Create DrawingFile/DrawingExtraction/DrawingPage/DrawingNoteSection/DrawingNote models with CASCADE relationships, implement idempotent webhook endpoint for AWS callbacks with status state machine, provide read-only list API mirroring SubmittalItemViewSet pattern with pagination and filtering.
 
-**Tech Stack:** Django 4.2, Django REST Framework, PostgreSQL, pytest
+**Tech Stack:** Django 4.2, Django REST Framework, PostgreSQL (tests via Django test runner: `docker-compose exec web python manage.py test ...`)
 
 ---
 
@@ -559,25 +559,6 @@ class TestDrawingPageModel(TestCase):
         self.assertEqual(pages[0].page_number, 1)
         self.assertEqual(pages[1].page_number, 3)
 
-    def test_unique_page_number_per_extraction(self):
-        """Test page_number is unique per extraction"""
-        DrawingPage.objects.create(
-            drawing_file=self.drawing_file,
-            extraction=self.extraction,
-            page_number=1,
-            page_type=DrawingPageType.DRAWING,
-            extraction_status=DrawingPageExtractionStatus.SUCCESS,
-        )
-
-        from django.db import IntegrityError
-        with self.assertRaises(IntegrityError):
-            DrawingPage.objects.create(
-                drawing_file=self.drawing_file,
-                extraction=self.extraction,
-                page_number=1,
-                page_type=DrawingPageType.DRAWING,
-                extraction_status=DrawingPageExtractionStatus.SUCCESS,
-            )
 ```
 
 **Step 2: Run test to verify it fails**
@@ -618,7 +599,6 @@ class DrawingPage(BaseModel):
 
     class Meta:
         ordering = ['page_number']
-        unique_together = [['extraction', 'page_number']]
 
     def __str__(self):
         return f"Page {self.page_number} of {self.drawing_file.file_name}"
@@ -1040,6 +1020,154 @@ chore: add migration for drawing parser models
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Phase 1.5: Upload Flow Integration
+
+### Task 7.5: Update Upload Logic and Trigger Extraction
+
+**Files:**
+- Modify: `apps/deliverables/serializers/__init__.py`
+- Modify: `apps/deliverables/views/main_views.py`
+- Create: `apps/deliverables/tests/test_drawing_upload.py`
+
+**Step 1: Write failing test for drawing upload**
+
+```python
+# apps/deliverables/tests/test_drawing_upload.py
+from django.test import TestCase
+from django.urls import reverse
+from django.core.files.uploadedfile import SimpleUploadedFile
+from rest_framework.test import APIClient
+from rest_framework import status
+from apps.deliverables.models import Project, ProjectVersion, DrawingFile, DrawingExtraction, DrawingExtractionStatus
+from apps.teams.models import Team
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+class DrawingUploadTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user('test@example.com', password='testpass')
+        self.team = Team.objects.create(name="Test Team", slug="test-team")
+        self.project = Project.objects.create(
+            name="Test Project",
+            project_number="P-001",
+            team=self.team,
+            created_by=self.user
+        )
+        self.project_version = self.project.versions.first()
+        self.team.members.add(self.user)
+        self.client.force_authenticate(user=self.user)
+
+    def test_upload_drawing_file(self):
+        """Test uploading a file with file_type='drawing'"""
+        pdf_content = b"%PDF-1.4 test content"
+        drawing_file = SimpleUploadedFile("mechanical.pdf", pdf_content, content_type="application/pdf")
+
+        url = reverse('deliverables:upload-file')
+        data = {
+            'files': [drawing_file],
+            'project_id': self.project.id,
+            'project_version_id': self.project_version.id,
+            'file_type': 'drawing'
+        }
+
+        response = self.client.post(url, data, format='multipart')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify DrawingFile was created
+        self.assertEqual(DrawingFile.objects.count(), 1)
+        df = DrawingFile.objects.first()
+        self.assertEqual(df.file_name, "mechanical.pdf")
+        
+        # Verify DrawingExtraction was created
+        self.assertEqual(DrawingExtraction.objects.count(), 1)
+        ext = DrawingExtraction.objects.first()
+        self.assertEqual(ext.drawing_file, df)
+        self.assertEqual(ext.status, DrawingExtractionStatus.PENDING)
+
+    def test_upload_duplicate_drawing_reuses_file_record(self):
+        """Test that uploading the same drawing reuses the DrawingFile record but creates new Extraction"""
+        pdf_content = b"%PDF-1.4 unique content"
+        file1 = SimpleUploadedFile("mechanical.pdf", pdf_content, content_type="application/pdf")
+        
+        url = reverse('deliverables:upload-file')
+        
+        # First upload
+        self.client.post(url, {
+            'files': [file1],
+            'project_id': self.project.id,
+            'project_version_id': self.project_version.id,
+            'file_type': 'drawing'
+        }, format='multipart')
+        
+        self.assertEqual(DrawingFile.objects.count(), 1)
+        self.assertEqual(DrawingExtraction.objects.count(), 1)
+        
+        # Second upload of same file
+        file2 = SimpleUploadedFile("mechanical.pdf", pdf_content, content_type="application/pdf")
+        self.client.post(url, {
+            'files': [file2],
+            'project_id': self.project.id,
+            'project_version_id': self.project_version.id,
+            'file_type': 'drawing'
+        }, format='multipart')
+        
+        # Should still be 1 DrawingFile but 2 Extractions
+        self.assertEqual(DrawingFile.objects.count(), 1)
+        self.assertEqual(DrawingExtraction.objects.count(), 2)
+```
+
+**Step 2: Update Serializer**
+
+Add `file_type` to `FileUploadSerializer` in `apps/deliverables/serializers/__init__.py`:
+
+```python
+class FileUploadSerializer(serializers.Serializer):
+    files = serializers.ListField(child=serializers.FileField())
+    project_id = serializers.IntegerField()
+    project_version_id = serializers.IntegerField(required=False)
+    extract_notices = serializers.BooleanField(required=False)
+    full_spec_processing = serializers.BooleanField(required=False)
+    file_type = serializers.ChoiceField(
+        choices=['spec', 'drawing'],
+        default='spec',
+        required=False
+    )
+```
+
+**Step 3: Update View Logic**
+
+Modify `upload_file` in `apps/deliverables/views/main_views.py` to handle `file_type == 'drawing'`:
+- Use separate S3 prefix: `drawings/`
+- Check MD5 uniqueness for `DrawingFile` within same version.
+- Create `DrawingExtraction`.
+- Trigger AWS Lambda (placeholder for actual trigger call).
+
+**Step 4: Run tests to verify**
+
+Run: `docker-compose exec web python manage.py test apps.deliverables.tests.test_drawing_upload --verbosity=2`
+
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+git add apps/deliverables/serializers/__init__.py apps/deliverables/views/main_views.py apps/deliverables/tests/test_drawing_upload.py
+git commit -m "$(cat <<'EOF'
+feat: integrate drawing upload into main upload flow
+
+Updates FileUploadSerializer and upload_file view to support 
+drawings, including duplicate detection and extraction triggering.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
 )"
 ```
@@ -2287,6 +2415,7 @@ Review the design document and confirm all specified components were implemented
 - [x] DrawingNoteSection model
 - [x] DrawingNote model
 - [x] DrawingExtractionWebhookEvent model
+- [x] Upload flow integration (Task 7.5)
 - [x] Webhook endpoint with idempotency
 - [x] DrawingNote list endpoint with filtering
 - [x] Admin classes
@@ -2302,6 +2431,7 @@ Full implementation of webhook system for receiving parsed
 drawing data from AWS extraction service including:
 
 - 6 new models with proper relationships
+- Main upload flow integration with duplicate detection
 - Idempotent webhook endpoint with status state machine
 - Read-only API with pagination and filtering
 - Admin interface for debugging
@@ -2319,12 +2449,13 @@ EOF
 
 ## Summary
 
-This plan implements the drawing parser webhook system in **15 tasks across 5 phases**:
+This plan implements the drawing parser webhook system in **16 tasks across 6 phases**:
 
 | Phase | Tasks | Description |
 |-------|-------|-------------|
 | **Phase 0** | 1 | Add "drawings" feature flag with TDD |
 | **Phase 1** | 2-7 | Create models and enums with TDD |
+| **Phase 1.5** | 7.5 | Integrate drawing upload into main upload flow |
 | **Phase 2** | 8-9 | Implement webhook endpoint with idempotency |
 | **Phase 3** | 10-12 | Create API serializer, permissions, and ViewSet |
 | **Phase 4** | 13-15 | Add admin, run tests, finalize |
