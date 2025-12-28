@@ -959,4 +959,50 @@ class DrawingPage(BaseModel):
         return f"Page {self.page_number} of {self.drawing_file.file_name}"
 
 
+class DrawingNoteSection(BaseModel):
+    """A section header containing notes on a drawing page (e.g., 'GENERAL NOTES:')"""
+
+    page = models.ForeignKey(
+        "DrawingPage",
+        on_delete=models.CASCADE,
+        related_name="note_sections"
+    )
+
+    header = models.CharField(max_length=512)
+    header_bbox = models.JSONField(null=True, blank=True)  # [x1, y1, x2, y2]
+
+    class Meta:
+        ordering = ['id']
+
+    def __str__(self):
+        return f"{self.header} (Page {self.page.page_number})"
+
+
+class DrawingNote(BaseModel):
+    """Individual note extracted from a drawing"""
+
+    section = models.ForeignKey(
+        "DrawingNoteSection",
+        on_delete=models.CASCADE,
+        related_name="notes"
+    )
+
+    note_number = models.IntegerField()
+    category = models.CharField(max_length=256)
+    text = models.TextField()
+    bounding_box = models.JSONField(null=True, blank=True)
+    source_blocks = models.JSONField(null=True, blank=True)
+    drawing_references = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['note_number']
+        indexes = [
+            models.Index(fields=['category']),
+        ]
+
+    def __str__(self):
+        preview = self.text[:50] + '...' if len(self.text) > 50 else self.text
+        return f"Note {self.note_number}: {preview}"
+
+
 # endregion Drawing Parser Models
