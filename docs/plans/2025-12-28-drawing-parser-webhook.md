@@ -2171,6 +2171,45 @@ class TestDrawingNoteViewSet(TestCase):
         self.assertIn('all_filter_vals', response.data)
         self.assertIn('category', response.data['all_filter_vals'])
         self.assertIn('drawing_file', response.data['all_filter_vals'])
+
+    def test_processing_status_returned(self):
+        """Test that processing_status is included in response"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertIn('processing_status', response.data)
+        status_data = response.data['processing_status']
+        self.assertIn('is_processing', status_data)
+        self.assertIn('files_processing', status_data)
+        self.assertIn('files_completed', status_data)
+        self.assertIn('files_failed', status_data)
+        self.assertIn('files', status_data)
+
+    def test_processing_status_shows_processing_files(self):
+        """Test processing_status correctly shows files being processed"""
+        # Create a file that is still processing
+        processing_file = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name="Electrical.pdf",
+            file_s3_key="drawings/electrical.pdf",
+            md5="def456",
+        )
+        DrawingExtraction.objects.create(
+            drawing_file=processing_file,
+            status=DrawingExtractionStatus.PROCESSING,
+        )
+
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        status_data = response.data['processing_status']
+        self.assertTrue(status_data['is_processing'])
+        self.assertEqual(status_data['files_processing'], 1)
+        self.assertEqual(status_data['files_completed'], 1)  # Original file
+        self.assertEqual(len(status_data['files']), 1)
+        self.assertEqual(status_data['files'][0]['name'], "Electrical.pdf")
+        self.assertEqual(status_data['files'][0]['status'], "PROCESSING")
 ```
 
 **Step 2: Run test to verify it fails**
@@ -2187,8 +2226,10 @@ Add to `apps/deliverables/views/drawing_views.py`:
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.response import Response
+from django.db.models import OuterRef, Subquery
 
-from ..models import DrawingNote
+from ..models import DrawingNote, DrawingFile, DrawingExtraction, DrawingExtractionStatus
 from ..serializers.drawing_serializers import DrawingNoteReadSerializer
 from ..permissions import DrawingNoteAccessPermissions
 
@@ -2243,7 +2284,65 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
 
         return queryset
 
+    def _get_processing_status(self, project_id, version_id=None):
+        """
+        Get processing status for all drawing files in the project/version.
+        Returns status object with file counts and details for files still processing.
+        """
+        # Get all drawing files for this project/version
+        files_qs = DrawingFile.objects.filter(project_id=project_id)
+        if version_id:
+            files_qs = files_qs.filter(project_version_id=version_id)
+
+        # Annotate with latest extraction status
+        latest_extraction = DrawingExtraction.objects.filter(
+            drawing_file=OuterRef('pk')
+        ).order_by('-created_at')
+
+        files_with_status = files_qs.annotate(
+            latest_status=Subquery(latest_extraction.values('status')[:1])
+        )
+
+        # Count by status
+        files_processing = 0
+        files_completed = 0
+        files_failed = 0
+        processing_files = []
+
+        for f in files_with_status:
+            status = f.latest_status
+            if status in [DrawingExtractionStatus.PENDING, DrawingExtractionStatus.PROCESSING]:
+                files_processing += 1
+                processing_files.append({
+                    'id': f.id,
+                    'name': f.file_name,
+                    'status': status or DrawingExtractionStatus.PENDING,
+                })
+            elif status in [DrawingExtractionStatus.SUCCESS, DrawingExtractionStatus.PARTIAL_SUCCESS]:
+                files_completed += 1
+            elif status == DrawingExtractionStatus.FAILED:
+                files_failed += 1
+            elif status is None:
+                # No extraction yet - treat as pending
+                files_processing += 1
+                processing_files.append({
+                    'id': f.id,
+                    'name': f.file_name,
+                    'status': DrawingExtractionStatus.PENDING,
+                })
+
+        return {
+            'is_processing': files_processing > 0,
+            'files_processing': files_processing,
+            'files_completed': files_completed,
+            'files_failed': files_failed,
+            'files': processing_files,
+        }
+
     def list(self, request, *args, **kwargs):
+        project_id = self.kwargs['project_id']
+        version_id = request.query_params.get('project_version_id')
+
         queryset = self.filter_queryset(self.get_queryset())
 
         # Get filter values for UI dropdowns
@@ -2254,12 +2353,16 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
             ).distinct()),
         }
 
+        # Get processing status
+        processing_status = self._get_processing_status(project_id, version_id)
+
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = self.get_paginated_response(serializer.data)
             response.data['all_filter_vals'] = all_filter_vals
             response.data['total_count'] = queryset.count()
+            response.data['processing_status'] = processing_status
             return response
 
         serializer = self.get_serializer(queryset, many=True)
@@ -2267,6 +2370,7 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
             'results': serializer.data,
             'all_filter_vals': all_filter_vals,
             'total_count': queryset.count(),
+            'processing_status': processing_status,
         })
 ```
 
