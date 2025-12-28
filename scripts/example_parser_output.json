@@ -1,0 +1,39 @@
+{
+  "model_version": "v1.0.0",
+  "processing_time_ms": 2500,
+  "total_pages": 2,
+  "pages": [
+    {
+      "page_number": 1,
+      "page_type": "DRAWING",
+      "extraction_status": "SUCCESS",
+      "note_sections": [
+        {
+          "header": "GENERAL NOTES:",
+          "header_bbox": [100, 50, 300, 70],
+          "notes": [
+            {
+              "note_number": 1,
+              "category": "GENERAL",
+              "text": "All work shall comply with applicable codes.",
+              "bounding_box": [100, 80, 500, 100],
+              "drawing_references": ["A-101", "A-102"]
+            },
+            {
+              "note_number": 2,
+              "category": "GENERAL",
+              "text": "Contractor to verify all dimensions on site.",
+              "bounding_box": [100, 110, 500, 130]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page_number": 2,
+      "page_type": "SCHEDULE",
+      "extraction_status": "SUCCESS",
+      "note_sections": []
+    }
+  ]
+}
