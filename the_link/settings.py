@@ -631,6 +631,7 @@ QA_PLANNER_FEATURE_FLAG_NAME = 'qa_planner'
 SPEC_CENTERED_VIEW_FEATURE_FLAG_NAME = 'spec_centered_view'
 VERSIONING_PDF_COMPARISON_FEATURE_FLAG_NAME = 'versioning_pdf_comparison'
 LANGCHAIN_UPDATE_FEATURE_FLAG_NAME = 'langchain_update'
+DRAWINGS_FEATURE_FLAG_NAME = 'drawings'
 
 PROCORE_CLIENT_ID = os.environ.get("PROCORE_CLIENT_ID", default="")
 PROCORE_CLIENT_SECRET = os.environ.get("PROCORE_CLIENT_SECRET", default="")
