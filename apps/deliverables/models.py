@@ -894,4 +894,37 @@ class DrawingFile(BaseModel):
         return extraction.status if extraction else None
 
 
+class DrawingExtraction(BaseModel):
+    """Tracks each extraction attempt for a drawing file"""
+
+    drawing_file = models.ForeignKey(
+        "DrawingFile",
+        on_delete=models.CASCADE,
+        related_name="extractions"
+    )
+
+    status = models.CharField(
+        max_length=32,
+        choices=DrawingExtractionStatus.choices,
+        default=DrawingExtractionStatus.PENDING
+    )
+
+    # Processing metadata
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    model_version = models.CharField(max_length=128, null=True, blank=True)
+    processing_time_ms = models.IntegerField(null=True, blank=True)
+    output_s3_key = models.CharField(max_length=1024, null=True, blank=True)
+    error_message = models.TextField(null=True, blank=True)
+    failure_summary = models.CharField(max_length=256, null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['drawing_file', 'status']),
+        ]
+
+    def __str__(self):
+        return f"Extraction {self.id} for {self.drawing_file.file_name} ({self.status})"
+
+
 # endregion Drawing Parser Models
