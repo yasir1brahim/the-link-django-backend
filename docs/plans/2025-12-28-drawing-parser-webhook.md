@@ -1774,6 +1774,15 @@ class TestDrawingNoteReadSerializer(TestCase):
         self.assertEqual(data['page_extraction_status'], "success")
         self.assertEqual(data['page_extraction_failed'], False)
 
+    def test_serializer_includes_drawing_file_url(self):
+        """Test serializer includes presigned URL for the drawing file"""
+        serializer = DrawingNoteReadSerializer(self.note)
+        data = serializer.data
+
+        self.assertIn('drawing_file_url', data)
+        # URL should be a presigned S3 URL containing the file key
+        self.assertIn('drawings/test.pdf', data['drawing_file_url'])
+
     def test_serializer_page_extraction_failed_true(self):
         """Test page_extraction_failed is True when extraction failed"""
         self.page.extraction_status = DrawingPageExtractionStatus.FAILED
@@ -1796,8 +1805,18 @@ Expected: FAIL with "ImportError: cannot import name 'DrawingNoteReadSerializer'
 Create `apps/deliverables/serializers/drawing_serializers.py`:
 
 ```python
+import boto3
+from django.conf import settings
 from rest_framework import serializers
 from ..models import DrawingNote, DrawingPageExtractionStatus
+
+
+s3 = boto3.client(
+    "s3",
+    region_name=settings.AWS_REGION,
+    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
+)
 
 
 class DrawingNoteReadSerializer(serializers.ModelSerializer):
@@ -1808,6 +1827,7 @@ class DrawingNoteReadSerializer(serializers.ModelSerializer):
     # Flattened fields for table display
     drawing_file_id = serializers.IntegerField(source='section.page.drawing_file.id')
     drawing_file_name = serializers.CharField(source='section.page.drawing_file.file_name')
+    drawing_file_url = serializers.SerializerMethodField()
     page_number = serializers.IntegerField(source='section.page.page_number')
     section_header = serializers.CharField(source='section.header')
 
@@ -1821,6 +1841,7 @@ class DrawingNoteReadSerializer(serializers.ModelSerializer):
             'id',
             'drawing_file_id',
             'drawing_file_name',
+            'drawing_file_url',
             'page_number',
             'section_header',
             'note_number',
@@ -1831,6 +1852,15 @@ class DrawingNoteReadSerializer(serializers.ModelSerializer):
             'page_extraction_status',
             'page_extraction_failed',
         ]
+
+    def get_drawing_file_url(self, obj):
+        """Generate a presigned URL for the drawing file PDF."""
+        s3_key = obj.section.page.drawing_file.file_s3_key
+        return s3.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': settings.S3_BUCKET, 'Key': s3_key},
+            ExpiresIn=3600
+        )
 
     def get_page_extraction_failed(self, obj):
         return obj.section.page.extraction_status == DrawingPageExtractionStatus.FAILED
