@@ -173,3 +173,17 @@ class ExtractionNoteAccessPermissions(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return request.user.is_member_of_project(project)
         return obj.created_by is None or obj.created_by_id == request.user.id
+
+
+class DrawingNoteAccessPermissions(permissions.BasePermission):
+    """
+    Permission to only allow members of a project to access drawing notes.
+    """
+
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        project_id = view.kwargs.get('project_id')
+        if project_id:
+            return request.user.is_member_of_project(project_id)
+        return False
