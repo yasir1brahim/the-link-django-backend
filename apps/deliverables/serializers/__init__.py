@@ -358,6 +358,11 @@ class FileUploadSerializer(serializers.Serializer):
     project_version_id = serializers.IntegerField(required=False)
     extract_notices = serializers.BooleanField(required=False)
     full_spec_processing = serializers.BooleanField(required=False)
+    file_type = serializers.ChoiceField(
+        choices=['spec', 'drawing'],
+        required=False,
+        default='spec'
+    )
 
 
 class CombineSubmittalItemsSerializer(serializers.Serializer):

@@ -125,6 +125,9 @@ from ..models import (
     ProcoreSubmittalTypeMapping,
     ROLE_PROJECT_MEMBER,
     NoticeExcerpt,
+    DrawingFile,
+    DrawingExtraction,
+    DrawingExtractionStatus,
 )
 from ..permissions import (
     ProjectAccessPermissions,
@@ -135,7 +138,7 @@ from ..permissions import (
 )
 from apps.utils.feature_flags import (
     is_notices_feature_flag_active, is_versioning_feature_flag_active, is_v2_process_deliverables_feature_flag_active,
-    is_full_spec_processing_feature_flag_active, is_specgpt_feature_flag_active
+    is_full_spec_processing_feature_flag_active, is_specgpt_feature_flag_active, is_drawings_feature_flag_active
 )
 from ..constants import masterformat_to_section_title_map
 from ..serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
@@ -1603,7 +1606,65 @@ def upload_file(request):
                 project_version_id = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first().id
             else:
                 return Response({'detail': 'Versioning is active but no project_version_id was provided'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
+    # Handle drawing file uploads
+    file_type = serializer.validated_data.get('file_type', 'spec')
+    if file_type == 'drawing':
+        project_version = ProjectVersion.objects.get(id=project_version_id)
+        uploaded_drawings = []
+        for file in files:
+            try:
+                file_md5 = get_file_hash(file)
+                filename = f'project_{project_id}__version_{project_version_id}__{int(time.time())}_{file.name}'
+                s3_key = f'drawings/{filename}'
+
+                # Check for existing DrawingFile with same md5, name, project, and version
+                existing_drawing = DrawingFile.objects.filter(
+                    md5=file_md5,
+                    file_name=file.name,
+                    project=project,
+                    project_version=project_version
+                ).first()
+
+                if existing_drawing:
+                    # Reuse existing DrawingFile record
+                    drawing_file = existing_drawing
+                else:
+                    # Upload to S3
+                    s3.upload_fileobj(file, settings.S3_BUCKET, s3_key)
+
+                    # Create new DrawingFile
+                    drawing_file = DrawingFile.objects.create(
+                        project=project,
+                        project_version=project_version,
+                        uploaded_by=user,
+                        file_name=file.name,
+                        file_s3_key=s3_key,
+                        md5=file_md5,
+                    )
+
+                # Always create a new DrawingExtraction for each upload
+                extraction = DrawingExtraction.objects.create(
+                    drawing_file=drawing_file,
+                    status=DrawingExtractionStatus.PENDING,
+                )
+
+                uploaded_drawings.append({
+                    'drawing_file_id': drawing_file.id,
+                    'extraction_id': extraction.id,
+                    'file_name': file.name,
+                    'status': 'pending'
+                })
+            except Exception as e:
+                logging.error(f"Error uploading drawing file: {e}")
+                not_parsed.append(file.name)
+
+        return Response({
+            'drawings': uploaded_drawings,
+            'error_parsing': not_parsed,
+            'message': 'Drawing files uploaded successfully'
+        }, status=status.HTTP_200_OK)
+
     for file in files:
         try:
             filename = f'project_{project_id}__version_{project_version_id}__{int(time.time())}_{file.name}'
