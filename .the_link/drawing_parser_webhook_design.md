@@ -243,6 +243,34 @@ class DrawingNote(BaseModel):
         ]
 ```
 
+### DrawingExtractionWebhookEvent (Idempotency / Retry Safety)
+
+Store each webhook delivery so the endpoint is safe to re-deliver (AWS retries) and we can dedupe repeated callbacks.
+
+**Note**: If the caller cannot provide an `event_id`, we can still be safe by using the webhook event model with a different uniqueness key (TBD), but the clean v1 approach is to require an `event_id`.
+
+```python
+class DrawingExtractionWebhookEvent(BaseModel):
+    extraction = models.ForeignKey(
+        "DrawingExtraction",
+        on_delete=models.CASCADE,
+        related_name="webhook_events",
+    )
+
+    # Provided by the caller; unique per webhook delivery.
+    event_id = models.CharField(max_length=128, unique=True)
+
+    # Helps debug ordering / retries without storing the entire payload forever.
+    new_status = models.CharField(max_length=32)
+    output_s3_key = models.CharField(max_length=1024, null=True, blank=True)
+    payload = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["extraction", "new_status"]),
+        ]
+```
+
 ---
 
 ## API Endpoints
@@ -282,6 +310,7 @@ file_type = serializers.ChoiceField(
 
 ```python
 class DrawingExtractionWebhookRequest(TypedDict):
+    event_id: str                           # Unique per webhook delivery (idempotency key)
     extraction_id: int                      # Maps to DrawingExtraction.id
     new_status: str                         # PROCESSING, SUCCESS, PARTIAL_SUCCESS, FAILED
 
@@ -334,40 +363,86 @@ class NoteData(TypedDict):
 @permission_classes([AllowAny])
 def drawing_extraction_webhook(request):
     payload = request.data
+    event_id = payload['event_id']
     extraction_id = payload['extraction_id']
-    new_status = payload['new_status']
+    new_status = DrawingExtractionStatus(payload['new_status'])
 
-    extraction = DrawingExtraction.objects.get(id=extraction_id)
+    # Idempotency + atomicity:
+    # Record the delivery and apply all DB updates in a single transaction.
+    # If anything fails mid-write, the event row rolls back too, and AWS can retry safely.
+    with transaction.atomic():
+        extraction = DrawingExtraction.objects.select_for_update().get(id=extraction_id)
 
-    if new_status == 'PROCESSING':
-        extraction.status = DrawingExtractionStatus.PROCESSING
-        extraction.started_at = timezone.now()
-        extraction.save()
+        try:
+            DrawingExtractionWebhookEvent.objects.create(
+                extraction=extraction,
+                event_id=event_id,
+                new_status=new_status.value,
+                output_s3_key=payload.get("output_s3_key"),
+                payload=payload,
+            )
+        except IntegrityError:
+            return Response(status=status.HTTP_200_OK)
 
-    elif new_status in ['SUCCESS', 'PARTIAL_SUCCESS']:
-        extraction.status = new_status
-        extraction.completed_at = timezone.now()
-        extraction.model_version = payload.get('model_version')
-        extraction.processing_time_ms = payload.get('processing_time_ms')
-        extraction.output_s3_key = payload.get('output_s3_key')
-        extraction.save()
+        # Define allowed status transitions to avoid out-of-order events
+        allowed_next_statuses = {
+            DrawingExtractionStatus.PENDING: {DrawingExtractionStatus.PROCESSING, DrawingExtractionStatus.FAILED},
+            DrawingExtractionStatus.PROCESSING: {
+                DrawingExtractionStatus.SUCCESS,
+                DrawingExtractionStatus.PARTIAL_SUCCESS,
+                DrawingExtractionStatus.FAILED,
+            },
+            DrawingExtractionStatus.SUCCESS: set(),
+            DrawingExtractionStatus.PARTIAL_SUCCESS: set(),
+            DrawingExtractionStatus.FAILED: set(),
+        }
+        if new_status not in allowed_next_statuses.get(extraction.status, set()):
+            # Ignore regressions / unexpected transitions (e.g., PROCESSING after SUCCESS).
+            return Response(status=status.HTTP_200_OK)
 
-        # Update drawing file total_pages
-        data = payload['data']
-        extraction.drawing_file.total_pages = data['total_pages']
-        extraction.drawing_file.save()
+        if new_status == DrawingExtractionStatus.PROCESSING:
+            extraction.status = DrawingExtractionStatus.PROCESSING
+            extraction.started_at = timezone.now()
+            extraction.save()
 
-        # Create page, section, and note records
-        _create_drawing_records(extraction, data)
+        elif new_status in {DrawingExtractionStatus.SUCCESS, DrawingExtractionStatus.PARTIAL_SUCCESS}:
+            extraction.status = new_status
+            extraction.completed_at = timezone.now()
+            extraction.model_version = payload.get('model_version')
+            extraction.processing_time_ms = payload.get('processing_time_ms')
+            extraction.output_s3_key = payload.get('output_s3_key')
+            extraction.failure_summary = payload.get('failure_summary')
+            extraction.save()
 
-    elif new_status == 'FAILED':
-        extraction.status = DrawingExtractionStatus.FAILED
-        extraction.completed_at = timezone.now()
-        extraction.error_message = payload.get('error_message')
-        extraction.save()
+            # Update drawing file total_pages
+            data = payload['data']
+            extraction.drawing_file.total_pages = data['total_pages']
+            extraction.drawing_file.save()
+
+            # Idempotent record creation:
+            # Delete all pages for this extraction (cascades note_sections + notes),
+            # then recreate from webhook payload.
+            # Use bulk_create for performance across pages, sections, and notes.
+            DrawingPage.objects.filter(extraction=extraction).delete()
+            _create_drawing_records(extraction, data)
+
+        elif new_status == DrawingExtractionStatus.FAILED:
+            extraction.status = DrawingExtractionStatus.FAILED
+            extraction.completed_at = timezone.now()
+            extraction.error_message = payload.get('error_message')
+            extraction.failure_summary = payload.get('failure_summary')
+            extraction.save()
 
     return Response(status=status.HTTP_200_OK)
 ```
+
+#### Bulk Creation Strategy (`_create_drawing_records`)
+
+To handle large PDFs efficiently, the helper should:
+1. `bulk_create` all `DrawingPage` objects first.
+2. `bulk_create` all `DrawingNoteSection` objects.
+3. `bulk_create` all `DrawingNote` objects.
+*(Note: Use `return_created_objects=True` or perform separate queries if IDs are needed for nested relationships during bulk creation.)*
 
 ### 3. Drawing Notes List Endpoint
 
@@ -474,9 +549,11 @@ class DrawingNoteReadSerializer(serializers.ModelSerializer):
 | `project_version_id` | int | Filter by project version |
 | `category` | string | Filter by note category |
 | `drawing_file_id` | int | Filter by specific drawing file |
-| `search` | string | Full-text search in note text |
+| `search` | string | Case-insensitive substring search in note text (v1). Not Postgres full-text search. |
 | `page_number` | int | Page number for pagination |
 | `limit` | int | Items per page (max 100) |
+
+**Search (v2 option)**: If we need true Postgres full-text search, add a `SearchVector` (or generated column) over `DrawingNote.text` with a GIN index, and switch the filter to use FTS ranking instead of `icontains`.
 
 ---
 
@@ -484,7 +561,7 @@ class DrawingNoteReadSerializer(serializers.ModelSerializer):
 
 | File | Action | Description |
 |------|--------|-------------|
-| `apps/deliverables/models.py` | Modify | Add 3 enums + 5 models |
+| `apps/deliverables/models.py` | Modify | Add 3 enums + 6 models (includes webhook event model for idempotency) |
 | `apps/deliverables/views/main_views.py` | Modify | Update `upload_file` for `file_type` param |
 | `apps/deliverables/views/drawing_views.py` | Create | Webhook view + ViewSet |
 | `apps/deliverables/serializers.py` | Modify | Add `DrawingNoteReadSerializer` |
@@ -542,7 +619,11 @@ This provides clearer separation and easier management of permissions/lifecycle 
 
 ### Duplicate Detection
 
-Duplicates are checked **within the same project version only**. This allows users to re-upload the same drawing in a new project version (e.g., updated revisions).
+Duplicates are checked **within the same project version only**. 
+
+- If a file with the same MD5 is uploaded to the same project version, the existing `DrawingFile` record is reused.
+- A **new** `DrawingExtraction` record is created for that `DrawingFile` and the extraction process is triggered.
+- This preserves the history of previous extraction attempts while ensuring the latest data is processed.
 
 ### Error Communication for PARTIAL_SUCCESS
 
