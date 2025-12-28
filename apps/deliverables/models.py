@@ -824,3 +824,74 @@ class PDFAnnotation(BaseModel):
     def __str__(self):
         user_display = self.user.email if self.user else "Unknown user"
         return f"Annotation (Page {self.page_number}) by {user_display}"
+
+
+# region Drawing Parser Models
+
+class DrawingExtractionStatus(models.TextChoices):
+    """Status of a drawing extraction run"""
+    PENDING = "PENDING", "Pending"
+    PROCESSING = "PROCESSING", "Processing"
+    SUCCESS = "SUCCESS", "Success"
+    PARTIAL_SUCCESS = "PARTIAL_SUCCESS", "Partial Success"
+    FAILED = "FAILED", "Failed"
+
+
+class DrawingPageType(models.TextChoices):
+    """Type of page in a drawing"""
+    DRAWING = "drawing", "Drawing"
+    SPEC = "spec", "Specification"
+
+
+class DrawingPageExtractionStatus(models.TextChoices):
+    """Extraction status for individual pages"""
+    SUCCESS = "success", "Success"
+    NO_NOTES_FOUND = "no_notes_found", "No Notes Found"
+    FAILED = "failed", "Failed"
+
+
+class DrawingFile(BaseModel):
+    """Uploaded drawing document (e.g., mechanical drawings PDF)"""
+
+    project = models.ForeignKey(
+        "Project",
+        on_delete=models.CASCADE,
+        related_name="drawing_files"
+    )
+    project_version = models.ForeignKey(
+        "ProjectVersion",
+        on_delete=models.CASCADE,
+        related_name="drawing_files"
+    )
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_drawing_files"
+    )
+
+    file_name = models.CharField(max_length=512)
+    file_s3_key = models.CharField(max_length=1024)
+    md5 = models.CharField(max_length=64)
+    total_pages = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['project', 'project_version']),
+        ]
+
+    def __str__(self):
+        return f"{self.file_name} ({self.project.name})"
+
+    @property
+    def latest_extraction(self):
+        return self.extractions.order_by('-created_at').first()
+
+    @property
+    def extraction_status(self):
+        extraction = self.latest_extraction
+        return extraction.status if extraction else None
+
+
+# endregion Drawing Parser Models
