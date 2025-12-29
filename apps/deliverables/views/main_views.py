@@ -1630,7 +1630,8 @@ def upload_file(request):
                     # Reuse existing DrawingFile record
                     drawing_file = existing_drawing
                 else:
-                    # Upload to S3
+                    # Reset file pointer after hashing, then upload to S3
+                    file.seek(0)
                     s3.upload_fileobj(file, settings.S3_BUCKET, s3_key)
 
                     # Create new DrawingFile
