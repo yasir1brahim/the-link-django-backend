@@ -232,6 +232,14 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         if search:
             queryset = queryset.filter(text__icontains=search)
 
+        # Order by file, page, section header, note number
+        queryset = queryset.order_by(
+            'section__page__drawing_file__file_name',
+            'section__page__page_number',
+            'section__header',
+            'note_number',
+        )
+
         return queryset
 
     def _get_processing_status(self, project_id, version_id=None):
