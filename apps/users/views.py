@@ -151,3 +151,46 @@ class CustomPasswordResetConfirmView(APIView):
             except (TypeError, ValueError, CustomUser.DoesNotExist):
                 return Response({'error': 'Invalid user.'}, status=status.HTTP_400_BAD_REQUEST)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class PasswordResetTokenValidationView(APIView):
+    """Validate password reset token without resetting password."""
+    permission_classes = [AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        """Handle GET request to validate token"""
+        uidb64 = request.query_params.get('uid')
+        token = request.query_params.get('token')
+
+        if not uidb64 or not token:
+            return Response(
+                {'error': 'Missing uid or token parameter.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            uid = urlsafe_base64_decode(uidb64).decode()
+            user = get_user_model().objects.get(pk=uid)
+
+            if default_token_generator.check_token(user, token):
+                return Response(
+                    {'valid': True, 'message': 'Token is valid.'},
+                    status=status.HTTP_200_OK
+                )
+            else:
+                return Response(
+                    {
+                        'valid': False,
+                        'error': 'expired',
+                        'message': 'Password reset link has expired or is invalid.'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except (TypeError, ValueError, get_user_model().DoesNotExist):
+            return Response(
+                {
+                    'valid': False,
+                    'error': 'invalid',
+                    'message': 'Invalid password reset link.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
