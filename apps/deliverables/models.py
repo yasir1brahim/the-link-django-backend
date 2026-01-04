@@ -946,6 +946,11 @@ class DrawingPage(BaseModel):
         max_length=32,
         choices=DrawingPageType.choices
     )
+    rotation = models.IntegerField(default=0)
+    rotated_width = models.FloatField(null=True, blank=True)
+    rotated_height = models.FloatField(null=True, blank=True)
+    unrotated_width = models.FloatField(null=True, blank=True)
+    unrotated_height = models.FloatField(null=True, blank=True)
     extraction_status = models.CharField(
         max_length=32,
         choices=DrawingPageExtractionStatus.choices
@@ -969,7 +974,9 @@ class DrawingNoteSection(BaseModel):
     )
 
     header = models.CharField(max_length=512)
-    header_bbox = models.JSONField(null=True, blank=True)  # [x1, y1, x2, y2]
+    header_bbox = models.JSONField(null=True, blank=True)  # [x1, y1, x2, y2] - Deprecated, use unrotated_header_bbox
+    rotated_header_bbox = models.JSONField(null=True, blank=True)
+    unrotated_header_bbox = models.JSONField(null=True, blank=True)
 
     class Meta:
         ordering = ['id']
@@ -990,7 +997,10 @@ class DrawingNote(BaseModel):
     note_number = models.IntegerField()
     category = models.CharField(max_length=256)
     text = models.TextField()
-    bounding_box = models.JSONField(null=True, blank=True)
+    bounding_box = models.JSONField(null=True, blank=True) # Deprecated, use unrotated_bounding_box
+    raw_bounding_box = models.JSONField(null=True, blank=True) # Deprecated, use rotated_bounding_box
+    rotated_bounding_box = models.JSONField(null=True, blank=True)
+    unrotated_bounding_box = models.JSONField(null=True, blank=True)
     source_blocks = models.JSONField(null=True, blank=True)
     drawing_references = models.JSONField(null=True, blank=True)
 

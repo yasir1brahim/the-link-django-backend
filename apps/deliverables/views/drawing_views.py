@@ -12,6 +12,7 @@ from ..models import (
     DrawingExtractionStatus,
     DrawingExtractionWebhookEvent,
     DrawingPage,
+    DrawingPageExtractionStatus,
     DrawingNoteSection,
     DrawingNote,
     DrawingFile,
@@ -132,6 +133,24 @@ def _create_drawing_records(extraction, data):
     """
     pages_data = data.get('pages', [])
 
+    def _normalize_page_extraction_status(status_value):
+        if status_value is None:
+            return status_value
+
+        normalized = str(status_value).lower()
+        if normalized == 'error':
+            return DrawingPageExtractionStatus.FAILED
+        if normalized == 'partial':
+            return DrawingPageExtractionStatus.FAILED
+        if normalized == 'success':
+            return DrawingPageExtractionStatus.SUCCESS
+        if normalized == 'no_notes_found':
+            return DrawingPageExtractionStatus.NO_NOTES_FOUND
+        if normalized == 'failed':
+            return DrawingPageExtractionStatus.FAILED
+
+        return status_value
+
     # First pass: create all pages
     page_objects = []
     for page_data in pages_data:
@@ -140,7 +159,12 @@ def _create_drawing_records(extraction, data):
             extraction=extraction,
             page_number=page_data['page_number'],
             page_type=page_data['page_type'],
-            extraction_status=page_data['extraction_status'],
+            rotation=page_data.get('rotation', 0),
+            rotated_width=page_data.get('rotated_page_width'),
+            rotated_height=page_data.get('rotated_page_height'),
+            unrotated_width=page_data.get('unrotated_page_width'),
+            unrotated_height=page_data.get('unrotated_page_height'),
+            extraction_status=_normalize_page_extraction_status(page_data['extraction_status']),
             spec_content=page_data.get('spec_content'),
         ))
 
@@ -157,10 +181,18 @@ def _create_drawing_records(extraction, data):
         page = page_map[page_data['page_number']]
         for section_data in page_data.get('note_sections', []):
             section_index = len(section_objects)
+            
+            rotated_header_bbox = section_data.get('rotated_header_bbox')
+            unrotated_header_bbox = section_data.get('unrotated_header_bbox')
+            # Fallback for older payloads or consistency
+            header_bbox = unrotated_header_bbox or rotated_header_bbox
+
             section_objects.append(DrawingNoteSection(
                 page=page,
                 header=section_data['header'],
-                header_bbox=section_data.get('header_bbox'),
+                header_bbox=header_bbox,
+                rotated_header_bbox=rotated_header_bbox,
+                unrotated_header_bbox=unrotated_header_bbox,
             ))
             section_notes_map.append((section_index, section_data.get('notes', [])))
 
@@ -176,7 +208,10 @@ def _create_drawing_records(extraction, data):
                 note_number=note_data['note_number'],
                 category=note_data['category'],
                 text=note_data['text'],
-                bounding_box=note_data.get('bounding_box'),
+                bounding_box=note_data.get('unrotated_bounding_box') or note_data.get('bounding_box'),
+                raw_bounding_box=note_data.get('rotated_bounding_box') or note_data.get('raw_bounding_box') or note_data.get('bounding_box'),
+                rotated_bounding_box=note_data.get('rotated_bounding_box'),
+                unrotated_bounding_box=note_data.get('unrotated_bounding_box'),
                 source_blocks=note_data.get('source_blocks'),
                 drawing_references=note_data.get('drawing_references'),
             ))

@@ -1609,14 +1609,19 @@ def upload_file(request):
 
     # Handle drawing file uploads
     file_type = serializer.validated_data.get('file_type', 'spec')
+    print(f"[DRAWING UPLOAD] file_type={file_type}, project_id={project_id}, version_id={project_version_id}")
     if file_type == 'drawing':
+        print(f"[DRAWING UPLOAD] Processing {len(files)} drawing file(s)")
         project_version = ProjectVersion.objects.get(id=project_version_id)
         uploaded_drawings = []
         for file in files:
             try:
+                print(f"[DRAWING UPLOAD] Processing file: {file.name}, size={file.size}")
                 file_md5 = get_file_hash(file)
+                print(f"[DRAWING UPLOAD] File hash: {file_md5}")
                 filename = f'project_{project_id}__version_{project_version_id}__{int(time.time())}_{file.name}'
                 s3_key = f'drawings/{filename}'
+                print(f"[DRAWING UPLOAD] S3 key: {s3_key}")
 
                 # Check for existing DrawingFile with same md5, name, project, and version
                 existing_drawing = DrawingFile.objects.filter(
@@ -1628,11 +1633,15 @@ def upload_file(request):
 
                 if existing_drawing:
                     # Reuse existing DrawingFile record
+                    print(f"[DRAWING UPLOAD] Found existing DrawingFile id={existing_drawing.id}")
                     drawing_file = existing_drawing
                 else:
                     # Reset file pointer after hashing, then upload to S3
                     file.seek(0)
+                    file_size_after_seek = file.size
+                    print(f"[DRAWING UPLOAD] Uploading to S3 bucket={settings.S3_BUCKET}, key={s3_key}, size={file_size_after_seek}")
                     s3.upload_fileobj(file, settings.S3_BUCKET, s3_key)
+                    print(f"[DRAWING UPLOAD] S3 upload completed")
 
                     # Create new DrawingFile
                     drawing_file = DrawingFile.objects.create(
@@ -1643,12 +1652,14 @@ def upload_file(request):
                         file_s3_key=s3_key,
                         md5=file_md5,
                     )
+                    print(f"[DRAWING UPLOAD] Created DrawingFile id={drawing_file.id}")
 
                 # Always create a new DrawingExtraction for each upload
                 extraction = DrawingExtraction.objects.create(
                     drawing_file=drawing_file,
                     status=DrawingExtractionStatus.PENDING,
                 )
+                print(f"[DRAWING UPLOAD] Created DrawingExtraction id={extraction.id}")
 
                 uploaded_drawings.append({
                     'drawing_file_id': drawing_file.id,
@@ -1657,7 +1668,9 @@ def upload_file(request):
                     'status': 'pending'
                 })
             except Exception as e:
-                logging.error(f"Error uploading drawing file: {e}")
+                import traceback
+                print(f"[DRAWING UPLOAD] Error uploading drawing file {file.name}: {e}")
+                traceback.print_exc()
                 not_parsed.append(file.name)
 
         return Response({
