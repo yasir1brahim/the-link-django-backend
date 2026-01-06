@@ -1,3 +1,4 @@
+import logging
 from django.contrib import admin
 from django.db.models import Count, Q
 from waffle.admin import FlagAdmin as WaffleFlagAdmin
@@ -9,6 +10,7 @@ from apps.users.serializers import CustomPasswordResetSerializer
 from apps.utils.constants import WELCOME_RESET_SUBJECT
 from .emails import send_team_added_notification
 
+logger = logging.getLogger(__name__)
 
 @admin.register(Membership)
 class MembershipAdmin(admin.ModelAdmin):
@@ -81,6 +83,15 @@ class TeamAdmin(admin.ModelAdmin):
                 obj.save()
                 if is_new:
                     new_memberships.append(obj)
+            try:
+                for obj in getattr(formset, "deleted_objects", []) or []:
+                    logger.info(f"Deleting Membership instance: {obj}")
+                    obj.delete()
+            except Exception as e:
+                # If something goes wrong during deletion, don't block rest of save
+                logger.error(f"Error Deleting Membership instance: {str(e)}")
+                pass
+
             formset.save_m2m()
 
             # Send emails for newly created memberships via Team admin
