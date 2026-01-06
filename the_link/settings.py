@@ -618,6 +618,8 @@ BACKEND_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/spec-status-webhook
 NOTICES_LAMBDA_FUNCTION_URL = os.environ.get("NOTICES_LAMBDA_FUNCTION_URL", default="")
 BACKEND_NOTICES_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/webhooks/notice-processing/"
 BACKEND_FULL_SPEC_PROCESSING_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/webhooks/full-spec-processing/"
+DRAWINGS_LAMBDA_FUNCTION_URL = os.environ.get("DRAWINGS_LAMBDA_FUNCTION_URL", default="")
+BACKEND_DRAWINGS_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/webhooks/drawing-extraction/"
 NOTICES_FEATURE_FLAG_NAME = 'notices'
 VERSIONING_FEATURE_FLAG_NAME = 'versioning'
 VERSIONING_SUBMITTAL_COMPARISON_FEATURE_FLAG_NAME = 'versioning_submittal_comparison'
@@ -631,6 +633,7 @@ QA_PLANNER_FEATURE_FLAG_NAME = 'qa_planner'
 SPEC_CENTERED_VIEW_FEATURE_FLAG_NAME = 'spec_centered_view'
 VERSIONING_PDF_COMPARISON_FEATURE_FLAG_NAME = 'versioning_pdf_comparison'
 LANGCHAIN_UPDATE_FEATURE_FLAG_NAME = 'langchain_update'
+DRAWINGS_FEATURE_FLAG_NAME = 'drawings'
 
 PROCORE_CLIENT_ID = os.environ.get("PROCORE_CLIENT_ID", default="")
 PROCORE_CLIENT_SECRET = os.environ.get("PROCORE_CLIENT_SECRET", default="")

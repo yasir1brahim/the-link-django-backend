@@ -24,7 +24,9 @@ from django.conf import settings
 from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
     UploadedFile, SpecSection, MasterFormatSection,
     SubmittalItemList, ExcelExportHeader, ProjectVersion, Chat, ChatMessage,
-    AiGeneratedLog, ExtractedData, CustomItemType, ExtractionNote
+    AiGeneratedLog, ExtractedData, CustomItemType, ExtractionNote,
+    DrawingFile, DrawingExtraction, DrawingPage, DrawingNoteSection,
+    DrawingNote, DrawingExtractionWebhookEvent,
 )
 
 
@@ -538,3 +540,57 @@ class ExtractionNoteAdmin(admin.ModelAdmin):
         return super().get_queryset(request).select_related(
             'extracted_data', 'created_by'
         )
+
+
+@admin.register(DrawingFile)
+class DrawingFileAdmin(admin.ModelAdmin):
+    list_display = ['id', 'file_name', 'project', 'project_version', 'total_pages', 'created_at']
+    list_filter = ['project', 'project_version']
+    search_fields = ['file_name', 'project__name']
+    raw_id_fields = ['project', 'project_version', 'uploaded_by']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(DrawingExtraction)
+class DrawingExtractionAdmin(admin.ModelAdmin):
+    list_display = ['id', 'drawing_file', 'status', 'started_at', 'completed_at', 'created_at']
+    list_filter = ['status']
+    search_fields = ['drawing_file__file_name']
+    raw_id_fields = ['drawing_file']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(DrawingPage)
+class DrawingPageAdmin(admin.ModelAdmin):
+    list_display = ['id', 'drawing_file', 'page_number', 'page_type', 'extraction_status']
+    list_filter = ['page_type', 'extraction_status']
+    search_fields = ['drawing_file__file_name']
+    raw_id_fields = ['drawing_file', 'extraction']
+
+
+@admin.register(DrawingNoteSection)
+class DrawingNoteSectionAdmin(admin.ModelAdmin):
+    list_display = ['id', 'header', 'page']
+    search_fields = ['header']
+    raw_id_fields = ['page']
+
+
+@admin.register(DrawingNote)
+class DrawingNoteAdmin(admin.ModelAdmin):
+    list_display = ['id', 'note_number', 'category', 'text_preview', 'section']
+    list_filter = ['category']
+    search_fields = ['text', 'category']
+    raw_id_fields = ['section']
+
+    def text_preview(self, obj):
+        return obj.text[:50] + '...' if len(obj.text) > 50 else obj.text
+    text_preview.short_description = 'Text'
+
+
+@admin.register(DrawingExtractionWebhookEvent)
+class DrawingExtractionWebhookEventAdmin(admin.ModelAdmin):
+    list_display = ['id', 'event_id', 'extraction', 'new_status', 'created_at']
+    list_filter = ['new_status']
+    search_fields = ['event_id']
+    raw_id_fields = ['extraction']
+    readonly_fields = ['created_at', 'updated_at']

@@ -125,6 +125,9 @@ from ..models import (
     ProcoreSubmittalTypeMapping,
     ROLE_PROJECT_MEMBER,
     NoticeExcerpt,
+    DrawingFile,
+    DrawingExtraction,
+    DrawingExtractionStatus,
 )
 from ..permissions import (
     ProjectAccessPermissions,
@@ -135,7 +138,7 @@ from ..permissions import (
 )
 from apps.utils.feature_flags import (
     is_notices_feature_flag_active, is_versioning_feature_flag_active, is_v2_process_deliverables_feature_flag_active,
-    is_full_spec_processing_feature_flag_active, is_specgpt_feature_flag_active
+    is_full_spec_processing_feature_flag_active, is_specgpt_feature_flag_active, is_drawings_feature_flag_active
 )
 from ..constants import masterformat_to_section_title_map
 from ..serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
@@ -1496,6 +1499,43 @@ def call_extract_notices_lambda(callback_url, document_id, object_key, project_v
     return "Kicked off processing job"
 
 
+def call_extract_drawing_notes_lambda(
+    callback_url,
+    project_id,
+    project_version_id,
+    drawing_file_id,
+    extraction_id,
+    file_s3_key,
+    use_llm=False,
+):
+    logging.debug(f"call_extract_drawing_notes_lambda: {file_s3_key}")
+
+    if not settings.DRAWINGS_LAMBDA_FUNCTION_URL:
+        raise ValueError("DRAWINGS_LAMBDA_FUNCTION_URL is not set")
+
+    payload = {
+        "source_file_s3_uri": f"s3://{settings.S3_BUCKET}/{file_s3_key}",
+        "callback_url": callback_url,
+        "project_id": str(project_id),
+        "project_version_id": str(project_version_id),
+        "drawing_file_id": str(drawing_file_id),
+        "extraction_id": str(extraction_id),
+        "ENVIRONMENT": settings.ENVIRONMENT,
+        "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
+        "use_llm": bool(use_llm),
+    }
+
+    print(f"Invoking lambda with URL: {settings.DRAWINGS_LAMBDA_FUNCTION_URL}")
+    print(f"Invoking lambda with payload: {payload}")
+
+    invoke_lambda(
+        payload=payload,
+        lambda_url=settings.DRAWINGS_LAMBDA_FUNCTION_URL
+    )
+
+    return "Kicked off drawing extraction job"
+
+
 def upload_to_s3_and_process(file_data):
     """Handle S3 upload and Lambda processing for a single file"""
     try:
@@ -1603,7 +1643,92 @@ def upload_file(request):
                 project_version_id = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first().id
             else:
                 return Response({'detail': 'Versioning is active but no project_version_id was provided'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
+    # Handle drawing file uploads
+    file_type = serializer.validated_data.get('file_type', 'spec')
+    print(f"[DRAWING UPLOAD] file_type={file_type}, project_id={project_id}, version_id={project_version_id}")
+    if file_type == 'drawing':
+        print(f"[DRAWING UPLOAD] Processing {len(files)} drawing file(s)")
+        project_version = ProjectVersion.objects.get(id=project_version_id)
+        uploaded_drawings = []
+        for file in files:
+            try:
+                print(f"[DRAWING UPLOAD] Processing file: {file.name}, size={file.size}")
+                file_md5 = get_file_hash(file)
+                print(f"[DRAWING UPLOAD] File hash: {file_md5}")
+                filename = f'project_{project_id}__version_{project_version_id}__{int(time.time())}_{file.name}'
+                s3_key = f'drawings/{filename}'
+                print(f"[DRAWING UPLOAD] S3 key: {s3_key}")
+
+                # Check for existing DrawingFile with same md5, name, project, and version
+                existing_drawing = DrawingFile.objects.filter(
+                    md5=file_md5,
+                    file_name=file.name,
+                    project=project,
+                    project_version=project_version
+                ).first()
+
+                if existing_drawing:
+                    # Reuse existing DrawingFile record
+                    print(f"[DRAWING UPLOAD] Found existing DrawingFile id={existing_drawing.id}")
+                    drawing_file = existing_drawing
+                else:
+                    # Reset file pointer after hashing, then upload to S3
+                    file.seek(0)
+                    file_size_after_seek = file.size
+                    print(f"[DRAWING UPLOAD] Uploading to S3 bucket={settings.S3_BUCKET}, key={s3_key}, size={file_size_after_seek}")
+                    s3.upload_fileobj(file, settings.S3_BUCKET, s3_key)
+                    print(f"[DRAWING UPLOAD] S3 upload completed")
+
+                    # Create new DrawingFile
+                    drawing_file = DrawingFile.objects.create(
+                        project=project,
+                        project_version=project_version,
+                        uploaded_by=user,
+                        file_name=file.name,
+                        file_s3_key=s3_key,
+                        md5=file_md5,
+                    )
+                    print(f"[DRAWING UPLOAD] Created DrawingFile id={drawing_file.id}")
+
+                # Always create a new DrawingExtraction for each upload
+                extraction = DrawingExtraction.objects.create(
+                    drawing_file=drawing_file,
+                    status=DrawingExtractionStatus.PENDING,
+                )
+                print(f"[DRAWING UPLOAD] Created DrawingExtraction id={extraction.id}")
+
+                try:
+                    call_extract_drawing_notes_lambda(
+                        callback_url=settings.BACKEND_DRAWINGS_CALLBACK_URL,
+                        project_id=project_id,
+                        project_version_id=project_version_id,
+                        drawing_file_id=drawing_file.id,
+                        extraction_id=extraction.id,
+                        file_s3_key=drawing_file.file_s3_key,
+                    )
+                except Exception as e:
+                    logging.error(f"[DRAWING UPLOAD] Failed to invoke drawing extraction lambda: {e}")
+                    not_parsed.append(file.name)
+
+                uploaded_drawings.append({
+                    'drawing_file_id': drawing_file.id,
+                    'extraction_id': extraction.id,
+                    'file_name': file.name,
+                    'status': 'pending'
+                })
+            except Exception as e:
+                import traceback
+                print(f"[DRAWING UPLOAD] Error uploading drawing file {file.name}: {e}")
+                traceback.print_exc()
+                not_parsed.append(file.name)
+
+        return Response({
+            'drawings': uploaded_drawings,
+            'error_parsing': not_parsed,
+            'message': 'Drawing files uploaded successfully'
+        }, status=status.HTTP_200_OK)
+
     for file in files:
         try:
             filename = f'project_{project_id}__version_{project_version_id}__{int(time.time())}_{file.name}'
