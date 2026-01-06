@@ -618,6 +618,8 @@ BACKEND_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/spec-status-webhook
 NOTICES_LAMBDA_FUNCTION_URL = os.environ.get("NOTICES_LAMBDA_FUNCTION_URL", default="")
 BACKEND_NOTICES_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/webhooks/notice-processing/"
 BACKEND_FULL_SPEC_PROCESSING_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/webhooks/full-spec-processing/"
+DRAWINGS_LAMBDA_FUNCTION_URL = os.environ.get("DRAWINGS_LAMBDA_FUNCTION_URL", default="")
+BACKEND_DRAWINGS_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/webhooks/drawing-extraction/"
 NOTICES_FEATURE_FLAG_NAME = 'notices'
 VERSIONING_FEATURE_FLAG_NAME = 'versioning'
 VERSIONING_SUBMITTAL_COMPARISON_FEATURE_FLAG_NAME = 'versioning_submittal_comparison'

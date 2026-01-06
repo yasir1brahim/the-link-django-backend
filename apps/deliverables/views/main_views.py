@@ -1499,6 +1499,43 @@ def call_extract_notices_lambda(callback_url, document_id, object_key, project_v
     return "Kicked off processing job"
 
 
+def call_extract_drawing_notes_lambda(
+    callback_url,
+    project_id,
+    project_version_id,
+    drawing_file_id,
+    extraction_id,
+    file_s3_key,
+    use_llm=False,
+):
+    logging.debug(f"call_extract_drawing_notes_lambda: {file_s3_key}")
+
+    if not settings.DRAWINGS_LAMBDA_FUNCTION_URL:
+        raise ValueError("DRAWINGS_LAMBDA_FUNCTION_URL is not set")
+
+    payload = {
+        "source_file_s3_uri": f"s3://{settings.S3_BUCKET}/{file_s3_key}",
+        "callback_url": callback_url,
+        "project_id": str(project_id),
+        "project_version_id": str(project_version_id),
+        "drawing_file_id": str(drawing_file_id),
+        "extraction_id": str(extraction_id),
+        "ENVIRONMENT": settings.ENVIRONMENT,
+        "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
+        "use_llm": bool(use_llm),
+    }
+
+    print(f"Invoking lambda with URL: {settings.DRAWINGS_LAMBDA_FUNCTION_URL}")
+    print(f"Invoking lambda with payload: {payload}")
+
+    invoke_lambda(
+        payload=payload,
+        lambda_url=settings.DRAWINGS_LAMBDA_FUNCTION_URL
+    )
+
+    return "Kicked off drawing extraction job"
+
+
 def upload_to_s3_and_process(file_data):
     """Handle S3 upload and Lambda processing for a single file"""
     try:
@@ -1660,6 +1697,19 @@ def upload_file(request):
                     status=DrawingExtractionStatus.PENDING,
                 )
                 print(f"[DRAWING UPLOAD] Created DrawingExtraction id={extraction.id}")
+
+                try:
+                    call_extract_drawing_notes_lambda(
+                        callback_url=settings.BACKEND_DRAWINGS_CALLBACK_URL,
+                        project_id=project_id,
+                        project_version_id=project_version_id,
+                        drawing_file_id=drawing_file.id,
+                        extraction_id=extraction.id,
+                        file_s3_key=drawing_file.file_s3_key,
+                    )
+                except Exception as e:
+                    logging.error(f"[DRAWING UPLOAD] Failed to invoke drawing extraction lambda: {e}")
+                    not_parsed.append(file.name)
 
                 uploaded_drawings.append({
                     'drawing_file_id': drawing_file.id,
