@@ -68,6 +68,7 @@ THIRD_PARTY_APPS = [
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
     "allauth.socialaccount.providers.microsoft",
+    'admin_reorder',
     "whitenoise.runserver_nostatic",
     "channels",
     "django_otp",
@@ -129,6 +130,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    'admin_reorder.middleware.ModelAdminReorder',
     "allauth.account.middleware.AccountMiddleware",
     "apps.teams.middleware.TeamsMiddleware",
     "apps.web.locale_middleware.UserLocaleMiddleware",
@@ -660,3 +662,26 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", default="")
 # OpenAI model context settings
 OPENAI_MODEL_MAX_CONTEXT_SIZE = 1000000 # in tokens
 BACKEND_AI_LOG_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/webhooks/ai-log-generation/"
+
+ADMIN_REORDER = (
+    {
+        'app': 'users', 
+        'label': 'User Management', 
+        'models': ('users.CustomUser',),
+    },
+    
+    'teams',
+    'deliverables',
+    'sites',
+
+    {
+        'app': 'socialaccount',
+        'label': 'Social Authentication',
+        'models': (
+            'socialaccount.SocialAccount',
+            'socialaccount.SocialApp',
+            'socialaccount.SocialToken',
+        )
+    },
+
+)
