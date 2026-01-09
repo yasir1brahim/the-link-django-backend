@@ -15,6 +15,7 @@ from pathlib import Path
 
 import dj_database_url
 import environ
+from .admin_reorder_config import ADMIN_REORDER
 from django.utils.translation import gettext_lazy
 
 # Build paths inside the project like this: BASE_DIR / "subdir".
@@ -130,7 +131,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    'admin_reorder.middleware.ModelAdminReorder',
+    "admin_reorder.middleware.ModelAdminReorder",
     "allauth.account.middleware.AccountMiddleware",
     "apps.teams.middleware.TeamsMiddleware",
     "apps.web.locale_middleware.UserLocaleMiddleware",
@@ -662,26 +663,3 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", default="")
 # OpenAI model context settings
 OPENAI_MODEL_MAX_CONTEXT_SIZE = 1000000 # in tokens
 BACKEND_AI_LOG_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/webhooks/ai-log-generation/"
-
-ADMIN_REORDER = (
-    {
-        'app': 'users', 
-        'label': 'User Management', 
-        'models': ('users.CustomUser',),
-    },
-    
-    'teams',
-    'deliverables',
-    'sites',
-
-    {
-        'app': 'socialaccount',
-        'label': 'Social Authentication',
-        'models': (
-            'socialaccount.SocialAccount',
-            'socialaccount.SocialApp',
-            'socialaccount.SocialToken',
-        )
-    },
-
-)
