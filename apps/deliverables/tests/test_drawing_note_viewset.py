@@ -205,3 +205,78 @@ class TestDrawingNoteViewSet(TestCase):
         self.assertEqual(len(status_data['files']), 1)
         self.assertEqual(status_data['files'][0]['name'], "Electrical.pdf")
         self.assertEqual(status_data['files'][0]['status'], "PROCESSING")
+
+    def test_export_notes_to_xlsx(self):
+        """Test exporting drawing notes to XLSX format"""
+        import openpyxl
+        from io import BytesIO
+
+        url = reverse('deliverables:drawing-note-export', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        self.assertIn('attachment; filename=drawing_notes.xlsx', response['Content-Disposition'])
+
+        # Verify the workbook content
+        workbook = openpyxl.load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+
+        # Check headers
+        headers = ['File Name', 'Page', 'Section', 'Note #', 'Category', 'Note Text']
+        for col, header in enumerate(headers, start=1):
+            self.assertEqual(worksheet.cell(row=1, column=col).value, header)
+
+        # Check data row
+        self.assertEqual(worksheet.cell(row=2, column=1).value, "Mechanical.pdf")  # File Name
+        self.assertEqual(worksheet.cell(row=2, column=2).value, 1)  # Page
+        self.assertEqual(worksheet.cell(row=2, column=3).value, "GENERAL NOTES:")  # Section
+        self.assertEqual(worksheet.cell(row=2, column=4).value, 1)  # Note #
+        self.assertEqual(worksheet.cell(row=2, column=5).value, "GENERAL NOTES")  # Category
+        self.assertEqual(worksheet.cell(row=2, column=6).value, "Test note content")  # Note Text
+
+    def test_export_notes_with_filter(self):
+        """Test exporting filtered drawing notes"""
+        import openpyxl
+        from io import BytesIO
+
+        # Create additional note with different category
+        DrawingNote.objects.create(
+            section=self.section,
+            note_number=2,
+            category="MECHANICAL",
+            text="Mechanical note content",
+        )
+
+        url = reverse('deliverables:drawing-note-export', kwargs={'project_id': self.project.id})
+
+        # Export with category filter
+        response = self.client.get(url, {'category': 'MECHANICAL'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        workbook = openpyxl.load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+
+        # Should only have header row + 1 data row (filtered result)
+        self.assertEqual(worksheet.max_row, 2)
+        self.assertEqual(worksheet.cell(row=2, column=5).value, "MECHANICAL")
+
+    def test_export_notes_unauthenticated_denied(self):
+        """Test export is denied for unauthenticated users"""
+        self.client.logout()
+        url = reverse('deliverables:drawing-note-export', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
+
+    def test_export_notes_non_member_denied(self):
+        """Test export is denied for non-members"""
+        self.client.force_authenticate(user=self.other_user)
+        url = reverse('deliverables:drawing-note-export', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
