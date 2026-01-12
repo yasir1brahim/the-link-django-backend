@@ -1,5 +1,6 @@
 boto3
 channels
+django-modeladmin-reorder
 channels_redis
 docutils
 Django
