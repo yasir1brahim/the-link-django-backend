@@ -15,6 +15,7 @@ from pathlib import Path
 
 import dj_database_url
 import environ
+from .admin_reorder_config import ADMIN_REORDER
 from django.utils.translation import gettext_lazy
 
 # Build paths inside the project like this: BASE_DIR / "subdir".
@@ -68,6 +69,7 @@ THIRD_PARTY_APPS = [
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
     "allauth.socialaccount.providers.microsoft",
+    'admin_reorder',
     "whitenoise.runserver_nostatic",
     "channels",
     "django_otp",
@@ -129,6 +131,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "admin_reorder.middleware.ModelAdminReorder",
     "allauth.account.middleware.AccountMiddleware",
     "apps.teams.middleware.TeamsMiddleware",
     "apps.web.locale_middleware.UserLocaleMiddleware",
