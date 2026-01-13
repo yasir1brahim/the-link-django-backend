@@ -1,11 +1,21 @@
+import re
+
+import openpyxl
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+
 from django.db import transaction, IntegrityError
 from django.db.models import OuterRef, Subquery
+from django.http import HttpResponse
 from django.utils import timezone
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status, viewsets
 from rest_framework.pagination import PageNumberPagination
+
+from .main_views import clean_excel_content
 
 from ..models import (
     DrawingExtraction,
@@ -368,3 +378,73 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
             'total_count': queryset.count(),
             'processing_status': processing_status,
         })
+
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request, *args, **kwargs):
+        """
+        Export drawing notes to XLSX format.
+        Supports the same filters as the list endpoint.
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+
+        # Create a workbook and select the active worksheet
+        workbook = openpyxl.Workbook()
+        worksheet = workbook.active
+        worksheet.title = "Drawing Notes"
+
+        # Define the styles (matching submittal export pattern)
+        text_alignment = Alignment(wrap_text=True, vertical='center')
+        header_alignment = Alignment(wrap_text=True, vertical='center')
+        header_font = Font(bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='202a44', end_color='202a44', fill_type='solid')
+        header_border = Border(right=Side(border_style='thin', color='FFFFFF'))
+
+        # Define the headers
+        headers = ['File Name', 'Page', 'Section', 'Note #', 'Category', 'Note Text']
+        worksheet.append(headers)
+
+        # Style the header row
+        for col in range(1, len(headers) + 1):
+            cell = worksheet.cell(row=1, column=col)
+            cell.alignment = header_alignment
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = header_border
+
+        # Write data to the worksheet
+        row_idx = 2
+        for note in queryset:
+            row = [
+                note.section.page.drawing_file.file_name,
+                note.section.page.page_number,
+                note.section.header,
+                note.note_number,
+                note.category,
+                clean_excel_content(re.sub(ILLEGAL_CHARACTERS_RE, '', note.text or '')),
+            ]
+            worksheet.append(row)
+            for col in range(1, len(row) + 1):
+                cell = worksheet.cell(row=row_idx, column=col)
+                cell.alignment = text_alignment
+            row_idx += 1
+
+        # Adjust column widths
+        column_widths = {
+            'A': 40,  # File Name
+            'B': 10,  # Page
+            'C': 30,  # Section
+            'D': 10,  # Note #
+            'E': 20,  # Category
+            'F': 100,  # Note Text
+        }
+        for col_letter, width in column_widths.items():
+            worksheet.column_dimensions[col_letter].width = width
+
+        # Create a response object and set the appropriate headers
+        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = 'attachment; filename=drawing_notes.xlsx'
+
+        # Save the workbook to the response
+        workbook.save(response)
+
+        return response
