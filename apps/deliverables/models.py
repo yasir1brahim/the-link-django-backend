@@ -179,6 +179,9 @@ class SpecSection(BaseModel):
     specgpt_embedding_status = models.CharField(max_length=256, blank=True, null=True, choices=UploadedFile.SpecgptProcessingStatusChoices.choices)
     file_s3_key = models.CharField(max_length=1024, blank=True, null=True)
 
+    class Meta:
+        ordering = ['masterformat_section__masterformat_number', 'document__name']
+
     def __str__(self):
         return f"{self.document.name} - {self.masterformat_section.masterformat_number}"
 
