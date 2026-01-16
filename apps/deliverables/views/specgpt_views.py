@@ -1691,7 +1691,7 @@ class ChatViewSet(viewsets.ModelViewSet):
         print("GENERATE GENERAL LOG: top_p: ", top_p)
 
         project_version_files = UploadedFile.objects.filter(project_version_id=project_version_id).order_by('id')
-        project_version_specs = SpecSection.objects.filter(document__in=project_version_files).order_by('id')
+        project_version_specs = SpecSection.objects.filter(document__in=project_version_files)
         spec_sections = [{
             'master_format_section_number': spec_section.masterformat_section.masterformat_number,
             'file_s3_key': spec_section.file_s3_key
@@ -1844,13 +1844,13 @@ class ChatViewSet(viewsets.ModelViewSet):
         
         # Get common data for all lambda calls
         project_version_files = UploadedFile.objects.filter(project_version_id=project_version_id).order_by('id')
-        project_version_specs = SpecSection.objects.filter(document__in=project_version_files).order_by('id')
+        project_version_specs = SpecSection.objects.filter(document__in=project_version_files)
         spec_sections = [{
             'master_format_section_number': spec_section.masterformat_section.masterformat_number,
             'file_s3_key': spec_section.file_s3_key
         } for spec_section in project_version_specs if spec_section.file_s3_key]
         s3_bucket = settings.S3_BUCKET
-        
+
         # Check feature flag for data tables
         use_data_tables = False
         if request and hasattr(request, 'user'):

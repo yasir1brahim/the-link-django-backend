@@ -111,7 +111,7 @@ class SpecCentricViewTests(APITestCase):
     
     def test_get_spec_sections_success(self):
         """Test getting spec sections successfully."""
-        url = reverse('deliverables:spec-section-list', kwargs={'project_pk': self.project.id})
+        url = reverse('deliverables:spec-section-list', kwargs={'project_id': self.project.id})
         response = self.client.get(url)
         
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -121,7 +121,7 @@ class SpecCentricViewTests(APITestCase):
     
     def test_get_spec_sections_with_version_filter(self):
         """Test getting spec sections with project version filter."""
-        url = reverse('deliverables:spec-section-list', kwargs={'project_pk': self.project.id})
+        url = reverse('deliverables:spec-section-list', kwargs={'project_id': self.project.id})
         response = self.client.get(url, {'project_version_id': self.project_version.id})
         
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -170,7 +170,7 @@ class SpecCentricViewTests(APITestCase):
         self.feature_flag.everyone = False
         self.feature_flag.save()
         
-        url = reverse('deliverables:spec-section-list', kwargs={'project_pk': self.project.id})
+        url = reverse('deliverables:spec-section-list', kwargs={'project_id': self.project.id})
         response = self.client.get(url)
         
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
@@ -181,7 +181,7 @@ class SpecCentricViewTests(APITestCase):
         """Test that unauthenticated users cannot access endpoints."""
         self.client.logout()
         
-        url = reverse('deliverables:spec-section-list', kwargs={'project_pk': self.project.id})
+        url = reverse('deliverables:spec-section-list', kwargs={'project_id': self.project.id})
         response = self.client.get(url)
         
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
@@ -199,7 +199,7 @@ class SpecCentricViewTests(APITestCase):
         # Authenticate as the other user
         self.client.force_authenticate(user=other_user)
         
-        url = reverse('deliverables:spec-section-list', kwargs={'project_pk': self.project.id})
+        url = reverse('deliverables:spec-section-list', kwargs={'project_id': self.project.id})
         response = self.client.get(url)
         
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
@@ -367,3 +367,159 @@ class SpecSectionContentSerializerTests(TestCase):
         self.assertIn('Newer AI requirement', requirement_texts)
         self.assertIn('Manual requirement', requirement_texts)
         self.assertNotIn('Older AI requirement', requirement_texts)
+
+
+class SpecSectionOrderingTests(APITestCase):
+    """Test cases for spec section ordering consistency."""
+
+    def setUp(self):
+        """Set up test data with multiple spec sections for ordering tests."""
+        self.user = User.objects.create_user(
+            username='ordering_tester',
+            password='testpass123'
+        )
+
+        self.team = Team.objects.create(
+            name='Ordering Test Team',
+            slug='ordering-test-team'
+        )
+
+        self.project = Project.objects.create(
+            name='Ordering Test Project',
+            team=self.team
+        )
+
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role=ROLE_PROJECT_MEMBER
+        )
+
+        # Get the project version that was auto-created with the project
+        self.project_version = self.project.versions.first()
+
+        # Create masterformat sections with different numbers (out of order)
+        self.mf_section_03 = MasterFormatSection.objects.create(
+            masterformat_number='03 30 00',
+            masterformat_description='Cast-in-Place Concrete'
+        )
+        self.mf_section_01 = MasterFormatSection.objects.create(
+            masterformat_number='01 00 00',
+            masterformat_description='General Requirements'
+        )
+        self.mf_section_05 = MasterFormatSection.objects.create(
+            masterformat_number='05 12 00',
+            masterformat_description='Structural Steel'
+        )
+
+        # Create uploaded files with different names
+        self.file_b = UploadedFile.objects.create(
+            name='B_specs.pdf',
+            project=self.project,
+            project_version=self.project_version,
+            uploaded_by=self.user,
+            document_path='test/b_specs.pdf'
+        )
+        self.file_a = UploadedFile.objects.create(
+            name='A_specs.pdf',
+            project=self.project,
+            project_version=self.project_version,
+            uploaded_by=self.user,
+            document_path='test/a_specs.pdf'
+        )
+        self.file_c = UploadedFile.objects.create(
+            name='C_specs.pdf',
+            project=self.project,
+            project_version=self.project_version,
+            uploaded_by=self.user,
+            document_path='test/c_specs.pdf'
+        )
+
+        # Create spec sections in random order to test sorting
+        # These should be sorted by masterformat_number first, then by document name
+        self.spec_section_03_b = SpecSection.objects.create(
+            masterformat_section=self.mf_section_03,
+            document=self.file_b,
+            processing_status='COMPLETED'
+        )
+        self.spec_section_01_a = SpecSection.objects.create(
+            masterformat_section=self.mf_section_01,
+            document=self.file_a,
+            processing_status='COMPLETED'
+        )
+        self.spec_section_05_c = SpecSection.objects.create(
+            masterformat_section=self.mf_section_05,
+            document=self.file_c,
+            processing_status='COMPLETED'
+        )
+        self.spec_section_01_b = SpecSection.objects.create(
+            masterformat_section=self.mf_section_01,
+            document=self.file_b,
+            processing_status='COMPLETED'
+        )
+        self.spec_section_03_a = SpecSection.objects.create(
+            masterformat_section=self.mf_section_03,
+            document=self.file_a,
+            processing_status='COMPLETED'
+        )
+
+        # Create feature flag
+        Flag.objects.create(
+            name='spec_centered_view',
+            everyone=True
+        )
+
+        self.client.force_authenticate(user=self.user)
+
+    def test_model_has_correct_ordering_meta(self):
+        """Test that SpecSection model has correct ordering in Meta class."""
+        self.assertEqual(
+            SpecSection._meta.ordering,
+            ['masterformat_section__masterformat_number', 'document__name']
+        )
+
+    def test_queryset_returns_spec_sections_ordered_by_masterformat_number(self):
+        """Test that spec sections are ordered by masterformat_section number first."""
+        spec_sections = list(SpecSection.objects.filter(document__project=self.project))
+
+        # Extract masterformat numbers in order
+        masterformat_numbers = [
+            ss.masterformat_section.masterformat_number for ss in spec_sections
+        ]
+
+        # Verify they are in ascending order
+        self.assertEqual(masterformat_numbers, sorted(masterformat_numbers))
+
+    def test_queryset_returns_spec_sections_ordered_by_document_name_within_masterformat(self):
+        """Test that spec sections with same masterformat number are ordered by document name."""
+        # Get spec sections for masterformat 01 00 00 (we have 2)
+        spec_sections_01 = list(
+            SpecSection.objects.filter(
+                document__project=self.project,
+                masterformat_section=self.mf_section_01
+            )
+        )
+
+        self.assertEqual(len(spec_sections_01), 2)
+        # First should be A_specs.pdf, second should be B_specs.pdf
+        self.assertEqual(spec_sections_01[0].document.name, 'A_specs.pdf')
+        self.assertEqual(spec_sections_01[1].document.name, 'B_specs.pdf')
+
+    def test_full_ordering_sequence(self):
+        """Test the complete ordering: masterformat number, then document name."""
+        spec_sections = list(SpecSection.objects.filter(document__project=self.project))
+
+        expected_order = [
+            ('01 00 00', 'A_specs.pdf'),  # 01 00 00, A
+            ('01 00 00', 'B_specs.pdf'),  # 01 00 00, B
+            ('03 30 00', 'A_specs.pdf'),  # 03 30 00, A
+            ('03 30 00', 'B_specs.pdf'),  # 03 30 00, B
+            ('05 12 00', 'C_specs.pdf'),  # 05 12 00, C
+        ]
+
+        actual_order = [
+            (ss.masterformat_section.masterformat_number, ss.document.name)
+            for ss in spec_sections
+        ]
+
+        self.assertEqual(actual_order, expected_order)
