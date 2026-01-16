@@ -123,11 +123,15 @@ class BaseProjectSerializer(serializers.ModelSerializer):
     def get_current_user_team_role(self, obj):
         """
         Get the current user's role in the team that owns this project.
-        Returns 'admin' or 'member'.
+        Returns 'admin', 'member', or None if user is not a team member.
         """
         request = self.context.get('request')
         if not request or not request.user or not request.user.is_authenticated:
-            return 'member'
+            return None
+
+        # Check if user is actually a member of the team
+        if not request.user.is_member_of_team(obj.team):
+            return None
 
         # Use the user's team role helper method
         if request.user.is_admin_for_team(obj.team):
@@ -358,6 +362,11 @@ class FileUploadSerializer(serializers.Serializer):
     project_version_id = serializers.IntegerField(required=False)
     extract_notices = serializers.BooleanField(required=False)
     full_spec_processing = serializers.BooleanField(required=False)
+    file_type = serializers.ChoiceField(
+        choices=['spec', 'drawing'],
+        required=False,
+        default='spec'
+    )
 
 
 class CombineSubmittalItemsSerializer(serializers.Serializer):

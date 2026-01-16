@@ -5,7 +5,7 @@ from apps.teams.permissions import TeamAccessPermissions
 from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
 from apps.teams.models import Team, Membership as TeamMembership
 from dj_rest_auth.serializers import JWTSerializer
-from dj_rest_auth.views import LoginView
+from dj_rest_auth.views import LoginView, UserDetailsView
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.generics import GenericAPIView
@@ -421,4 +421,30 @@ def ellisdon_microsoft_callback(request):
         }
         return Response(wrapped_jwt_data, status=200)
     return response
-    
+
+
+class UserDetailsWithTeamsView(UserDetailsView):
+    """Extend dj_rest_auth's `UserDetailsView` to include `team_roles` in the response.
+
+    This keeps the original behaviour but appends the user's team roles (via
+    `get_all_team_roles`) to the returned response payload when possible.
+    """
+
+    def get(self, request, *args, **kwargs):
+        response = super().get(request, *args, **kwargs)
+
+        team_roles = []
+        try:
+            user = getattr(request, "user", None)
+            if user and hasattr(user, "get_all_team_roles"):
+                team_roles = user.get_all_team_roles() or []
+        except Exception:
+            team_roles = []
+
+        try:
+            if hasattr(response, "data") and isinstance(response.data, dict):
+                response.data["team_roles"] = team_roles
+        except Exception:
+            pass
+
+        return response

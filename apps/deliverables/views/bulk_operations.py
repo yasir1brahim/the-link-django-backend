@@ -214,15 +214,15 @@ def bulk_delete_documents(request):
             try:
                 # Get all spec sections related to this document for logging purposes
                 spec_sections = SpecSection.objects.filter(document=document)
-                
-                # Set document field to null for all related submittal items instead of deleting them
-                SubmittalItem.objects.filter(document=document).update(document=None)
-                
+
+                # Cascade delete all related submittal items
+                SubmittalItem.objects.filter(document=document).delete()
+
                 # Set document field to null for all related notice matches instead of deleting them
                 NoticeMatch.objects.filter(document=document).update(document=None)
-                
-                # Set spec_section to null for submittal items that reference spec sections from this document
-                SubmittalItem.objects.filter(spec_section__in=spec_sections).update(spec_section=None)
+
+                # Set spec_section to null for semantically processed items that reference spec sections from this document
+                # Note: submittal items that reference these spec sections were already deleted above
                 SemanticallyProcessedSpecItem.objects.filter(spec_section__in=spec_sections).update(spec_section=None)
                 
                 # Set document field to null for all related semantically processed spec items instead of deleting them
