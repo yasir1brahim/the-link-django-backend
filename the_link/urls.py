@@ -28,7 +28,7 @@ from apps.subscriptions.urls import team_urlpatterns as subscriptions_team_urls
 from apps.web.sitemaps import StaticViewSitemap
 from apps.deliverables.urls import single_project_urlpatterns
 from apps.deliverables.urls import urlpatterns as deliverables_urls
-from apps.users.views import CustomPasswordResetView, CustomPasswordResetConfirmView
+from apps.users.views import CustomPasswordResetView, CustomPasswordResetConfirmView, PasswordResetTokenValidationView
 
 sitemaps = {
     "static": StaticViewSitemap(),
@@ -63,6 +63,7 @@ urlpatterns = [
     # auth API
     path("api/auth/", include("apps.authentication.urls")),
     path('api/auth/password/reset/', CustomPasswordResetView.as_view(), name='password-reset'),
+    path("api/auth/password/reset/validate/", PasswordResetTokenValidationView.as_view(), name="password-reset-validate"),
     path("api/auth/password/reset/confirm/", CustomPasswordResetConfirmView.as_view(), name="password-reset-confirm"),
     
     # API docs

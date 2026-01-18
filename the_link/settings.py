@@ -248,6 +248,7 @@ ACCOUNT_LOGIN_BY_CODE_ENABLED = True
 SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
 # Connect local account and social account if local account with that email address already exists
 SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+PASSWORD_RESET_TIMEOUT = 1800
 
 ACCOUNT_FORMS = {
     "signup": "apps.teams.forms.TeamSignupForm",

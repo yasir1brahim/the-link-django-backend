@@ -27,6 +27,25 @@ from django.contrib.auth import get_user_model
 from django.utils.http import urlsafe_base64_decode
 from rest_framework.permissions import AllowAny
 
+
+def validate_reset_token(uidb64, token):
+    """Validate password reset token, return (user, error_type) tuple.
+
+    Returns:
+        (user, None) if token is valid
+        (None, 'expired') if token is expired or invalid
+        (None, 'invalid') if uid is malformed or user doesn't exist
+    """
+    try:
+        uid = urlsafe_base64_decode(uidb64).decode()
+        user = get_user_model().objects.get(pk=uid)
+        if default_token_generator.check_token(user, token):
+            return user, None
+        return None, 'expired'
+    except (TypeError, ValueError, get_user_model().DoesNotExist):
+        return None, 'invalid'
+
+
 @login_required
 def profile(request):
     if request.method == "POST":
@@ -139,15 +158,53 @@ class CustomPasswordResetConfirmView(APIView):
             token = serializer.validated_data['token']
             new_password = serializer.validated_data['new_password1']
 
-            try:
-                uid = urlsafe_base64_decode(uidb64).decode()
-                user = get_user_model().objects.get(pk=uid)
-                if default_token_generator.check_token(user, token):
-                    user.set_password(new_password)
-                    user.save()
-                    return Response({'message': 'Password reset successfully.'}, status=status.HTTP_200_OK)
-                else:
-                    return Response({'error': 'Invalid token.'}, status=status.HTTP_400_BAD_REQUEST)
-            except (TypeError, ValueError, CustomUser.DoesNotExist):
+            user, error = validate_reset_token(uidb64, token)
+            if user:
+                user.set_password(new_password)
+                user.save()
+                return Response({'message': 'Password reset successfully.'}, status=status.HTTP_200_OK)
+            elif error == 'expired':
+                return Response({'error': 'Invalid token.'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
                 return Response({'error': 'Invalid user.'}, status=status.HTTP_400_BAD_REQUEST)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class PasswordResetTokenValidationView(APIView):
+    """Validate password reset token without resetting password."""
+    permission_classes = [AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        """Handle GET request to validate token"""
+        uidb64 = request.query_params.get('uid')
+        token = request.query_params.get('token')
+
+        if not uidb64 or not token:
+            return Response(
+                {'error': 'Missing uid or token parameter.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user, error = validate_reset_token(uidb64, token)
+        if user:
+            return Response(
+                {'valid': True, 'message': 'Token is valid.'},
+                status=status.HTTP_200_OK
+            )
+        elif error == 'expired':
+            return Response(
+                {
+                    'valid': False,
+                    'error': 'expired',
+                    'message': 'Password reset link has expired or is invalid.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        else:
+            return Response(
+                {
+                    'valid': False,
+                    'error': 'invalid',
+                    'message': 'Invalid password reset link.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
