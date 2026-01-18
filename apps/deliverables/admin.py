@@ -363,6 +363,7 @@ class SpecSectionAdmin(admin.ModelAdmin):
     list_display = ["id", "project_name", "document", "masterformat_section"]
     list_filter = ["document__project", "masterformat_section"]
     search_fields = ["masterformat_section__masterformat_number", "document__project__name", "document__name"]
+    ordering = ['masterformat_section__masterformat_number', 'document__name']
 
     def project_name(self, obj):
         """Display the project name."""
