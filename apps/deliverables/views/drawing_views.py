@@ -330,10 +330,20 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         if sheet_number:
             queryset = queryset.filter(section__page__sheet_number=sheet_number)
 
+        # Filter by sheet_number_is_null
+        sheet_number_is_null = self.request.query_params.get('sheet_number_is_null')
+        if sheet_number_is_null and sheet_number_is_null.lower() == 'true':
+            queryset = queryset.filter(section__page__sheet_number__isnull=True)
+
         # Filter by sheet_title
         sheet_title = self.request.query_params.get('sheet_title')
         if sheet_title:
             queryset = queryset.filter(section__page__sheet_title__icontains=sheet_title)
+
+        # Filter by sheet_title_is_null
+        sheet_title_is_null = self.request.query_params.get('sheet_title_is_null')
+        if sheet_title_is_null and sheet_title_is_null.lower() == 'true':
+            queryset = queryset.filter(section__page__sheet_title__isnull=True)
 
         # Search in text (case-insensitive substring)
         search = self.request.query_params.get('search')
@@ -412,9 +422,27 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
             pages__note_sections__notes__in=queryset
         ).distinct().values('id', 'file_name')
 
+        # Get unique sheet numbers and titles from the queryset
+        sheet_numbers_raw = list(queryset.values_list(
+            'section__page__sheet_number', flat=True
+        ).distinct())
+        sheet_titles_raw = list(queryset.values_list(
+            'section__page__sheet_title', flat=True
+        ).distinct())
+
+        # Separate nulls from values for the filter lists
+        sheet_numbers = sorted([sn for sn in sheet_numbers_raw if sn is not None])
+        sheet_titles = sorted([st for st in sheet_titles_raw if st is not None])
+        has_null_sheet_number = None in sheet_numbers_raw
+        has_null_sheet_title = None in sheet_titles_raw
+
         all_filter_vals = {
             'category': list(set(queryset.values_list('category', flat=True))),
             'drawing_files': [{'id': df['id'], 'name': df['file_name']} for df in drawing_files_qs],
+            'sheet_numbers': sheet_numbers,
+            'sheet_titles': sheet_titles,
+            'has_null_sheet_number': has_null_sheet_number,
+            'has_null_sheet_title': has_null_sheet_title,
         }
 
         # Get processing status
