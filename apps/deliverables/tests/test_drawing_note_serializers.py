@@ -88,3 +88,47 @@ class TestDrawingNoteReadSerializer(TestCase):
         data = serializer.data
 
         self.assertEqual(data['page_extraction_failed'], True)
+
+    def test_serializer_includes_sheet_number(self):
+        """Test serializer includes sheet_number field"""
+        self.page.sheet_number = "M-103"
+        self.page.save()
+
+        serializer = DrawingNoteReadSerializer(self.note)
+        data = serializer.data
+
+        self.assertIn('sheet_number', data)
+        self.assertEqual(data['sheet_number'], "M-103")
+
+    def test_serializer_includes_sheet_title(self):
+        """Test serializer includes sheet_title field"""
+        self.page.sheet_title = "FLOOR PLAN - DRAINAGE"
+        self.page.save()
+
+        serializer = DrawingNoteReadSerializer(self.note)
+        data = serializer.data
+
+        self.assertIn('sheet_title', data)
+        self.assertEqual(data['sheet_title'], "FLOOR PLAN - DRAINAGE")
+
+    def test_serializer_handles_null_sheet_number(self):
+        """Test serializer handles null sheet_number correctly"""
+        self.page.sheet_number = None
+        self.page.save()
+
+        serializer = DrawingNoteReadSerializer(self.note)
+        data = serializer.data
+
+        self.assertIn('sheet_number', data)
+        self.assertIsNone(data['sheet_number'])
+
+    def test_serializer_handles_null_sheet_title(self):
+        """Test serializer handles null sheet_title correctly"""
+        self.page.sheet_title = None
+        self.page.save()
+
+        serializer = DrawingNoteReadSerializer(self.note)
+        data = serializer.data
+
+        self.assertIn('sheet_title', data)
+        self.assertIsNone(data['sheet_title'])

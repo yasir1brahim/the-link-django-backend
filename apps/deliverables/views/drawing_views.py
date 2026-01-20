@@ -486,7 +486,7 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         header_border = Border(right=Side(border_style='thin', color='FFFFFF'))
 
         # Define the headers
-        headers = ['File Name', 'Page', 'Section', 'Note #', 'Category', 'Note Text']
+        headers = ['File Name', 'Sheet #', 'Sheet Title', 'Page', 'Section', 'Note #', 'Category', 'Note Text']
         worksheet.append(headers)
 
         # Style the header row
@@ -502,6 +502,8 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         for note in queryset:
             row = [
                 note.section.page.drawing_file.file_name,
+                note.section.page.sheet_number or '',
+                note.section.page.sheet_title or '',
                 note.section.page.page_number,
                 note.section.header,
                 note.note_number,
@@ -517,11 +519,13 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         # Adjust column widths
         column_widths = {
             'A': 40,  # File Name
-            'B': 10,  # Page
-            'C': 30,  # Section
-            'D': 10,  # Note #
-            'E': 20,  # Category
-            'F': 100,  # Note Text
+            'B': 15,  # Sheet #
+            'C': 40,  # Sheet Title
+            'D': 10,  # Page
+            'E': 30,  # Section
+            'F': 10,  # Note #
+            'G': 20,  # Category
+            'H': 100,  # Note Text
         }
         for col_letter, width in column_widths.items():
             worksheet.column_dimensions[col_letter].width = width

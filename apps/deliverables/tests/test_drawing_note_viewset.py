@@ -226,17 +226,20 @@ class TestDrawingNoteViewSet(TestCase):
         worksheet = workbook.active
 
         # Check headers
-        headers = ['File Name', 'Page', 'Section', 'Note #', 'Category', 'Note Text']
+        headers = ['File Name', 'Sheet #', 'Sheet Title', 'Page', 'Section', 'Note #', 'Category', 'Note Text']
         for col, header in enumerate(headers, start=1):
             self.assertEqual(worksheet.cell(row=1, column=col).value, header)
 
         # Check data row
         self.assertEqual(worksheet.cell(row=2, column=1).value, "Mechanical.pdf")  # File Name
-        self.assertEqual(worksheet.cell(row=2, column=2).value, 1)  # Page
-        self.assertEqual(worksheet.cell(row=2, column=3).value, "GENERAL NOTES:")  # Section
-        self.assertEqual(worksheet.cell(row=2, column=4).value, 1)  # Note #
-        self.assertEqual(worksheet.cell(row=2, column=5).value, "GENERAL NOTES")  # Category
-        self.assertEqual(worksheet.cell(row=2, column=6).value, "Test note content")  # Note Text
+        # Sheet # and Sheet Title are empty strings when null (openpyxl may interpret '' as None)
+        self.assertIn(worksheet.cell(row=2, column=2).value, ["", None])  # Sheet #
+        self.assertIn(worksheet.cell(row=2, column=3).value, ["", None])  # Sheet Title
+        self.assertEqual(worksheet.cell(row=2, column=4).value, 1)  # Page
+        self.assertEqual(worksheet.cell(row=2, column=5).value, "GENERAL NOTES:")  # Section
+        self.assertEqual(worksheet.cell(row=2, column=6).value, 1)  # Note #
+        self.assertEqual(worksheet.cell(row=2, column=7).value, "GENERAL NOTES")  # Category
+        self.assertEqual(worksheet.cell(row=2, column=8).value, "Test note content")  # Note Text
 
     def test_export_notes_with_filter(self):
         """Test exporting filtered drawing notes"""
@@ -263,7 +266,7 @@ class TestDrawingNoteViewSet(TestCase):
 
         # Should only have header row + 1 data row (filtered result)
         self.assertEqual(worksheet.max_row, 2)
-        self.assertEqual(worksheet.cell(row=2, column=5).value, "MECHANICAL")
+        self.assertEqual(worksheet.cell(row=2, column=7).value, "MECHANICAL")  # Category is now column 7
 
     def test_export_notes_unauthenticated_denied(self):
         """Test export is denied for unauthenticated users"""
@@ -507,3 +510,274 @@ class TestDrawingNoteViewSet(TestCase):
         self.assertEqual(results[0]['text'], 'Alpha note')
         self.assertEqual(results[1]['text'], 'Test note content')
         self.assertEqual(results[2]['text'], 'Zebra note')
+
+
+class TestDrawingNoteViewSetSheetFields(TestCase):
+    """Tests for sheet_number and sheet_title filtering, sorting, and filter values"""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user('test@example.com', password='testpass')
+        self.team = Team.objects.create(name="Test Team", slug="test-team")
+        self.project = Project.objects.create(
+            name="Test Project",
+            project_number="P-001",
+            team=self.team,
+            created_by=self.user
+        )
+        self.project_version = self.project.versions.first()
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role=ROLE_PROJECT_MEMBER
+        )
+
+        # Create drawing file and extraction
+        self.drawing_file = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name="Mechanical.pdf",
+            file_s3_key="drawings/test.pdf",
+            md5="abc123",
+        )
+        self.extraction = DrawingExtraction.objects.create(
+            drawing_file=self.drawing_file,
+            status=DrawingExtractionStatus.SUCCESS,
+        )
+
+        # Create pages with different sheet values
+        self.page1 = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=1,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+            sheet_number="A-101",
+            sheet_title="First Floor Plan",
+        )
+        self.page2 = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=2,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+            sheet_number="M-201",
+            sheet_title="Mechanical Plan",
+        )
+        self.page3 = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=3,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+            sheet_number=None,  # No sheet number
+            sheet_title=None,   # No sheet title
+        )
+
+        # Create sections and notes
+        self.section1 = DrawingNoteSection.objects.create(page=self.page1, header="GENERAL NOTES:")
+        self.section2 = DrawingNoteSection.objects.create(page=self.page2, header="MECHANICAL NOTES:")
+        self.section3 = DrawingNoteSection.objects.create(page=self.page3, header="OTHER NOTES:")
+
+        self.note1 = DrawingNote.objects.create(
+            section=self.section1, note_number=1, category="GENERAL", text="Note on A-101"
+        )
+        self.note2 = DrawingNote.objects.create(
+            section=self.section2, note_number=1, category="MECHANICAL", text="Note on M-201"
+        )
+        self.note3 = DrawingNote.objects.create(
+            section=self.section3, note_number=1, category="OTHER", text="Note without sheet"
+        )
+
+        self.client.force_authenticate(user=self.user)
+
+    def test_filter_by_sheet_number_exact(self):
+        """Test filtering by sheet_number (exact match)"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sheet_number': 'A-101'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['text'], "Note on A-101")
+
+    def test_filter_by_sheet_title_partial(self):
+        """Test filtering by sheet_title (case-insensitive partial match)"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sheet_title': 'mechanical'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['text'], "Note on M-201")
+
+    def test_filter_by_sheet_number_is_null(self):
+        """Test filtering for records where sheet_number is null"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sheet_number_is_null': 'true'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['text'], "Note without sheet")
+
+    def test_filter_by_sheet_title_is_null(self):
+        """Test filtering for records where sheet_title is null"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sheet_title_is_null': 'true'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['text'], "Note without sheet")
+
+    def test_sort_by_sheet_number_asc(self):
+        """Test sorting by sheet_number ascending"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sort_column': 'sheet_number', 'sort_direction': 'asc'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        self.assertEqual(len(results), 3)
+        # PostgreSQL: nulls sort last in ascending order
+        self.assertEqual(results[0]['sheet_number'], 'A-101')
+        self.assertEqual(results[1]['sheet_number'], 'M-201')
+        self.assertIsNone(results[2]['sheet_number'])
+
+    def test_sort_by_sheet_number_desc(self):
+        """Test sorting by sheet_number descending"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sort_column': 'sheet_number', 'sort_direction': 'desc'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        self.assertEqual(len(results), 3)
+        # PostgreSQL: nulls sort first in descending order
+        self.assertIsNone(results[0]['sheet_number'])
+        self.assertEqual(results[1]['sheet_number'], 'M-201')
+        self.assertEqual(results[2]['sheet_number'], 'A-101')
+
+    def test_sort_by_sheet_title_asc(self):
+        """Test sorting by sheet_title ascending"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sort_column': 'sheet_title', 'sort_direction': 'asc'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        self.assertEqual(len(results), 3)
+        # PostgreSQL: nulls sort last in ascending order
+        self.assertEqual(results[0]['sheet_title'], 'First Floor Plan')
+        self.assertEqual(results[1]['sheet_title'], 'Mechanical Plan')
+        self.assertIsNone(results[2]['sheet_title'])
+
+    def test_sort_by_sheet_title_desc(self):
+        """Test sorting by sheet_title descending"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sort_column': 'sheet_title', 'sort_direction': 'desc'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        self.assertEqual(len(results), 3)
+        # PostgreSQL: nulls sort first in descending order
+        self.assertIsNone(results[0]['sheet_title'])
+        self.assertEqual(results[1]['sheet_title'], 'Mechanical Plan')
+        self.assertEqual(results[2]['sheet_title'], 'First Floor Plan')
+
+    def test_sheet_fields_in_response(self):
+        """Test that sheet_number and sheet_title appear in API response"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(len(response.data['results']) > 0)
+
+        # Check that sheet fields are present in the response
+        first_result = response.data['results'][0]
+        self.assertIn('sheet_number', first_result)
+        self.assertIn('sheet_title', first_result)
+
+    def test_all_filter_vals_includes_sheet_numbers(self):
+        """Test that all_filter_vals includes sheet_numbers list"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('all_filter_vals', response.data)
+        self.assertIn('sheet_numbers', response.data['all_filter_vals'])
+
+        sheet_numbers = response.data['all_filter_vals']['sheet_numbers']
+        self.assertIn('A-101', sheet_numbers)
+        self.assertIn('M-201', sheet_numbers)
+        # Null should not be in the list
+        self.assertNotIn(None, sheet_numbers)
+
+    def test_all_filter_vals_includes_sheet_titles(self):
+        """Test that all_filter_vals includes sheet_titles list"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('sheet_titles', response.data['all_filter_vals'])
+
+        sheet_titles = response.data['all_filter_vals']['sheet_titles']
+        self.assertIn('First Floor Plan', sheet_titles)
+        self.assertIn('Mechanical Plan', sheet_titles)
+        self.assertNotIn(None, sheet_titles)
+
+    def test_all_filter_vals_has_null_sheet_number_flag(self):
+        """Test that has_null_sheet_number flag is correctly set"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('has_null_sheet_number', response.data['all_filter_vals'])
+        self.assertTrue(response.data['all_filter_vals']['has_null_sheet_number'])
+
+    def test_all_filter_vals_has_null_sheet_title_flag(self):
+        """Test that has_null_sheet_title flag is correctly set"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('has_null_sheet_title', response.data['all_filter_vals'])
+        self.assertTrue(response.data['all_filter_vals']['has_null_sheet_title'])
+
+    def test_all_filter_vals_no_nulls_when_all_have_values(self):
+        """Test has_null flags are False when all records have values"""
+        # Delete the page without sheet values
+        self.page3.delete()
+
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['all_filter_vals']['has_null_sheet_number'])
+        self.assertFalse(response.data['all_filter_vals']['has_null_sheet_title'])
+
+    def test_export_with_sheet_number_is_null_filter(self):
+        """Test export endpoint supports sheet_number_is_null filter"""
+        import openpyxl
+        from io import BytesIO
+
+        url = reverse('deliverables:drawing-note-export', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sheet_number_is_null': 'true'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        workbook = openpyxl.load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+
+        # Should only have header + 1 row (the note without sheet number)
+        self.assertEqual(worksheet.max_row, 2)
+
+    def test_export_with_sheet_title_is_null_filter(self):
+        """Test export endpoint supports sheet_title_is_null filter"""
+        import openpyxl
+        from io import BytesIO
+
+        url = reverse('deliverables:drawing-note-export', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sheet_title_is_null': 'true'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        workbook = openpyxl.load_workbook(BytesIO(response.content))
+        worksheet = workbook.active
+
+        # Should only have header + 1 row
+        self.assertEqual(worksheet.max_row, 2)
