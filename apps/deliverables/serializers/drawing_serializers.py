@@ -27,6 +27,8 @@ class DrawingNoteReadSerializer(serializers.ModelSerializer):
     page_rotated_height = serializers.FloatField(source='section.page.rotated_height')
     page_unrotated_width = serializers.FloatField(source='section.page.unrotated_width')
     page_unrotated_height = serializers.FloatField(source='section.page.unrotated_height')
+    sheet_number = serializers.CharField(source='section.page.sheet_number', allow_null=True)
+    sheet_title = serializers.CharField(source='section.page.sheet_title', allow_null=True)
     section_header = serializers.CharField(source='section.header')
     section_rotated_header_bbox = serializers.JSONField(source='section.rotated_header_bbox')
     section_unrotated_header_bbox = serializers.JSONField(source='section.unrotated_header_bbox')
@@ -48,6 +50,8 @@ class DrawingNoteReadSerializer(serializers.ModelSerializer):
             'page_rotated_height',
             'page_unrotated_width',
             'page_unrotated_height',
+            'sheet_number',
+            'sheet_title',
             'section_header',
             'section_rotated_header_bbox',
             'section_unrotated_header_bbox',

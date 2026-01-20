@@ -176,6 +176,8 @@ def _create_drawing_records(extraction, data):
             unrotated_height=page_data.get('unrotated_page_height'),
             extraction_status=_normalize_page_extraction_status(page_data['extraction_status']),
             spec_content=page_data.get('spec_content'),
+            sheet_number=page_data.get('sheet_number'),
+            sheet_title=page_data.get('sheet_title'),
         ))
 
     created_pages = DrawingPage.objects.bulk_create(page_objects)

@@ -959,6 +959,8 @@ class DrawingPage(BaseModel):
         choices=DrawingPageExtractionStatus.choices
     )
     spec_content = models.TextField(null=True, blank=True)
+    sheet_number = models.CharField(max_length=64, null=True, blank=True)
+    sheet_title = models.CharField(max_length=512, null=True, blank=True)
 
     class Meta:
         ordering = ['page_number']
