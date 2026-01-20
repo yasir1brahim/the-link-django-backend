@@ -176,6 +176,8 @@ def _create_drawing_records(extraction, data):
             unrotated_height=page_data.get('unrotated_page_height'),
             extraction_status=_normalize_page_extraction_status(page_data['extraction_status']),
             spec_content=page_data.get('spec_content'),
+            sheet_number=page_data.get('sheet_number'),
+            sheet_title=page_data.get('sheet_title'),
         ))
 
     created_pages = DrawingPage.objects.bulk_create(page_objects)
@@ -245,12 +247,14 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = DrawingNoteReadSerializer
 
     # Sorting configuration
-    allowed_sort_columns = ['drawing_file_name', 'category', 'text']
+    allowed_sort_columns = ['drawing_file_name', 'category', 'text', 'sheet_number', 'sheet_title']
     allowed_sort_directions = ['asc', 'desc']
     sort_column_mapping = {
         'drawing_file_name': 'section__page__drawing_file__file_name',
         'category': 'category',
         'text': 'text',
+        'sheet_number': 'section__page__sheet_number',
+        'sheet_title': 'section__page__sheet_title',
     }
 
     def apply_sorting(self, queryset):
@@ -320,6 +324,26 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(
                 section__page__drawing_file_id=drawing_file_id
             )
+
+        # Filter by sheet_number
+        sheet_number = self.request.query_params.get('sheet_number')
+        if sheet_number:
+            queryset = queryset.filter(section__page__sheet_number=sheet_number)
+
+        # Filter by sheet_number_is_null
+        sheet_number_is_null = self.request.query_params.get('sheet_number_is_null')
+        if sheet_number_is_null and sheet_number_is_null.lower() == 'true':
+            queryset = queryset.filter(section__page__sheet_number__isnull=True)
+
+        # Filter by sheet_title
+        sheet_title = self.request.query_params.get('sheet_title')
+        if sheet_title:
+            queryset = queryset.filter(section__page__sheet_title__icontains=sheet_title)
+
+        # Filter by sheet_title_is_null
+        sheet_title_is_null = self.request.query_params.get('sheet_title_is_null')
+        if sheet_title_is_null and sheet_title_is_null.lower() == 'true':
+            queryset = queryset.filter(section__page__sheet_title__isnull=True)
 
         # Search in text (case-insensitive substring)
         search = self.request.query_params.get('search')
@@ -398,9 +422,27 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
             pages__note_sections__notes__in=queryset
         ).distinct().values('id', 'file_name')
 
+        # Get unique sheet numbers and titles from the queryset
+        sheet_numbers_raw = list(queryset.values_list(
+            'section__page__sheet_number', flat=True
+        ).distinct())
+        sheet_titles_raw = list(queryset.values_list(
+            'section__page__sheet_title', flat=True
+        ).distinct())
+
+        # Separate nulls from values for the filter lists
+        sheet_numbers = sorted([sn for sn in sheet_numbers_raw if sn is not None])
+        sheet_titles = sorted([st for st in sheet_titles_raw if st is not None])
+        has_null_sheet_number = None in sheet_numbers_raw
+        has_null_sheet_title = None in sheet_titles_raw
+
         all_filter_vals = {
             'category': list(set(queryset.values_list('category', flat=True))),
             'drawing_files': [{'id': df['id'], 'name': df['file_name']} for df in drawing_files_qs],
+            'sheet_numbers': sheet_numbers,
+            'sheet_titles': sheet_titles,
+            'has_null_sheet_number': has_null_sheet_number,
+            'has_null_sheet_title': has_null_sheet_title,
         }
 
         # Get processing status
@@ -444,7 +486,7 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         header_border = Border(right=Side(border_style='thin', color='FFFFFF'))
 
         # Define the headers
-        headers = ['File Name', 'Page', 'Section', 'Note #', 'Category', 'Note Text']
+        headers = ['File Name', 'Sheet #', 'Sheet Title', 'Page', 'Section', 'Note #', 'Category', 'Note Text']
         worksheet.append(headers)
 
         # Style the header row
@@ -460,6 +502,8 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         for note in queryset:
             row = [
                 note.section.page.drawing_file.file_name,
+                note.section.page.sheet_number or '',
+                note.section.page.sheet_title or '',
                 note.section.page.page_number,
                 note.section.header,
                 note.note_number,
@@ -475,11 +519,13 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         # Adjust column widths
         column_widths = {
             'A': 40,  # File Name
-            'B': 10,  # Page
-            'C': 30,  # Section
-            'D': 10,  # Note #
-            'E': 20,  # Category
-            'F': 100,  # Note Text
+            'B': 15,  # Sheet #
+            'C': 40,  # Sheet Title
+            'D': 10,  # Page
+            'E': 30,  # Section
+            'F': 10,  # Note #
+            'G': 20,  # Category
+            'H': 100,  # Note Text
         }
         for col_letter, width in column_widths.items():
             worksheet.column_dimensions[col_letter].width = width
