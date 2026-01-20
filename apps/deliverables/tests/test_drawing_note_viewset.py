@@ -280,3 +280,230 @@ class TestDrawingNoteViewSet(TestCase):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_sort_by_category_asc(self):
+        """Test sorting by category ascending"""
+        # Create notes with different categories
+        DrawingNote.objects.create(
+            section=self.section,
+            note_number=2,
+            category="MECHANICAL",
+            text="Mechanical note",
+        )
+        DrawingNote.objects.create(
+            section=self.section,
+            note_number=3,
+            category="ELECTRICAL",
+            text="Electrical note",
+        )
+
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sort_column': 'category', 'sort_direction': 'asc'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        self.assertEqual(len(results), 3)
+        # Alphabetical order: ELECTRICAL, GENERAL NOTES, MECHANICAL
+        self.assertEqual(results[0]['category'], 'ELECTRICAL')
+        self.assertEqual(results[1]['category'], 'GENERAL NOTES')
+        self.assertEqual(results[2]['category'], 'MECHANICAL')
+
+    def test_sort_by_category_desc(self):
+        """Test sorting by category descending"""
+        # Create notes with different categories
+        DrawingNote.objects.create(
+            section=self.section,
+            note_number=2,
+            category="MECHANICAL",
+            text="Mechanical note",
+        )
+        DrawingNote.objects.create(
+            section=self.section,
+            note_number=3,
+            category="ELECTRICAL",
+            text="Electrical note",
+        )
+
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sort_column': 'category', 'sort_direction': 'desc'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        self.assertEqual(len(results), 3)
+        # Reverse alphabetical: MECHANICAL, GENERAL NOTES, ELECTRICAL
+        self.assertEqual(results[0]['category'], 'MECHANICAL')
+        self.assertEqual(results[1]['category'], 'GENERAL NOTES')
+        self.assertEqual(results[2]['category'], 'ELECTRICAL')
+
+    def test_sort_by_text_asc(self):
+        """Test sorting by text ascending"""
+        DrawingNote.objects.create(
+            section=self.section,
+            note_number=2,
+            category="GENERAL NOTES",
+            text="Alpha note",
+        )
+        DrawingNote.objects.create(
+            section=self.section,
+            note_number=3,
+            category="GENERAL NOTES",
+            text="Zebra note",
+        )
+
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sort_column': 'text', 'sort_direction': 'asc'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        self.assertEqual(len(results), 3)
+        self.assertEqual(results[0]['text'], 'Alpha note')
+        self.assertEqual(results[1]['text'], 'Test note content')
+        self.assertEqual(results[2]['text'], 'Zebra note')
+
+    def test_sort_by_drawing_file_name_asc(self):
+        """Test sorting by drawing file name ascending"""
+        # Create another drawing file with notes
+        drawing_file2 = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name="Architectural.pdf",
+            file_s3_key="drawings/arch.pdf",
+            md5="xyz789",
+        )
+        extraction2 = DrawingExtraction.objects.create(
+            drawing_file=drawing_file2,
+            status=DrawingExtractionStatus.SUCCESS,
+        )
+        page2 = DrawingPage.objects.create(
+            drawing_file=drawing_file2,
+            extraction=extraction2,
+            page_number=1,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+        )
+        section2 = DrawingNoteSection.objects.create(page=page2, header="ARCH NOTES:")
+        DrawingNote.objects.create(
+            section=section2,
+            note_number=1,
+            category="ARCHITECTURAL",
+            text="Architectural note",
+        )
+
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sort_column': 'drawing_file_name', 'sort_direction': 'asc'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        self.assertEqual(len(results), 2)
+        # Alphabetical: Architectural.pdf before Mechanical.pdf
+        self.assertEqual(results[0]['drawing_file_name'], 'Architectural.pdf')
+        self.assertEqual(results[1]['drawing_file_name'], 'Mechanical.pdf')
+
+    def test_sort_by_drawing_file_name_desc(self):
+        """Test sorting by drawing file name descending"""
+        # Create another drawing file with notes
+        drawing_file2 = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name="Architectural.pdf",
+            file_s3_key="drawings/arch.pdf",
+            md5="xyz789",
+        )
+        extraction2 = DrawingExtraction.objects.create(
+            drawing_file=drawing_file2,
+            status=DrawingExtractionStatus.SUCCESS,
+        )
+        page2 = DrawingPage.objects.create(
+            drawing_file=drawing_file2,
+            extraction=extraction2,
+            page_number=1,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+        )
+        section2 = DrawingNoteSection.objects.create(page=page2, header="ARCH NOTES:")
+        DrawingNote.objects.create(
+            section=section2,
+            note_number=1,
+            category="ARCHITECTURAL",
+            text="Architectural note",
+        )
+
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sort_column': 'drawing_file_name', 'sort_direction': 'desc'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        self.assertEqual(len(results), 2)
+        # Reverse alphabetical: Mechanical.pdf before Architectural.pdf
+        self.assertEqual(results[0]['drawing_file_name'], 'Mechanical.pdf')
+        self.assertEqual(results[1]['drawing_file_name'], 'Architectural.pdf')
+
+    def test_sort_default_direction_is_asc(self):
+        """Test that default sort direction is ascending when not specified"""
+        DrawingNote.objects.create(
+            section=self.section,
+            note_number=2,
+            category="MECHANICAL",
+            text="Mechanical note",
+        )
+        DrawingNote.objects.create(
+            section=self.section,
+            note_number=3,
+            category="ELECTRICAL",
+            text="Electrical note",
+        )
+
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sort_column': 'category'})  # No sort_direction
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        # Should be ascending by default
+        self.assertEqual(results[0]['category'], 'ELECTRICAL')
+        self.assertEqual(results[1]['category'], 'GENERAL NOTES')
+        self.assertEqual(results[2]['category'], 'MECHANICAL')
+
+    def test_sort_invalid_column_uses_default_order(self):
+        """Test that invalid sort_column falls back to default ordering"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sort_column': 'invalid_column'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Should not raise error, just use default ordering
+
+    def test_sort_with_filter(self):
+        """Test that sorting works combined with filtering"""
+        # Create notes with different categories
+        DrawingNote.objects.create(
+            section=self.section,
+            note_number=2,
+            category="GENERAL NOTES",
+            text="Zebra note",
+        )
+        DrawingNote.objects.create(
+            section=self.section,
+            note_number=3,
+            category="GENERAL NOTES",
+            text="Alpha note",
+        )
+        DrawingNote.objects.create(
+            section=self.section,
+            note_number=4,
+            category="MECHANICAL",
+            text="Mechanical note",
+        )
+
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {
+            'category': 'GENERAL NOTES',
+            'sort_column': 'text',
+            'sort_direction': 'asc'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        # Should only include GENERAL NOTES, sorted by text
+        self.assertEqual(len(results), 3)
+        self.assertEqual(results[0]['text'], 'Alpha note')
+        self.assertEqual(results[1]['text'], 'Test note content')
+        self.assertEqual(results[2]['text'], 'Zebra note')

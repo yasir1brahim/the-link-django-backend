@@ -244,6 +244,55 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = DrawingNotePagination
     serializer_class = DrawingNoteReadSerializer
 
+    # Sorting configuration
+    allowed_sort_columns = ['drawing_file_name', 'category', 'text']
+    allowed_sort_directions = ['asc', 'desc']
+    sort_column_mapping = {
+        'drawing_file_name': 'section__page__drawing_file__file_name',
+        'category': 'category',
+        'text': 'text',
+    }
+
+    def apply_sorting(self, queryset):
+        """
+        Apply sorting to the queryset based on query parameters.
+        Returns queryset with default ordering if no valid sort_column provided.
+        """
+        sort_column = self.request.query_params.get('sort_column')
+        sort_direction = self.request.query_params.get('sort_direction', 'asc')
+
+        if sort_column:
+            # Validate sort_column
+            if sort_column not in self.allowed_sort_columns:
+                # Invalid sort_column - fall back to default ordering
+                return queryset.order_by(
+                    'section__page__drawing_file__file_name',
+                    'section__page__page_number',
+                    'section__header',
+                    'note_number',
+                )
+
+            # Validate sort_direction
+            if sort_direction not in self.allowed_sort_directions:
+                sort_direction = 'asc'
+
+            # Map API column name to database field
+            db_field = self.sort_column_mapping.get(sort_column, sort_column)
+
+            # Apply descending prefix if needed
+            if sort_direction == 'desc':
+                db_field = f'-{db_field}'
+
+            return queryset.order_by(db_field)
+
+        # Default ordering when no sort_column specified
+        return queryset.order_by(
+            'section__page__drawing_file__file_name',
+            'section__page__page_number',
+            'section__header',
+            'note_number',
+        )
+
     def get_queryset(self):
         project_id = self.kwargs['project_id']
         queryset = DrawingNote.objects.filter(
@@ -277,13 +326,8 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         if search:
             queryset = queryset.filter(text__icontains=search)
 
-        # Order by file, page, section header, note number
-        queryset = queryset.order_by(
-            'section__page__drawing_file__file_name',
-            'section__page__page_number',
-            'section__header',
-            'note_number',
-        )
+        # Apply sorting based on query parameters
+        queryset = self.apply_sorting(queryset)
 
         return queryset
 
