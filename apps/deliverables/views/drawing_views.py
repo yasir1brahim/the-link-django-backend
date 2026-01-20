@@ -247,12 +247,14 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = DrawingNoteReadSerializer
 
     # Sorting configuration
-    allowed_sort_columns = ['drawing_file_name', 'category', 'text']
+    allowed_sort_columns = ['drawing_file_name', 'category', 'text', 'sheet_number', 'sheet_title']
     allowed_sort_directions = ['asc', 'desc']
     sort_column_mapping = {
         'drawing_file_name': 'section__page__drawing_file__file_name',
         'category': 'category',
         'text': 'text',
+        'sheet_number': 'section__page__sheet_number',
+        'sheet_title': 'section__page__sheet_title',
     }
 
     def apply_sorting(self, queryset):
@@ -322,6 +324,16 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(
                 section__page__drawing_file_id=drawing_file_id
             )
+
+        # Filter by sheet_number
+        sheet_number = self.request.query_params.get('sheet_number')
+        if sheet_number:
+            queryset = queryset.filter(section__page__sheet_number=sheet_number)
+
+        # Filter by sheet_title
+        sheet_title = self.request.query_params.get('sheet_title')
+        if sheet_title:
+            queryset = queryset.filter(section__page__sheet_title__icontains=sheet_title)
 
         # Search in text (case-insensitive substring)
         search = self.request.query_params.get('search')
