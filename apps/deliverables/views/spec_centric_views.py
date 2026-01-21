@@ -36,14 +36,6 @@ class SpecCentricViewSet(viewsets.ViewSet):
         project_id = self.kwargs.get('project_id')
         project = get_object_or_404(Project, id=project_id)
 
-        # Check feature flag - use project.team instead of request.team
-        # since the endpoint URL doesn't include team_slug
-        if not is_spec_centered_view_feature_flag_active(
-            self.request.user,
-            project.team,
-            project
-        ):
-            return SpecSection.objects.none()
 
         return SpecSection.objects.filter(
             document__project=project
