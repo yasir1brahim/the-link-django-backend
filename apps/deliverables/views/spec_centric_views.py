@@ -7,7 +7,6 @@ from django.db.models import Prefetch, Q, Max
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 
-from apps.utils.feature_flags import is_spec_centered_view_feature_flag_active
 from apps.deliverables.permissions import SpecCentricViewAccessPermissions
 from apps.deliverables.models import (
     Project,
