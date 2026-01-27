@@ -67,7 +67,22 @@ class CustomUser(AbstractUser):
         if self.is_superuser:
             return True
         return self.teams.filter(id=team.id).exists()
-    
+
+    def get_all_team_roles(self):
+        """
+        Get all team roles for the current user.
+        Returns a dictionary mapping team_id to role.
+        Example: {1: 'admin', 2: 'member', 3: 'admin'}
+        """
+        from apps.teams.roles import ROLE_ADMIN
+        if self.is_superuser:
+            # For superusers, return all teams as admin
+            return {team.id: ROLE_ADMIN for team in self.teams.all()}
+
+        # Get all memberships for this user efficiently using .values() to avoid loading full objects
+        memberships = self.teams.through.objects.filter(user=self).values('team_id', 'role')
+        return {membership['team_id']: membership['role'] for membership in memberships}
+
     def is_admin_for_project(self, project):
         from apps.deliverables.models import ROLE_PROJECT_ADMIN, Project
         if self.is_superuser:

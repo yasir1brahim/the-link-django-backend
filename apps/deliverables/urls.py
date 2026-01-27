@@ -7,7 +7,10 @@ from .views import bulk_operations
 from .views.pdf_annotation_views import PDFAnnotationViewSet
 from .views.extracted_data_views import ExtractedDataViewSet
 from .views.custom_item_type_views import CustomItemTypeViewSet
+from .views.user_highlight_preference_views import UserHighlightPreferenceViewSet
 from .views import extraction_note_views
+from .views import drawing_views
+from .views.drawing_views import DrawingNoteViewSet
 
 
 app_name = "deliverables"
@@ -80,6 +83,16 @@ single_project_router.register(
     CustomItemTypeViewSet,
     basename='custom-item-type'
 )
+single_project_router.register(
+    'highlight-preference',
+    UserHighlightPreferenceViewSet,
+    basename='highlight-preference'
+)
+single_project_router.register(
+    'drawing-notes',
+    DrawingNoteViewSet,
+    basename='drawing-note',
+)
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -118,6 +131,7 @@ urlpatterns = [
     path('webhooks/full-spec-processing/', views.full_spec_processing_webhook, name='webhook-full-spec-processing'),
     path('webhooks/specgpt-embedding/', views.specgpt_embedding_webhook, name='webhook-specgpt-embedding'),
     path('webhooks/ai-log-generation/', views.ai_log_generation_webhook, name='webhook-ai-log-generation'),
+    path('webhooks/drawing-extraction/', drawing_views.drawing_extraction_webhook, name='drawing-extraction-webhook'),
     path('projects/<int:project_id>/spec-sections/', views.get_project_spec_sections, name='get-project-spec-sections'),
     path('spec-sections/<int:section_id>/download/', views.download_spec_section, name='download-spec-section'),
     path('spec-sections/download-multiple/', views.bulk_download_spec_sections, name='download-multiple-spec-sections'),

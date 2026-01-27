@@ -76,7 +76,13 @@ def bulk_reprocess_documents(request):
             try:
                 # Remove all existing submittals tied to this document before reprocessing
                 delete_submittals_for_document(document.id)
-                
+
+                # Delete existing spec sections for this document before reprocessing
+                # This ensures clean reprocessing without conflicts or duplicates
+                spec_sections_to_delete = SpecSection.objects.filter(document_id=document.id)
+                spec_sections_deleted, _ = spec_sections_to_delete.delete()
+                logging.info(f"Deleted {spec_sections_deleted} spec section(s) for document_id={document.id} before reprocessing")
+
                 # Get feature flags for the project
                 is_notices_flag_active = is_notices_feature_flag_active(request.user, document.project.team)
                 is_v2_process_deliverables_flag_active = is_v2_process_deliverables_feature_flag_active(request.user, document.project.team, document.project)
@@ -214,15 +220,15 @@ def bulk_delete_documents(request):
             try:
                 # Get all spec sections related to this document for logging purposes
                 spec_sections = SpecSection.objects.filter(document=document)
-                
-                # Set document field to null for all related submittal items instead of deleting them
-                SubmittalItem.objects.filter(document=document).update(document=None)
-                
+
+                # Cascade delete all related submittal items
+                SubmittalItem.objects.filter(document=document).delete()
+
                 # Set document field to null for all related notice matches instead of deleting them
                 NoticeMatch.objects.filter(document=document).update(document=None)
-                
-                # Set spec_section to null for submittal items that reference spec sections from this document
-                SubmittalItem.objects.filter(spec_section__in=spec_sections).update(spec_section=None)
+
+                # Set spec_section to null for semantically processed items that reference spec sections from this document
+                # Note: submittal items that reference these spec sections were already deleted above
                 SemanticallyProcessedSpecItem.objects.filter(spec_section__in=spec_sections).update(spec_section=None)
                 
                 # Set document field to null for all related semantically processed spec items instead of deleting them

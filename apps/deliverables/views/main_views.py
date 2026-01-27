@@ -60,10 +60,10 @@ def clean_excel_content(content):
     
     return content
 
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from django.db.models import Q, Case, When, IntegerField
+from django.db.models import Q, Case, When, IntegerField, Count, Prefetch
 from django.db import connection, transaction, IntegrityError
 from django.core.exceptions import TooManyFilesSent
 from rest_framework.decorators import api_view, permission_classes
@@ -96,6 +96,7 @@ from ..serializers import (
     ProjectVersionSerializer,
     ProjectMembershipAddSerializer,
     ProjectListSerializer,
+    ProjectOverviewSerializer,
     ProjectWriteSerializer,
     FileUploadSerializer,
     SubmittalItemReadSerializer,
@@ -124,6 +125,9 @@ from ..models import (
     ProcoreSubmittalTypeMapping,
     ROLE_PROJECT_MEMBER,
     NoticeExcerpt,
+    DrawingFile,
+    DrawingExtraction,
+    DrawingExtractionStatus,
 )
 from ..permissions import (
     ProjectAccessPermissions,
@@ -134,7 +138,7 @@ from ..permissions import (
 )
 from apps.utils.feature_flags import (
     is_notices_feature_flag_active, is_versioning_feature_flag_active, is_v2_process_deliverables_feature_flag_active,
-    is_full_spec_processing_feature_flag_active, is_specgpt_feature_flag_active
+    is_full_spec_processing_feature_flag_active, is_specgpt_feature_flag_active, is_drawings_feature_flag_active
 )
 from ..constants import masterformat_to_section_title_map
 from ..serializers.notices import NoticeMatchProcessingSerializer, NoticeMatchSerializer, NoticeProcessingCallbackSerializer
@@ -245,6 +249,8 @@ class ProjectViewSet(viewsets.ModelViewSet):
             return ProjectDetailsSerializer
         if self.action == 'list':
             return ProjectListSerializer
+        if self.action == 'overview':
+            return ProjectOverviewSerializer
         return ProjectWriteSerializer
     
 
@@ -289,6 +295,67 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 queryset = self.queryset.filter(members=self.request.user)
 
         return queryset.select_related('team').prefetch_related('members').prefetch_related('versions').order_by('name')
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='team_id',
+                description='ID of the team to filter projects',
+                required=False,
+                type=OpenApiTypes.INT
+            )
+        ],
+        description="Get a lightweight overview of projects with minimal data for list views. "
+    )
+    @action(detail=False, methods=['get'], url_path='overview')
+    def overview(self, request, *args, **kwargs):
+        """
+        Lightweight endpoint for project list/overview pages.
+        Returns minimal project data.
+        """
+
+        team_id = request.query_params.get('team_id', None)
+
+        if team_id is not None:
+            try:
+                team_id = int(team_id)
+                team = get_object_or_404(Team, id=team_id)
+
+                # Check if the user is a member of the team
+                # Return 404 instead of 403 to avoid disclosing team existence to non-members
+                if not request.user.is_member_of_team(team):
+                    raise Http404()
+
+                # Filter based on user role
+                if request.user.is_admin_for_team(team):
+                    queryset = self.queryset.filter(team_id=team_id)
+                else:
+                    queryset = self.queryset.filter(team_id=team_id, members=request.user)
+            except ValueError:
+                raise DRFValidationError("Invalid team_id. Must be an integer.")
+        else:
+            if request.user.is_superuser:
+                queryset = self.queryset
+            else:
+                queryset = self.queryset.filter(members=request.user)
+
+        # Prefetch only the current user's membership to avoid N+1 queries in serializer
+        queryset = queryset.prefetch_related(
+            Prefetch(
+                'project_memberships',
+                queryset=ProjectMembership.objects.filter(user=request.user),
+                to_attr='_current_user_memberships'
+            )
+        ).annotate(_members_count=Count('members')).order_by('name', 'id')
+
+        # Paginate if pagination is enabled
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
     def perform_create(self, serializer):
         print(f"serializer.validated_data: {serializer.validated_data}")
@@ -1451,6 +1518,43 @@ def call_extract_notices_lambda(callback_url, document_id, object_key, project_v
     return "Kicked off processing job"
 
 
+def call_extract_drawing_notes_lambda(
+    callback_url,
+    project_id,
+    project_version_id,
+    drawing_file_id,
+    extraction_id,
+    file_s3_key,
+    use_llm=False,
+):
+    logging.debug(f"call_extract_drawing_notes_lambda: {file_s3_key}")
+
+    if not settings.DRAWINGS_LAMBDA_FUNCTION_URL:
+        raise ValueError("DRAWINGS_LAMBDA_FUNCTION_URL is not set")
+
+    payload = {
+        "source_file_s3_uri": f"s3://{settings.S3_BUCKET}/{file_s3_key}",
+        "callback_url": callback_url,
+        "project_id": str(project_id),
+        "project_version_id": str(project_version_id),
+        "drawing_file_id": str(drawing_file_id),
+        "extraction_id": str(extraction_id),
+        "ENVIRONMENT": settings.ENVIRONMENT,
+        "AWS_UPLOAD_BUCKET": settings.S3_BUCKET,
+        "use_llm": bool(use_llm),
+    }
+
+    print(f"Invoking lambda with URL: {settings.DRAWINGS_LAMBDA_FUNCTION_URL}")
+    print(f"Invoking lambda with payload: {payload}")
+
+    invoke_lambda(
+        payload=payload,
+        lambda_url=settings.DRAWINGS_LAMBDA_FUNCTION_URL
+    )
+
+    return "Kicked off drawing extraction job"
+
+
 def upload_to_s3_and_process(file_data):
     """Handle S3 upload and Lambda processing for a single file"""
     try:
@@ -1558,7 +1662,92 @@ def upload_file(request):
                 project_version_id = ProjectVersion.objects.filter(project=project, is_archived=False).order_by('-created_at').first().id
             else:
                 return Response({'detail': 'Versioning is active but no project_version_id was provided'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
+    # Handle drawing file uploads
+    file_type = serializer.validated_data.get('file_type', 'spec')
+    print(f"[DRAWING UPLOAD] file_type={file_type}, project_id={project_id}, version_id={project_version_id}")
+    if file_type == 'drawing':
+        print(f"[DRAWING UPLOAD] Processing {len(files)} drawing file(s)")
+        project_version = ProjectVersion.objects.get(id=project_version_id)
+        uploaded_drawings = []
+        for file in files:
+            try:
+                print(f"[DRAWING UPLOAD] Processing file: {file.name}, size={file.size}")
+                file_md5 = get_file_hash(file)
+                print(f"[DRAWING UPLOAD] File hash: {file_md5}")
+                filename = f'project_{project_id}__version_{project_version_id}__{int(time.time())}_{file.name}'
+                s3_key = f'drawings/{filename}'
+                print(f"[DRAWING UPLOAD] S3 key: {s3_key}")
+
+                # Check for existing DrawingFile with same md5, name, project, and version
+                existing_drawing = DrawingFile.objects.filter(
+                    md5=file_md5,
+                    file_name=file.name,
+                    project=project,
+                    project_version=project_version
+                ).first()
+
+                if existing_drawing:
+                    # Reuse existing DrawingFile record
+                    print(f"[DRAWING UPLOAD] Found existing DrawingFile id={existing_drawing.id}")
+                    drawing_file = existing_drawing
+                else:
+                    # Reset file pointer after hashing, then upload to S3
+                    file.seek(0)
+                    file_size_after_seek = file.size
+                    print(f"[DRAWING UPLOAD] Uploading to S3 bucket={settings.S3_BUCKET}, key={s3_key}, size={file_size_after_seek}")
+                    s3.upload_fileobj(file, settings.S3_BUCKET, s3_key)
+                    print(f"[DRAWING UPLOAD] S3 upload completed")
+
+                    # Create new DrawingFile
+                    drawing_file = DrawingFile.objects.create(
+                        project=project,
+                        project_version=project_version,
+                        uploaded_by=user,
+                        file_name=file.name,
+                        file_s3_key=s3_key,
+                        md5=file_md5,
+                    )
+                    print(f"[DRAWING UPLOAD] Created DrawingFile id={drawing_file.id}")
+
+                # Always create a new DrawingExtraction for each upload
+                extraction = DrawingExtraction.objects.create(
+                    drawing_file=drawing_file,
+                    status=DrawingExtractionStatus.PENDING,
+                )
+                print(f"[DRAWING UPLOAD] Created DrawingExtraction id={extraction.id}")
+
+                try:
+                    call_extract_drawing_notes_lambda(
+                        callback_url=settings.BACKEND_DRAWINGS_CALLBACK_URL,
+                        project_id=project_id,
+                        project_version_id=project_version_id,
+                        drawing_file_id=drawing_file.id,
+                        extraction_id=extraction.id,
+                        file_s3_key=drawing_file.file_s3_key,
+                    )
+                except Exception as e:
+                    logging.error(f"[DRAWING UPLOAD] Failed to invoke drawing extraction lambda: {e}")
+                    not_parsed.append(file.name)
+
+                uploaded_drawings.append({
+                    'drawing_file_id': drawing_file.id,
+                    'extraction_id': extraction.id,
+                    'file_name': file.name,
+                    'status': 'pending'
+                })
+            except Exception as e:
+                import traceback
+                print(f"[DRAWING UPLOAD] Error uploading drawing file {file.name}: {e}")
+                traceback.print_exc()
+                not_parsed.append(file.name)
+
+        return Response({
+            'drawings': uploaded_drawings,
+            'error_parsing': not_parsed,
+            'message': 'Drawing files uploaded successfully'
+        }, status=status.HTTP_200_OK)
+
     for file in files:
         try:
             filename = f'project_{project_id}__version_{project_version_id}__{int(time.time())}_{file.name}'
@@ -2663,7 +2852,12 @@ def reprocess_document(request):
     
     # Remove all existing submittals tied to this document before reprocessing
     delete_submittals_for_document(uploaded_file.id)
-    
+
+    # Delete existing spec sections for this document before reprocessing
+    spec_sections_to_delete = SpecSection.objects.filter(document_id=uploaded_file.id)
+    spec_sections_deleted, _ = spec_sections_to_delete.delete()
+    logging.info(f"Deleted {spec_sections_deleted} spec section(s) for document_id={uploaded_file.id} before reprocessing")
+
     # Get feature flags for the project
     is_notices_flag_active = is_notices_feature_flag_active(request.user, project.team)
     is_v2_process_deliverables_flag_active = is_v2_process_deliverables_feature_flag_active(request.user, project.team, project)
@@ -2809,18 +3003,16 @@ def delete_document(request):
         return Response({'detail': 'User is not a member of the project'}, status=status.HTTP_403_FORBIDDEN)
     
     try:
-        # Set document field to null for all related submittal items instead of deleting them
-        submittal_items_updated = SubmittalItem.objects.filter(document=uploaded_file).update(document=None)
-        
+        # Cascade delete all related submittal items
+        submittal_items_deleted, _ = SubmittalItem.objects.filter(document=uploaded_file).delete()
+
         # Set document field to null for all related notice matches instead of deleting them
         notice_matches_updated = NoticeMatch.objects.filter(document=uploaded_file).update(document=None)
-        
-        # Set spec_section to null for submittal items that reference spec sections from this document
+
+        # Delete spec sections since they are directly tied to documents
+        # Note: submittal items that reference these spec sections were already deleted above
         spec_sections_to_delete = SpecSection.objects.filter(document=uploaded_file)
-        submittal_items_spec_section_updated = SubmittalItem.objects.filter(spec_section__in=spec_sections_to_delete).update(spec_section=None)
         semantically_processed_items_spec_section_updated = SemanticallyProcessedSpecItem.objects.filter(spec_section__in=spec_sections_to_delete).update(spec_section=None)
-        
-        # Now delete spec sections since they are directly tied to documents and don't make sense without a document
         spec_sections_deleted, _ = spec_sections_to_delete.delete()
         
         # Delete notice excerpts since they are directly tied to documents
@@ -2834,20 +3026,18 @@ def delete_document(request):
         uploaded_file.delete()
         
         logging.info(f"Document '{document_name}' (ID: {document_id}) deleted successfully. "
-                    f"Updated {submittal_items_updated} submittal items, "
-                    f"{notice_matches_updated} notice matches, "
-                    f"Updated {submittal_items_spec_section_updated} submittal items (spec_section), "
+                    f"Deleted {submittal_items_deleted} submittal items, "
+                    f"Updated {notice_matches_updated} notice matches, "
                     f"Updated {semantically_processed_items_spec_section_updated} semantically processed items (spec_section), "
                     f"Deleted {spec_sections_deleted} spec sections, "
                     f"Deleted {notice_excerpts_deleted} notice excerpts, "
-                    f"{semantically_processed_items_updated} semantically processed items.")
-        
+                    f"Updated {semantically_processed_items_updated} semantically processed items.")
+
         return Response({
             'detail': 'Document deleted successfully',
             'document_name': document_name,
-            'submittal_items_updated': submittal_items_updated,
+            'submittal_items_deleted': submittal_items_deleted,
             'notice_matches_updated': notice_matches_updated,
-            'submittal_items_spec_section_updated': submittal_items_spec_section_updated,
             'semantically_processed_items_spec_section_updated': semantically_processed_items_spec_section_updated,
             'spec_sections_deleted': spec_sections_deleted,
             'notice_excerpts_deleted': notice_excerpts_deleted,

@@ -179,6 +179,9 @@ class SpecSection(BaseModel):
     specgpt_embedding_status = models.CharField(max_length=256, blank=True, null=True, choices=UploadedFile.SpecgptProcessingStatusChoices.choices)
     file_s3_key = models.CharField(max_length=1024, blank=True, null=True)
 
+    class Meta:
+        ordering = ['masterformat_section__masterformat_number', 'document__name']
+
     def __str__(self):
         return f"{self.document.name} - {self.masterformat_section.masterformat_number}"
 
@@ -701,6 +704,77 @@ class CustomItemType(BaseModel):
         project_label = self.project.project_number or self.project.name
         return f"{self.name} ({project_label})"
 
+
+class UserHighlightPreference(BaseModel):
+    """
+    Stores the user's last used highlight type per project for quick reuse.
+    Allows cross-device persistence of the "Repeat Last Highlight" feature.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="highlight_preferences",
+        help_text="User who owns this preference."
+    )
+    project = models.ForeignKey(
+        "Project",
+        on_delete=models.CASCADE,
+        related_name="user_highlight_preferences",
+        help_text="Project context for this preference."
+    )
+
+    is_custom_type = models.BooleanField(
+        default=False,
+        help_text="True if last highlight was a custom type, False if standard type."
+    )
+    custom_item_type = models.ForeignKey(
+        "CustomItemType",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="user_preferences",
+        help_text="Reference to custom type if is_custom_type=True."
+    )
+    standard_item_type = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Standard type name (e.g., 'inspections', 'warranties') if is_custom_type=False."
+    )
+    extraction_type = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="The extraction_type used (e.g., 'qa_planner', 'custom_highlights')."
+    )
+
+    # Store display information for quick access
+    type_display_name = models.CharField(
+        max_length=200,
+        help_text="Human-readable name to display (e.g., 'Inspections', 'Safety Requirements')."
+    )
+    type_color = models.CharField(
+        max_length=7,
+        help_text="HEX color code for visual display."
+    )
+
+    class Meta:
+        db_table = "deliverables_user_highlight_preference"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "project"],
+                name="unique_highlight_preference_per_user_project"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["user", "project"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user.email} - {self.project.name}: {self.type_display_name}"
+
+
 class PDFAnnotation(BaseModel):
     annotation_id = models.CharField(
         max_length=255,
@@ -753,3 +827,238 @@ class PDFAnnotation(BaseModel):
     def __str__(self):
         user_display = self.user.email if self.user else "Unknown user"
         return f"Annotation (Page {self.page_number}) by {user_display}"
+
+
+# region Drawing Parser Models
+
+class DrawingExtractionStatus(models.TextChoices):
+    """Status of a drawing extraction run"""
+    PENDING = "PENDING", "Pending"
+    PROCESSING = "PROCESSING", "Processing"
+    SUCCESS = "SUCCESS", "Success"
+    PARTIAL_SUCCESS = "PARTIAL_SUCCESS", "Partial Success"
+    FAILED = "FAILED", "Failed"
+
+
+class DrawingPageType(models.TextChoices):
+    """Type of page in a drawing"""
+    DRAWING = "drawing", "Drawing"
+    SPEC = "spec", "Specification"
+
+
+class DrawingPageExtractionStatus(models.TextChoices):
+    """Extraction status for individual pages"""
+    SUCCESS = "success", "Success"
+    NO_NOTES_FOUND = "no_notes_found", "No Notes Found"
+    FAILED = "failed", "Failed"
+
+
+class DrawingFile(BaseModel):
+    """Uploaded drawing document (e.g., mechanical drawings PDF)"""
+
+    project = models.ForeignKey(
+        "Project",
+        on_delete=models.CASCADE,
+        related_name="drawing_files"
+    )
+    project_version = models.ForeignKey(
+        "ProjectVersion",
+        on_delete=models.CASCADE,
+        related_name="drawing_files"
+    )
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_drawing_files"
+    )
+
+    file_name = models.CharField(max_length=512)
+    file_s3_key = models.CharField(max_length=1024)
+    md5 = models.CharField(max_length=64)
+    total_pages = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['project', 'project_version']),
+        ]
+
+    def __str__(self):
+        return f"{self.file_name} ({self.project.name})"
+
+    @property
+    def latest_extraction(self):
+        return self.extractions.order_by('-created_at').first()
+
+    @property
+    def extraction_status(self):
+        extraction = self.latest_extraction
+        return extraction.status if extraction else None
+
+
+class DrawingExtraction(BaseModel):
+    """Tracks each extraction attempt for a drawing file"""
+
+    drawing_file = models.ForeignKey(
+        "DrawingFile",
+        on_delete=models.CASCADE,
+        related_name="extractions"
+    )
+
+    status = models.CharField(
+        max_length=32,
+        choices=DrawingExtractionStatus.choices,
+        default=DrawingExtractionStatus.PENDING
+    )
+
+    # Processing metadata
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    model_version = models.CharField(max_length=128, null=True, blank=True)
+    processing_time_ms = models.IntegerField(null=True, blank=True)
+    output_s3_key = models.CharField(max_length=1024, null=True, blank=True)
+    error_message = models.TextField(null=True, blank=True)
+    failure_summary = models.CharField(max_length=256, null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['drawing_file', 'status']),
+        ]
+
+    def __str__(self):
+        return f"Extraction {self.id} for {self.drawing_file.file_name} ({self.status})"
+
+
+class DrawingPage(BaseModel):
+    """Individual page from a drawing file"""
+
+    drawing_file = models.ForeignKey(
+        "DrawingFile",
+        on_delete=models.CASCADE,
+        related_name="pages"
+    )
+    extraction = models.ForeignKey(
+        "DrawingExtraction",
+        on_delete=models.CASCADE,
+        related_name="pages"
+    )
+
+    page_number = models.IntegerField()
+    page_type = models.CharField(
+        max_length=32,
+        choices=DrawingPageType.choices
+    )
+    rotation = models.IntegerField(default=0)
+    rotated_width = models.FloatField(null=True, blank=True)
+    rotated_height = models.FloatField(null=True, blank=True)
+    unrotated_width = models.FloatField(null=True, blank=True)
+    unrotated_height = models.FloatField(null=True, blank=True)
+    extraction_status = models.CharField(
+        max_length=32,
+        choices=DrawingPageExtractionStatus.choices
+    )
+    spec_content = models.TextField(null=True, blank=True)
+    sheet_number = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="The sheet number from the drawing title block (e.g., 'A-101', 'M-203')"
+    )
+    sheet_title = models.CharField(
+        max_length=512,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="The sheet title from the drawing title block (e.g., 'FLOOR PLAN - DRAINAGE - MAIN')"
+    )
+
+    class Meta:
+        ordering = ['page_number']
+
+    def __str__(self):
+        return f"Page {self.page_number} of {self.drawing_file.file_name}"
+
+
+class DrawingNoteSection(BaseModel):
+    """A section header containing notes on a drawing page (e.g., 'GENERAL NOTES:')"""
+
+    page = models.ForeignKey(
+        "DrawingPage",
+        on_delete=models.CASCADE,
+        related_name="note_sections"
+    )
+
+    header = models.CharField(max_length=512)
+    header_bbox = models.JSONField(null=True, blank=True)  # [x1, y1, x2, y2] - Deprecated, use unrotated_header_bbox
+    rotated_header_bbox = models.JSONField(null=True, blank=True)
+    unrotated_header_bbox = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['id']
+
+    def __str__(self):
+        return f"{self.header} (Page {self.page.page_number})"
+
+
+class DrawingNote(BaseModel):
+    """Individual note extracted from a drawing"""
+
+    section = models.ForeignKey(
+        "DrawingNoteSection",
+        on_delete=models.CASCADE,
+        related_name="notes"
+    )
+
+    note_number = models.IntegerField()
+    category = models.CharField(max_length=256)
+    text = models.TextField()
+    bounding_box = models.JSONField(null=True, blank=True) # Deprecated, use unrotated_bounding_box
+    raw_bounding_box = models.JSONField(null=True, blank=True) # Deprecated, use rotated_bounding_box
+    rotated_bounding_box = models.JSONField(null=True, blank=True)
+    unrotated_bounding_box = models.JSONField(null=True, blank=True)
+    source_blocks = models.JSONField(null=True, blank=True)
+    drawing_references = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['note_number']
+        indexes = [
+            models.Index(fields=['category']),
+        ]
+
+    def __str__(self):
+        preview = self.text[:50] + '...' if len(self.text) > 50 else self.text
+        return f"Note {self.note_number}: {preview}"
+
+
+class DrawingExtractionWebhookEvent(BaseModel):
+    """
+    Store each webhook delivery for idempotency and retry safety.
+    The unique event_id ensures duplicate deliveries are ignored.
+    """
+
+    extraction = models.ForeignKey(
+        "DrawingExtraction",
+        on_delete=models.CASCADE,
+        related_name="webhook_events",
+    )
+
+    # Provided by the caller; unique per webhook delivery
+    event_id = models.CharField(max_length=128, unique=True)
+
+    # Helps debug ordering/retries without storing entire payload forever
+    new_status = models.CharField(max_length=32)
+    output_s3_key = models.CharField(max_length=1024, null=True, blank=True)
+    payload = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["extraction", "new_status"]),
+        ]
+
+    def __str__(self):
+        return f"Webhook {self.event_id} -> {self.new_status}"
+
+
+# endregion Drawing Parser Models

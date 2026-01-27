@@ -368,3 +368,131 @@ class UploadLogoTests(APITestCase):
         response = self.client.post(self.upload_logo_url, {}, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data['error'], 'No file uploaded.')
+
+
+class TeamLogoEndpointTests(APITestCase):
+    """Tests for the lightweight team logo endpoint."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.team = Team.objects.create(
+            name='Test Team',
+            slug='test-team',
+            legacy_logo_url='https://example.com/logo.png'
+        )
+        self.team_member = CustomUser.objects.create_user(
+            username='team_member',
+            password='password123'
+        )
+        self.non_member = CustomUser.objects.create_user(
+            username='non_member',
+            password='password123'
+        )
+
+        TeamMembership.objects.create(
+            user=self.team_member,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+
+        self.url = reverse('teams:team-logo', args=[self.team.id])
+
+    def test_team_member_can_fetch_logo(self):
+        """Test that team member can fetch logo endpoint."""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['name'], 'Test Team')
+        self.assertEqual(response.data['logo_url'], 'https://example.com/logo.png')
+
+    def test_logo_endpoint_returns_minimal_fields(self):
+        """Test that logo endpoint returns only essential fields."""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(set(response.data.keys()), {'id', 'name', 'logo_url'})
+
+    def test_non_member_cannot_fetch_logo(self):
+        """Test that non-member cannot fetch logo (returns 404 to hide existence)."""
+        self.client.force_authenticate(user=self.non_member)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_unauthenticated_user_cannot_fetch_logo(self):
+        """Test that unauthenticated user cannot fetch logo."""
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_nonexistent_team_returns_404(self):
+        """Test that nonexistent team returns 404."""
+        self.client.force_authenticate(user=self.team_member)
+        url = reverse('teams:team-logo', args=[99999])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class TeamFlagsEndpointTests(APITestCase):
+    """Tests for the lightweight team flags endpoint."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.team = Team.objects.create(name='Test Team', slug='test-team')
+        self.team_member = CustomUser.objects.create_user(
+            username='team_member',
+            password='password123'
+        )
+        self.non_member = CustomUser.objects.create_user(
+            username='non_member',
+            password='password123'
+        )
+
+        TeamMembership.objects.create(
+            user=self.team_member,
+            team=self.team,
+            role=ROLE_MEMBER
+        )
+
+        self.url = reverse('teams:team-flags', args=[self.team.id])
+
+    def test_team_member_can_fetch_flags(self):
+        """Test that team member can fetch flags endpoint."""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('active_flags', response.data)
+        self.assertIsInstance(response.data['active_flags'], list)
+
+    def test_flags_endpoint_returns_minimal_fields(self):
+        """Test that flags endpoint returns only essential fields."""
+        self.client.force_authenticate(user=self.team_member)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(set(response.data.keys()), {'id', 'active_flags'})
+
+    def test_non_member_cannot_fetch_flags(self):
+        """Test that non-member cannot fetch flags (returns 404 to hide existence)."""
+        self.client.force_authenticate(user=self.non_member)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_unauthenticated_user_cannot_fetch_flags(self):
+        """Test that unauthenticated user cannot fetch flags."""
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_nonexistent_team_returns_404(self):
+        """Test that nonexistent team returns 404."""
+        self.client.force_authenticate(user=self.team_member)
+        url = reverse('teams:team-flags', args=[99999])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

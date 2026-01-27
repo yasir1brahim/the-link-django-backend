@@ -56,7 +56,8 @@ from apps.deliverables.models import (
     Chat, ChatMessage,
     CustomPostgresChatMessageHistory,
     AiGeneratedLog,
-    ExtractedData
+    ExtractedData,
+    ExtractionSource
 )
 from apps.utils.feature_flags import is_specgpt_websockets_feature_flag_active, is_langchain_update_feature_flag_active
 
@@ -67,6 +68,8 @@ from apps.utils.feature_flags import is_inspection_log_use_data_tables_feature_f
 # LangGraph imports for adaptive RAG
 from langgraph.prebuilt import create_react_agent
 from apps.deliverables.tools.adaptive_retrieval import create_retrieval_tool
+
+logger = logging.getLogger(__name__)
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
@@ -375,6 +378,35 @@ def _create_extracted_data_from_log(ai_log):
             print(f"Created {len(extracted_items)} ExtractedData records for log {ai_log.id}")
 
 
+def _check_and_update_log_timeout(log_obj, timeout_seconds=600):
+    """
+    Check if a log has been processing for longer than the timeout threshold.
+    If timed out, update status to TIMEOUT and save.
+
+    Args:
+        log_obj: AiGeneratedLog instance to check
+        timeout_seconds: Timeout threshold in seconds (default: 30 for testing)
+
+    Returns:
+        bool: True if timeout was detected and updated, False otherwise
+    """
+    from datetime import datetime, timedelta, timezone
+
+    if log_obj.log_status != 'PROCESSING':
+        return False
+
+    elapsed_time = datetime.now(timezone.utc) - log_obj.created_at
+    timeout_threshold = timedelta(seconds=timeout_seconds)
+
+    if elapsed_time > timeout_threshold:
+        log_obj.log_status = 'TIMEOUT'
+        log_obj.save(update_fields=['log_status', 'updated_at'])
+        print(f"Log {log_obj.id} timed out after {elapsed_time.total_seconds()} seconds")
+        return True
+
+    return False
+
+
 def _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdown_table):
     """Handle webhook response for QA planner logs with merging logic.
 
@@ -394,6 +426,11 @@ def _handle_qa_planner_webhook(log_obj, qa_option, new_status, log_data, markdow
         # Re-fetch the log with a lock to get the latest state
         log_obj = AiGeneratedLog.objects.select_for_update().get(id=log_id)
         print(f"_handle_qa_planner_webhook: LOCKED & REFRESHED - completion_status={log_obj.completion_status}, qa_options_selected={log_obj.qa_options_selected}")
+
+        # If the log has already timed out, ignore this late callback
+        if log_obj.log_status == 'TIMEOUT':
+            print(f"_handle_qa_planner_webhook: TIMEOUT detected - ignoring late callback for log {log_id}, qa_option={qa_option}")
+            return
 
         # Update completion status for this QA option
         if log_obj.completion_status is None:
@@ -525,6 +562,11 @@ def ai_log_generation_webhook(request):
                 print(f"AI LOG GENERATION WEBHOOK: Fallback found no matching log")
 
         if log_obj:
+            # If the log has already timed out, ignore this late callback
+            if log_obj.log_status == 'TIMEOUT':
+                print(f"AI LOG GENERATION WEBHOOK: TIMEOUT detected - ignoring late callback for log {log_obj.id}")
+                return Response(status=status.HTTP_200_OK)
+
             # Handle QA planner logs differently (they need merging)
             if log_obj.log_type == 'qa_planner' and qa_option:
                 print(f"AI LOG GENERATION WEBHOOK: Handling QA planner webhook for option '{qa_option}', current completion_status={log_obj.completion_status}, qa_options_selected={log_obj.qa_options_selected}")
@@ -671,6 +713,10 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         # Apply sorting
         queryset = self.apply_sorting(queryset)
 
+        processing_logs = queryset.filter(log_status='PROCESSING')
+        for log in processing_logs:
+            _check_and_update_log_timeout(log)
+
         extracted_items_prefetch = Prefetch(
             'extracted_items',
             queryset=ExtractedData.objects.select_related(
@@ -712,40 +758,110 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             # Get the log object directly without going through get_queryset 
             # to avoid project_id validation for this specific action
             log_obj = AiGeneratedLog.objects.get(id=pk)
-            
-            serializer = self.get_serializer(log_obj)
-            structured_data = serializer.build_structured_rows(log_obj)
 
-            if not structured_data:
-                return Response({'filter_values': {}})
+            logger.info(f"Fetching filter values for log {pk} (type: {log_obj.log_type})")
+
+            # Check if we have ExtractedData records available
+            has_extracted_data = log_obj.extracted_items.exists()
+
+            # Also check for human-created highlights
+            has_human_highlights = ExtractedData.objects.filter(
+                ai_generated_log__isnull=True,
+                project=log_obj.project,
+                project_version=log_obj.project_version,
+                extraction_type=log_obj.log_type,
+                source=ExtractionSource.HUMAN,
+            ).exists()
 
             # Get filterable columns based on log type
             filterable_columns = self.get_filterable_columns(log_obj.log_type)
 
             filter_values = {}
 
-            for column_key in filterable_columns:
-                # Extract unique values for this column
-                values = set()
-                for item in structured_data:
-                    value = item.get(column_key)
-                    if value is not None and value != '':
-                        values.add(str(value))
-                
-                # Sort the values
-                filter_values[column_key] = sorted(list(values))
-            
+            # Use DB-level query if we have ExtractedData records
+            if has_extracted_data or has_human_highlights:
+                logger.info(f"Using DB-level query for filter values on log {pk}")
+
+                # Build base queryset
+                queryset = ExtractedData.objects.filter(
+                    ai_generated_log=log_obj
+                )
+
+                # Include human-created highlights
+                human_items_qs = ExtractedData.objects.filter(
+                    ai_generated_log__isnull=True,
+                    project=log_obj.project,
+                    project_version=log_obj.project_version,
+                    extraction_type=log_obj.log_type,
+                    source=ExtractionSource.HUMAN,
+                )
+
+                # Combine querysets
+                combined_qs = queryset.union(human_items_qs)
+                combined_ids = combined_qs.values_list('id', flat=True)
+                final_qs = ExtractedData.objects.filter(id__in=combined_ids)
+
+                # Extract unique values for each column using DB queries
+                for column_key in filterable_columns:
+                    # Map UI column names to database field names
+                    if column_key == 'Spec Section #':
+                        field_name = 'spec_section_number'
+                    elif column_key == 'item_type':
+                        field_name = 'item_type'
+                    elif column_key == 'Responsible Party':
+                        field_name = 'responsible_party'
+                    elif column_key == 'Deliverable Type':
+                        # Special case: JSON field
+                        # Fallback to Python for JSON fields
+                        values = set()
+                        for item in final_qs:
+                            if item.metadata and 'deliverable_type' in item.metadata:
+                                value = item.metadata['deliverable_type']
+                                if value is not None and value != '':
+                                    values.add(str(value))
+                        filter_values[column_key] = sorted(list(values))
+                        continue
+                    else:
+                        logger.warning(f"Unknown filterable column: {column_key}")
+                        continue
+
+                    # Use distinct() and values_list to get unique values from DB
+                    # Note: order_by() clears default model ordering which would otherwise
+                    # include 'id' in the SELECT, breaking DISTINCT on the field value
+                    values = final_qs.filter(**{f'{field_name}__isnull': False}).exclude(**{field_name: ''}).order_by().values_list(field_name, flat=True).distinct()
+                    filter_values[column_key] = sorted([str(v) for v in values])
+                    logger.debug(f"Found {len(filter_values[column_key])} unique values for {column_key}")
+
+            else:
+                # Fallback to old Python-level method for logs without ExtractedData
+                logger.info(f"Falling back to Python-level processing for filter values on log {pk}")
+
+                serializer = self.get_serializer(log_obj)
+                structured_data = serializer.build_structured_rows(log_obj)
+
+                if not structured_data:
+                    return Response({'filter_values': {}})
+
+                for column_key in filterable_columns:
+                    # Extract unique values for this column
+                    values = set()
+                    for item in structured_data:
+                        value = item.get(column_key)
+                        if value is not None and value != '':
+                            values.add(str(value))
+
+                    # Sort the values
+                    filter_values[column_key] = sorted(list(values))
+
+            logger.info(f"Returning filter values for {len(filter_values)} columns")
             return Response({'filter_values': filter_values})
-            
+
         except AiGeneratedLog.DoesNotExist:
             return Response(
-                {'error': 'Log not found'}, 
+                {'error': 'Log not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
-            import traceback
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error(f"Error in filter_values for log {pk}: {str(e)}")
             logger.error(traceback.format_exc())
             return Response(
@@ -843,15 +959,23 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            logger.info(f"{log_prefix} Checking log_data availability")
-            if not log_obj.log_data:
-                logger.warning(f"{log_prefix} No log_data available for log_id={pk}")
+            # Check for data availability - either ExtractedData records or legacy log_data
+            has_extracted_items = log_obj.extracted_items.exists() if hasattr(log_obj, 'extracted_items') else False
+            has_log_data = bool(log_obj.log_data)
+
+            logger.info(f"{log_prefix} Data availability: extracted_items={has_extracted_items}, log_data={has_log_data}")
+
+            if not has_extracted_items and not has_log_data:
+                logger.warning(f"{log_prefix} No data available for log_id={pk}")
                 return Response(
-                    {'error': 'No data available for export'}, 
+                    {'error': 'No data available for export'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
-            logger.info(f"{log_prefix} log_data contains {len(log_obj.log_data)} items")
+
+            if has_extracted_items:
+                logger.info(f"{log_prefix} Using ExtractedData records: {log_obj.extracted_items.count()} items")
+            elif has_log_data:
+                logger.info(f"{log_prefix} log_data contains {len(log_obj.log_data)} items")
             
             # Get filter, search, and sort parameters
             logger.info(f"{log_prefix} Processing filter parameters")
@@ -1567,7 +1691,7 @@ class ChatViewSet(viewsets.ModelViewSet):
         print("GENERATE GENERAL LOG: top_p: ", top_p)
 
         project_version_files = UploadedFile.objects.filter(project_version_id=project_version_id).order_by('id')
-        project_version_specs = SpecSection.objects.filter(document__in=project_version_files).order_by('id')
+        project_version_specs = SpecSection.objects.filter(document__in=project_version_files)
         spec_sections = [{
             'master_format_section_number': spec_section.masterformat_section.masterformat_number,
             'file_s3_key': spec_section.file_s3_key
@@ -1720,13 +1844,13 @@ class ChatViewSet(viewsets.ModelViewSet):
         
         # Get common data for all lambda calls
         project_version_files = UploadedFile.objects.filter(project_version_id=project_version_id).order_by('id')
-        project_version_specs = SpecSection.objects.filter(document__in=project_version_files).order_by('id')
+        project_version_specs = SpecSection.objects.filter(document__in=project_version_files)
         spec_sections = [{
             'master_format_section_number': spec_section.masterformat_section.masterformat_number,
             'file_s3_key': spec_section.file_s3_key
         } for spec_section in project_version_specs if spec_section.file_s3_key]
         s3_bucket = settings.S3_BUCKET
-        
+
         # Check feature flag for data tables
         use_data_tables = False
         if request and hasattr(request, 'user'):

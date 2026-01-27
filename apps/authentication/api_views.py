@@ -5,7 +5,7 @@ from apps.teams.permissions import TeamAccessPermissions
 from apps.teams.roles import ROLE_ADMIN, ROLE_MEMBER
 from apps.teams.models import Team, Membership as TeamMembership
 from dj_rest_auth.serializers import JWTSerializer
-from dj_rest_auth.views import LoginView
+from dj_rest_auth.views import LoginView, UserDetailsView
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.generics import GenericAPIView
@@ -62,11 +62,14 @@ class LoginViewWith2fa(LoginView):
         else:
             super_response = super().post(request, *args, **kwargs)
             if super_response.status_code == status.HTTP_200_OK:
+                # Get user's team roles
+                team_roles = self.user.get_all_team_roles()
                 # rewrap login responses to match our serializer schema
                 wrapped_jwt_data = {
                     "status": "success",
                     "detail": "User logged in.",
                     "jwt": super_response.data,
+                    "team_roles": team_roles,
                 }
                 return Response(wrapped_jwt_data, status=200)
             return super_response
@@ -97,16 +100,18 @@ class VerifyOTPView(GenericAPIView):
         if user and TOTP(Authenticator.objects.get(user=user, type=Authenticator.Type.TOTP)).validate_code(otp):
             # OTP is valid, generate JWT tokens
             refresh = RefreshToken.for_user(user)
-            return Response(
-                JWTSerializer(
-                    {
-                        "user": user,
-                        "refresh": str(refresh),
-                        "access": str(refresh.access_token),
-                    }
-                ).data,
-                status=status.HTTP_200_OK,
-            )
+            # Get user's team roles
+            team_roles = user.get_all_team_roles()
+            jwt_data = JWTSerializer(
+                {
+                    "user": user,
+                    "refresh": str(refresh),
+                    "access": str(refresh.access_token),
+                }
+            ).data
+            # Add team_roles to response
+            jwt_data["team_roles"] = team_roles
+            return Response(jwt_data, status=status.HTTP_200_OK)
         else:
             # OTP is invalid
             return Response({"status": "invalid_otp", "detail": "Invalid OTP code"}, status=status.HTTP_400_BAD_REQUEST)
@@ -376,11 +381,14 @@ def the_link_microsoft_callback(request):
         the_link_organization = Team.objects.get(sso_domain=settings.THE_LINK_SSO_ORGANIZATION_DOMAIN)
         if not TeamMembership.objects.filter(user=user, team=the_link_organization).exists():
             the_link_team_membership = TeamMembership.objects.create(user=user, team=the_link_organization, role=ROLE_MEMBER)
+        # Get user's team roles
+        team_roles = user.get_all_team_roles()
         # rewrap login responses to match our serializer schema
         wrapped_jwt_data = {
             "status": "success",
             "detail": "User logged in.",
             "jwt": response.data,
+            "team_roles": team_roles,
         }
         return Response(wrapped_jwt_data, status=200)
     return response
@@ -402,12 +410,41 @@ def ellisdon_microsoft_callback(request):
         ellis_don_organization = Team.objects.get(sso_domain=settings.ELLIS_DON_SSO_ORGANIZATION_DOMAIN)
         if not TeamMembership.objects.filter(user=user, team=ellis_don_organization).exists():
             ellis_don_team_membership = TeamMembership.objects.create(user=user, team=ellis_don_organization, role=ROLE_MEMBER)
+        # Get user's team roles
+        team_roles = user.get_all_team_roles()
         # rewrap login responses to match our serializer schema
         wrapped_jwt_data = {
             "status": "success",
             "detail": "User logged in.",
             "jwt": response.data,
+            "team_roles": team_roles,
         }
         return Response(wrapped_jwt_data, status=200)
     return response
-    
+
+
+class UserDetailsWithTeamsView(UserDetailsView):
+    """Extend dj_rest_auth's `UserDetailsView` to include `team_roles` in the response.
+
+    This keeps the original behaviour but appends the user's team roles (via
+    `get_all_team_roles`) to the returned response payload when possible.
+    """
+
+    def get(self, request, *args, **kwargs):
+        response = super().get(request, *args, **kwargs)
+
+        team_roles = []
+        try:
+            user = getattr(request, "user", None)
+            if user and hasattr(user, "get_all_team_roles"):
+                team_roles = user.get_all_team_roles() or []
+        except Exception:
+            team_roles = []
+
+        try:
+            if hasattr(response, "data") and isinstance(response.data, dict):
+                response.data["team_roles"] = team_roles
+        except Exception:
+            pass
+
+        return response
