@@ -138,6 +138,11 @@ urlpatterns = [
     path('documents/download-multiple/', views.bulk_download_documents, name='download-multiple-documents'),
     path('documents/reprocess-multiple/', bulk_operations.bulk_reprocess_documents, name='reprocess-multiple-documents'),
     path('documents/delete-multiple/', bulk_operations.bulk_delete_documents, name='delete-multiple-documents'),
+    
+    # Compass processing for old projects
+    path('projects/<int:project_id>/compass-processing-status/', views.get_compass_processing_status, name='compass-processing-status'),
+    path('projects/<int:project_id>/trigger-compass-processing/', views.trigger_compass_processing, name='trigger-compass-processing'),
+    
     path('projects/<int:project_id>/', include(single_project_router.urls)),
 
     # Extraction notes (manual nested routes)

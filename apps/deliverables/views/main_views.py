@@ -3442,3 +3442,239 @@ def get_pdf_version_comparison(request):
         
     except Exception as e:
         return Response({'detail': f'Error generating PDF URLs: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# region Compass Processing for Old Projects
+
+@extend_schema(
+    responses={
+        200: {
+            'description': 'Compass processing status',
+            'content': {
+                'application/json': {
+                    'example': {
+                        'needs_processing': True,
+                        'unprocessed_document_count': 5,
+                        'total_document_count': 10,
+                        'compass_enabled': True
+                    }
+                }
+            }
+        }
+    }
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_compass_processing_status(request, project_id):
+    """
+    Check if project needs Compass processing for old documents.
+    
+    Returns:
+        {
+            "needs_processing": bool,
+            "unprocessed_document_count": int,
+            "total_document_count": int,
+            "compass_enabled": bool
+        }
+    """
+    try:
+        project = Project.objects.get(id=project_id)
+        
+        # Check if user is a member of the project
+        if not request.user.is_member_of_project(project):
+            return Response(
+                {'detail': 'User is not a member of the project'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Check if Compass feature is active
+        is_compass_active = is_specgpt_feature_flag_active(
+            request.user,
+            project.team,
+            project
+        )
+        
+        if not is_compass_active:
+            return Response({
+                "needs_processing": False,
+                "unprocessed_document_count": 0,
+                "total_document_count": 0,
+                "compass_enabled": False
+            })
+        
+        # Count documents that need processing
+        unprocessed_docs = UploadedFile.objects.filter(
+            project=project,
+            specgpt_embedding_enabled=False
+        ).count()
+        
+        total_docs = UploadedFile.objects.filter(project=project).count()
+        
+        needs_processing = unprocessed_docs > 0
+        
+        return Response({
+            "needs_processing": needs_processing,
+            "unprocessed_document_count": unprocessed_docs,
+            "total_document_count": total_docs,
+            "compass_enabled": True
+        })
+        
+    except Project.DoesNotExist:
+        return Response(
+            {'detail': 'Project not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        logging.error(f"Error getting compass processing status: {e}")
+        return Response(
+            {'detail': 'An error occurred'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@extend_schema(
+    request=None,
+    responses={
+        200: {
+            'description': 'Processing triggered successfully',
+            'content': {
+                'application/json': {
+                    'example': {
+                        'message': 'Compass processing triggered successfully',
+                        'documents_updated': 5,
+                        'sections_triggered': 15
+                    }
+                }
+            }
+        }
+    }
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def trigger_compass_processing(request, project_id):
+    """
+    Trigger Compass embedding processing for all unprocessed documents in a project.
+    
+    This will:
+    1. Update all documents with specgpt_embedding_enabled=False to True
+    2. Set their status to IN_QUEUE
+    3. For documents that already have spec sections, update section status to trigger embedding
+    
+    Returns:
+        {
+            "message": str,
+            "documents_updated": int,
+            "sections_triggered": int
+        }
+    """
+    try:
+        project = Project.objects.get(id=project_id)
+        
+        # Check if user is a member of the project
+        if not request.user.is_member_of_project(project):
+            return Response(
+                {'detail': 'User is not a member of the project'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Check if Compass feature is active
+        is_compass_active = is_specgpt_feature_flag_active(
+            request.user,
+            project.team,
+            project
+        )
+        
+        if not is_compass_active:
+            return Response(
+                {'detail': 'Compass feature is not enabled for this project'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get all documents that need processing
+        unprocessed_docs = UploadedFile.objects.filter(
+            project=project,
+            specgpt_embedding_enabled=False
+        )
+        
+        if not unprocessed_docs.exists():
+            return Response({
+                "message": "No documents need processing",
+                "documents_updated": 0
+            })
+        
+        # Process each document by directly calling parse_spec
+        # (Reusing the same logic as reprocess_document but without the mock request complexity)
+        updated_count = 0
+        failed_docs = []
+        
+        for doc in unprocessed_docs:
+            try:
+                # Enable Compass for this document and set status to IN_QUEUE
+                doc.specgpt_embedding_enabled = True
+                doc.specgpt_processing_status = UploadedFile.SpecgptProcessingStatusChoices.IN_QUEUE
+                doc.save()
+                
+                # Delete existing submittals before reprocessing (same as reprocess_document)
+                delete_submittals_for_document(doc.id)
+                
+                # Get feature flags (same as reprocess_document)
+                is_notices_flag_active = is_notices_feature_flag_active(request.user, project.team)
+                is_v2_flag_active = is_v2_process_deliverables_feature_flag_active(request.user, project.team, project)
+                is_full_spec_flag_active = is_full_spec_processing_feature_flag_active(request.user, project.team, project)
+                is_specgpt_active = is_specgpt_feature_flag_active(request.user, project.team, project)
+                
+                # Trigger reprocessing via parse_spec (same as reprocess_document)
+                parse_spec(
+                    callback_url=settings.BACKEND_CALLBACK_URL,
+                    document_id=str(doc.id),
+                    project_id=str(project.id),
+                    project_version_id=str(doc.project_version.id),
+                    object_key=doc.document_path,
+                    filename=doc.name,
+                    user_id=str(request.user.id),
+                    is_v2_process_deliverables_flag_active=is_v2_flag_active,
+                    is_specgpt_flag_active=is_specgpt_active,
+                    specgpt_callback_url=settings.BACKEND_SPECGPT_CALLBACK_URL
+                )
+                
+                # Update document status (same as reprocess_document)
+                doc.processing_status = 'PENDING_PROCESSING'
+                doc.last_retry = datetime.now()
+                doc.save()
+                
+                updated_count += 1
+                logging.info(f"Triggered Compass processing for document {doc.id} ({doc.name})")
+                
+            except Exception as e:
+                failed_docs.append(doc.name)
+                logging.error(f"Error processing document {doc.id}: {e}")
+                continue
+        
+        logging.info(
+            f"Compass processing triggered for project {project_id}: "
+            f"{updated_count} documents reprocessing, {len(failed_docs)} failed"
+        )
+        
+        message = f"Compass processing triggered successfully for {updated_count} document(s)"
+        if failed_docs:
+            message += f". Failed: {', '.join(failed_docs)}"
+        
+        return Response({
+            "message": message,
+            "documents_updated": updated_count
+        })
+        
+    except Project.DoesNotExist:
+        return Response(
+            {'detail': 'Project not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        logging.error(f"Error triggering compass processing: {e}")
+        return Response(
+            {'detail': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+# endregion Compass Processing for Old Projects
+
