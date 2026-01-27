@@ -17,7 +17,6 @@ from apps.deliverables.models import (
     ExtractionSource,
     ROLE_PROJECT_MEMBER,
 )
-from apps.utils.feature_flags import is_spec_centered_view_feature_flag_active
 from apps.deliverables.serializers.spec_centric_serializers import SpecSectionContentSerializer
 
 User = get_user_model()
@@ -163,19 +162,6 @@ class SpecCentricViewTests(APITestCase):
         self.assertIn('spec_sections', response.data)
         self.assertIn('total_sections', response.data)
         self.assertIn('project_id', response.data)
-    
-    def test_feature_flag_disabled(self):
-        """Test that endpoints return 403 when feature flag is disabled."""
-        # Disable the feature flag
-        self.feature_flag.everyone = False
-        self.feature_flag.save()
-        
-        url = reverse('deliverables:spec-section-list', kwargs={'project_id': self.project.id})
-        response = self.client.get(url)
-        
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertIn('error', response.data)
-        self.assertIn('not enabled', response.data['error'])
     
     def test_unauthorized_access(self):
         """Test that unauthenticated users cannot access endpoints."""

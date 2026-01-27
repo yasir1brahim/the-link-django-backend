@@ -76,7 +76,13 @@ def bulk_reprocess_documents(request):
             try:
                 # Remove all existing submittals tied to this document before reprocessing
                 delete_submittals_for_document(document.id)
-                
+
+                # Delete existing spec sections for this document before reprocessing
+                # This ensures clean reprocessing without conflicts or duplicates
+                spec_sections_to_delete = SpecSection.objects.filter(document_id=document.id)
+                spec_sections_deleted, _ = spec_sections_to_delete.delete()
+                logging.info(f"Deleted {spec_sections_deleted} spec section(s) for document_id={document.id} before reprocessing")
+
                 # Get feature flags for the project
                 is_notices_flag_active = is_notices_feature_flag_active(request.user, document.project.team)
                 is_v2_process_deliverables_flag_active = is_v2_process_deliverables_feature_flag_active(request.user, document.project.team, document.project)
