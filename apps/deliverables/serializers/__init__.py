@@ -6,6 +6,7 @@ from apps.utils.feature_flags import get_active_flags_for_project
 from apps.users.serializers import CustomUserSerializer
 from apps.users.models import CustomUser
 from apps.teams.models import Team
+from ..utils import get_next_submittal_number
 from ..models import (
     SubmittalItem,
     UploadedFile,
@@ -485,19 +486,7 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
     type = serializers.CharField(required=False)
     added_under_submittal_id = serializers.IntegerField(required=False, allow_null=True)
 
-    def get_next_submittal_number(self, project_id):
-        current_max_number = (
-            SubmittalItem.objects
-            .filter(project_id=project_id)
-            .aggregate(Max('submittal_number'))
-        )['submittal_number__max']
 
-        # If there are no submittal numbers assigned yet, MAX() function
-        # will return None
-        if current_max_number is None:
-            return None
-
-        return round(current_max_number, 0) + 1
 
     def create(self, validated_data):
         mf_section, created = MasterFormatSection.objects.get_or_create(
@@ -558,7 +547,10 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             spec_section=spec_section,
             added_under_submittal=added_under_submittal,
             manually_added=True,
-            submittal_number=self.get_next_submittal_number(validated_data.get('project_id')),
+            submittal_number=get_next_submittal_number(
+                validated_data.get('project_id'),
+                validated_data.get('project_version').id if validated_data.get('project_version') else None
+            ),
         )
 
     def update(self, instance, validated_data):
@@ -684,17 +676,7 @@ class SubmittalItemFromHighlightSerializer(serializers.ModelSerializer):
         allow_null=True
     )
 
-    def get_next_submittal_number(self, project_id):
-        current_max_number = (
-            SubmittalItem.objects
-            .filter(project_id=project_id)
-            .aggregate(Max('submittal_number'))
-        )['submittal_number__max']
 
-        if current_max_number is None:
-            return None
-
-        return round(current_max_number, 0) + 1
 
     def create(self, validated_data):
         # Get the spec section by ID
@@ -738,7 +720,10 @@ class SubmittalItemFromHighlightSerializer(serializers.ModelSerializer):
             spec_section=spec_section,
             added_under_submittal=added_under_submittal,
             manually_added=True,
-            submittal_number=self.get_next_submittal_number(project_id),
+            submittal_number=get_next_submittal_number(
+                project_id,
+                validated_data.get('project_version').id if validated_data.get('project_version') else None
+            ),
             text_location=validated_data.get('text_location'),
             additional_text_locations=validated_data.get('additional_text_locations', []),
             parsing_method='UNKNOWN',

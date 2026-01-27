@@ -2,8 +2,46 @@ import re
 import csv
 import io
 from typing import List, Optional, Tuple, Union
+from django.db.models import Max
 
 ANCHOR_REPR_DELIMITER = '$$$'
+
+
+def get_next_submittal_number(project_id: int, project_version_id: int) -> Optional[int]:
+    """
+    Calculate the next submittal number for a given project and project version.
+    
+    This function queries the database to find the maximum submittal number
+    for the specified project and version, then returns the next sequential number.
+    
+    Args:
+        project_id: The ID of the project
+        project_version_id: The ID of the project version
+        
+    Returns:
+        The next submittal number (as an integer), or None if no submittal numbers
+        have been assigned yet for this project version.
+        
+    Example:
+        >>> next_num = get_next_submittal_number(project_id=1, project_version_id=2)
+        >>> # If max submittal_number is 5.0, returns 6
+    """
+    # Import here to avoid circular imports
+    from .models import SubmittalItem
+    
+    current_max_number = (
+        SubmittalItem.objects
+        .filter(project_id=project_id, project_version_id=project_version_id)
+        .aggregate(Max('submittal_number'))
+    )['submittal_number__max']
+    
+    # If there are no submittal numbers assigned yet, MAX() function
+    # will return None
+    if current_max_number is None:
+        return None
+    
+    return round(current_max_number, 0) + 1
+
 
 
 def format_anchor_repr(anchor: list) -> str:
