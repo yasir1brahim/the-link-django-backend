@@ -3,6 +3,7 @@ from enum import Enum
 from datetime import datetime, timedelta, timezone
 from typing import List
 
+from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
@@ -1066,6 +1067,19 @@ class DrawingNote(BaseModel):
     unrotated_bounding_box = models.JSONField(null=True, blank=True)
     source_blocks = models.JSONField(null=True, blank=True)
     drawing_references = models.JSONField(null=True, blank=True)
+    disciplines = ArrayField(
+        models.CharField(max_length=32, choices=Discipline.choices),
+        default=list,
+        blank=True,
+        help_text="List of disciplines this note relates to (can be multiple)",
+    )
+    discipline_confidence = models.CharField(
+        max_length=16,
+        choices=DisciplineConfidence.choices,
+        null=True,
+        blank=True,
+        help_text="Confidence level of the discipline classification",
+    )
 
     class Meta:
         ordering = ['note_number']

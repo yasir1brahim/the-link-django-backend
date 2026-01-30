@@ -3,7 +3,7 @@ from django.test import TestCase
 from apps.deliverables.models import (
     DrawingPage, DrawingFile, DrawingExtraction, DrawingExtractionStatus,
     DrawingPageType, DrawingPageExtractionStatus, Discipline, DisciplineConfidence,
-    Project,
+    Project, DrawingNote, DrawingNoteSection,
 )
 from apps.teams.models import Team
 from django.contrib.auth import get_user_model
@@ -83,3 +83,75 @@ class TestDrawingPageDisciplineFields(TestCase):
         page.refresh_from_db()
         self.assertIsNone(page.sheet_discipline)
         self.assertIsNone(page.sheet_discipline_confidence)
+
+
+class TestDrawingNoteDisciplineFields(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('test2@example.com')
+        self.team = Team.objects.create(name="Test Team 2", slug="test-team-2")
+        self.project = Project.objects.create(
+            name="Test Project",
+            project_number="P-002",
+            team=self.team,
+            created_by=self.user
+        )
+        self.project_version = self.project.versions.first()
+        self.drawing_file = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name="Mechanical.pdf",
+            file_s3_key="drawings/test.pdf",
+            md5="abc123",
+        )
+        self.extraction = DrawingExtraction.objects.create(
+            drawing_file=self.drawing_file,
+            status=DrawingExtractionStatus.SUCCESS,
+        )
+        self.page = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=1,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+        )
+        self.section = DrawingNoteSection.objects.create(
+            page=self.page,
+            header="GENERAL NOTES:",
+        )
+
+    def test_drawing_note_has_disciplines_array_field(self):
+        """Test DrawingNote can store multiple disciplines"""
+        note = DrawingNote.objects.create(
+            section=self.section,
+            note_number=1,
+            category="GENERAL NOTES",
+            text="Coordinate with mechanical and electrical.",
+            disciplines=["mechanical", "electrical"],
+            discipline_confidence=DisciplineConfidence.HIGH,
+        )
+        note.refresh_from_db()
+        self.assertEqual(note.disciplines, ["mechanical", "electrical"])
+        self.assertEqual(note.discipline_confidence, DisciplineConfidence.HIGH)
+
+    def test_drawing_note_disciplines_default_empty_list(self):
+        """Test disciplines field defaults to empty list"""
+        note = DrawingNote.objects.create(
+            section=self.section,
+            note_number=1,
+            category="GENERAL NOTES",
+            text="Some note",
+        )
+        note.refresh_from_db()
+        self.assertEqual(note.disciplines, [])
+
+    def test_drawing_note_discipline_confidence_nullable(self):
+        """Test discipline_confidence is nullable"""
+        note = DrawingNote.objects.create(
+            section=self.section,
+            note_number=1,
+            category="GENERAL NOTES",
+            text="Some note",
+            discipline_confidence=None,
+        )
+        note.refresh_from_db()
+        self.assertIsNone(note.discipline_confidence)
