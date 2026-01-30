@@ -132,3 +132,86 @@ class TestDrawingNoteReadSerializer(TestCase):
 
         self.assertIn('sheet_title', data)
         self.assertIsNone(data['sheet_title'])
+
+
+class TestDrawingNoteSerializerDisciplineFields(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('test2@example.com')
+        self.team = Team.objects.create(name="Test Team 2", slug="test-team-2")
+        self.project = Project.objects.create(
+            name="Test Project",
+            project_number="P-002",
+            team=self.team,
+            created_by=self.user
+        )
+        self.project_version = self.project.versions.first()
+        self.drawing_file = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name="Mechanical.pdf",
+            file_s3_key="drawings/test.pdf",
+            md5="abc123",
+        )
+        self.extraction = DrawingExtraction.objects.create(
+            drawing_file=self.drawing_file,
+            status=DrawingExtractionStatus.SUCCESS,
+        )
+        self.page = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=1,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+            sheet_discipline="mechanical",
+            sheet_discipline_confidence="high",
+        )
+        self.section = DrawingNoteSection.objects.create(
+            page=self.page,
+            header="GENERAL NOTES:",
+        )
+        self.note = DrawingNote.objects.create(
+            section=self.section,
+            note_number=1,
+            category="GENERAL NOTES",
+            text="Coordinate with electrical.",
+            disciplines=["mechanical", "electrical"],
+            discipline_confidence="high",
+        )
+
+    def test_serializer_includes_sheet_discipline(self):
+        """Test serializer includes sheet_discipline from page"""
+        serializer = DrawingNoteReadSerializer(self.note)
+        data = serializer.data
+
+        self.assertIn('sheet_discipline', data)
+        self.assertEqual(data['sheet_discipline'], "mechanical")
+
+    def test_serializer_includes_disciplines_array(self):
+        """Test serializer includes disciplines array from note"""
+        serializer = DrawingNoteReadSerializer(self.note)
+        data = serializer.data
+
+        self.assertIn('disciplines', data)
+        self.assertEqual(data['disciplines'], ["mechanical", "electrical"])
+
+    def test_serializer_handles_null_sheet_discipline(self):
+        """Test serializer handles null sheet_discipline"""
+        self.page.sheet_discipline = None
+        self.page.save()
+
+        serializer = DrawingNoteReadSerializer(self.note)
+        data = serializer.data
+
+        self.assertIn('sheet_discipline', data)
+        self.assertIsNone(data['sheet_discipline'])
+
+    def test_serializer_handles_empty_disciplines(self):
+        """Test serializer handles empty disciplines array"""
+        self.note.disciplines = []
+        self.note.save()
+
+        serializer = DrawingNoteReadSerializer(self.note)
+        data = serializer.data
+
+        self.assertIn('disciplines', data)
+        self.assertEqual(data['disciplines'], [])
