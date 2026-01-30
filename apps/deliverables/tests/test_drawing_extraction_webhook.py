@@ -398,3 +398,166 @@ class TestDrawingExtractionWebhookSheetFields(TestCase):
 
         self.assertIsNone(pages[2].sheet_number)
         self.assertIsNone(pages[2].sheet_title)
+
+
+class TestDrawingExtractionWebhookDisciplineFields(TestCase):
+    """Tests for discipline field extraction from webhook payload"""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user('test@example.com')
+        self.team = Team.objects.create(name="Test Team", slug="test-team")
+        self.project = Project.objects.create(
+            name="Test Project",
+            project_number="P-001",
+            team=self.team,
+            created_by=self.user
+        )
+        self.project_version = self.project.versions.first()
+        self.drawing_file = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name="Mechanical.pdf",
+            file_s3_key="drawings/test.pdf",
+            md5="abc123",
+        )
+        self.extraction = DrawingExtraction.objects.create(
+            drawing_file=self.drawing_file,
+            status=DrawingExtractionStatus.PROCESSING,
+        )
+        self.webhook_url = reverse('deliverables:drawing-extraction-webhook')
+
+    def test_sheet_discipline_extracted(self):
+        """Test that sheet_discipline and confidence are extracted from payload"""
+        from apps.deliverables.models import DrawingPage
+
+        payload = {
+            "event_id": "evt_disc_001",
+            "extraction_id": self.extraction.id,
+            "new_status": "SUCCESS",
+            "model_version": "v1.0",
+            "data": {
+                "total_pages": 1,
+                "pages": [
+                    {
+                        "page_number": 1,
+                        "extraction_status": "success",
+                        "page_type": "drawing",
+                        "sheet_number": "M-101",
+                        "sheet_discipline": "mechanical",
+                        "sheet_discipline_confidence": "high",
+                        "note_sections": [],
+                    }
+                ]
+            }
+        }
+
+        response = self.client.post(
+            self.webhook_url,
+            data=json.dumps(payload),
+            content_type='application/json'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        page = DrawingPage.objects.get(extraction=self.extraction)
+        self.assertEqual(page.sheet_discipline, "mechanical")
+        self.assertEqual(page.sheet_discipline_confidence, "high")
+
+    def test_note_disciplines_extracted(self):
+        """Test that note disciplines array and confidence are extracted"""
+        from apps.deliverables.models import DrawingNote
+
+        payload = {
+            "event_id": "evt_disc_002",
+            "extraction_id": self.extraction.id,
+            "new_status": "SUCCESS",
+            "model_version": "v1.0",
+            "data": {
+                "total_pages": 1,
+                "pages": [
+                    {
+                        "page_number": 1,
+                        "extraction_status": "success",
+                        "page_type": "drawing",
+                        "note_sections": [
+                            {
+                                "header": "GENERAL NOTES:",
+                                "notes": [
+                                    {
+                                        "note_number": 1,
+                                        "category": "GENERAL NOTES",
+                                        "text": "Coordinate with electrical and plumbing.",
+                                        "disciplines": ["mechanical", "electrical", "plumbing"],
+                                        "discipline_confidence": "high",
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+
+        response = self.client.post(
+            self.webhook_url,
+            data=json.dumps(payload),
+            content_type='application/json'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        note = DrawingNote.objects.get(section__page__extraction=self.extraction)
+        self.assertEqual(note.disciplines, ["mechanical", "electrical", "plumbing"])
+        self.assertEqual(note.discipline_confidence, "high")
+
+    def test_missing_discipline_fields_default_gracefully(self):
+        """Test webhook handles missing discipline fields gracefully"""
+        from apps.deliverables.models import DrawingPage, DrawingNote
+
+        payload = {
+            "event_id": "evt_disc_003",
+            "extraction_id": self.extraction.id,
+            "new_status": "SUCCESS",
+            "model_version": "v1.0",
+            "data": {
+                "total_pages": 1,
+                "pages": [
+                    {
+                        "page_number": 1,
+                        "extraction_status": "success",
+                        "page_type": "drawing",
+                        # No discipline fields
+                        "note_sections": [
+                            {
+                                "header": "NOTES:",
+                                "notes": [
+                                    {
+                                        "note_number": 1,
+                                        "category": "NOTES",
+                                        "text": "Some note",
+                                        # No discipline fields
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+
+        response = self.client.post(
+            self.webhook_url,
+            data=json.dumps(payload),
+            content_type='application/json'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        page = DrawingPage.objects.get(extraction=self.extraction)
+        self.assertIsNone(page.sheet_discipline)
+        self.assertIsNone(page.sheet_discipline_confidence)
+
+        note = DrawingNote.objects.get(section__page__extraction=self.extraction)
+        self.assertEqual(note.disciplines, [])
+        self.assertIsNone(note.discipline_confidence)

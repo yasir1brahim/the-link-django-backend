@@ -178,6 +178,8 @@ def _create_drawing_records(extraction, data):
             spec_content=page_data.get('spec_content'),
             sheet_number=page_data.get('sheet_number'),
             sheet_title=page_data.get('sheet_title'),
+            sheet_discipline=page_data.get('sheet_discipline'),
+            sheet_discipline_confidence=page_data.get('sheet_discipline_confidence'),
         ))
 
     created_pages = DrawingPage.objects.bulk_create(page_objects)
@@ -226,6 +228,8 @@ def _create_drawing_records(extraction, data):
                 unrotated_bounding_box=note_data.get('unrotated_bounding_box'),
                 source_blocks=note_data.get('source_blocks'),
                 drawing_references=note_data.get('drawing_references'),
+                disciplines=note_data.get('disciplines', []),
+                discipline_confidence=note_data.get('discipline_confidence'),
             ))
 
     DrawingNote.objects.bulk_create(note_objects)
