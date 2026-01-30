@@ -853,6 +853,38 @@ class DrawingPageExtractionStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
+class Discipline(models.TextChoices):
+    """NCS (US National CAD Standard) discipline designators"""
+    GENERAL = "general", "General"
+    HAZARDOUS_MATERIALS = "hazardous_materials", "Hazardous Materials"
+    SURVEY_MAPPING = "survey_mapping", "Survey/Mapping"
+    GEOTECHNICAL = "geotechnical", "Geotechnical"
+    CIVIL = "civil", "Civil"
+    LANDSCAPE = "landscape", "Landscape"
+    STRUCTURAL = "structural", "Structural"
+    ARCHITECTURAL = "architectural", "Architectural"
+    INTERIORS = "interiors", "Interiors"
+    EQUIPMENT = "equipment", "Equipment"
+    FIRE_PROTECTION = "fire_protection", "Fire Protection"
+    PLUMBING = "plumbing", "Plumbing"
+    PROCESS = "process", "Process"
+    MECHANICAL = "mechanical", "Mechanical"
+    ELECTRICAL = "electrical", "Electrical"
+    DISTRIBUTED_ENERGY = "distributed_energy", "Distributed Energy"
+    TELECOMMUNICATIONS = "telecommunications", "Telecommunications"
+    RESOURCE = "resource", "Resource"
+    OTHER = "other", "Other"
+    CONTRACTOR_SHOP = "contractor_shop", "Contractor/Shop"
+    OPERATIONS = "operations", "Operations"
+
+
+class DisciplineConfidence(models.TextChoices):
+    """Confidence level of discipline classification"""
+    HIGH = "high", "High"
+    MEDIUM = "medium", "Medium"
+    LOW = "low", "Low"
+
+
 class DrawingFile(BaseModel):
     """Uploaded drawing document (e.g., mechanical drawings PDF)"""
 
