@@ -423,10 +423,11 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         ).distinct().values('id', 'file_name')
 
         # Get unique sheet numbers and titles from the queryset
-        sheet_numbers_raw = list(queryset.values_list(
+        # Clear ordering with order_by() to ensure distinct() works correctly
+        sheet_numbers_raw = list(queryset.order_by().values_list(
             'section__page__sheet_number', flat=True
         ).distinct())
-        sheet_titles_raw = list(queryset.values_list(
+        sheet_titles_raw = list(queryset.order_by().values_list(
             'section__page__sheet_title', flat=True
         ).distinct())
 
@@ -437,7 +438,7 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         has_null_sheet_title = None in sheet_titles_raw
 
         all_filter_vals = {
-            'category': list(set(queryset.values_list('category', flat=True))),
+            'category': sorted(queryset.order_by().values_list('category', flat=True).distinct()),
             'drawing_files': [{'id': df['id'], 'name': df['file_name']} for df in drawing_files_qs],
             'sheet_numbers': sheet_numbers,
             'sheet_titles': sheet_titles,
