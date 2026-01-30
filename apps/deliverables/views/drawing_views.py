@@ -354,6 +354,16 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         if search:
             queryset = queryset.filter(text__icontains=search)
 
+        # Filter by sheet_discipline
+        sheet_discipline = self.request.query_params.get('sheet_discipline')
+        if sheet_discipline:
+            queryset = queryset.filter(section__page__sheet_discipline=sheet_discipline)
+
+        # Filter by disciplines (notes containing this discipline)
+        disciplines = self.request.query_params.get('disciplines')
+        if disciplines:
+            queryset = queryset.filter(disciplines__contains=[disciplines])
+
         # Apply sorting based on query parameters
         queryset = self.apply_sorting(queryset)
 
