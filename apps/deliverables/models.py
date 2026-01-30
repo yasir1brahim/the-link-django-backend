@@ -1005,6 +1005,20 @@ class DrawingPage(BaseModel):
         db_index=True,
         help_text="The sheet title from the drawing title block (e.g., 'FLOOR PLAN - DRAINAGE - MAIN')"
     )
+    sheet_discipline = models.CharField(
+        max_length=32,
+        choices=Discipline.choices,
+        null=True,
+        blank=True,
+        help_text="Primary discipline of the sheet based on sheet number prefix (e.g., M-101 → mechanical)",
+    )
+    sheet_discipline_confidence = models.CharField(
+        max_length=16,
+        choices=DisciplineConfidence.choices,
+        null=True,
+        blank=True,
+        help_text="Confidence level of the discipline classification",
+    )
 
     class Meta:
         ordering = ['page_number']
