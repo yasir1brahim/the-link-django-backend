@@ -342,7 +342,7 @@ class ProjectDetailsSerializer(BaseProjectSerializer):
                 default=8,
                 output_field=IntegerField(),
             )
-        ).order_by("status_order", "-created_at")
+        ).order_by("status_order", "name")
 
         # Apply version filter if present
         project_version_id = request.query_params.get("project_version_id") if request else None
