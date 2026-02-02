@@ -1011,6 +1011,7 @@ class DrawingPage(BaseModel):
         choices=Discipline.choices,
         null=True,
         blank=True,
+        db_index=True,
         help_text="Primary discipline of the sheet based on sheet number prefix (e.g., M-101 → mechanical)",
     )
     sheet_discipline_confidence = models.CharField(
