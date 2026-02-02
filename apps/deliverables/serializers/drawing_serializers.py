@@ -37,6 +37,9 @@ class DrawingNoteReadSerializer(serializers.ModelSerializer):
     page_extraction_status = serializers.CharField(source='section.page.extraction_status')
     page_extraction_failed = serializers.SerializerMethodField()
 
+    # Discipline fields
+    sheet_discipline = serializers.SerializerMethodField()
+
     class Meta:
         model = DrawingNote
         fields = [
@@ -65,6 +68,8 @@ class DrawingNoteReadSerializer(serializers.ModelSerializer):
             'unrotated_bounding_box',
             'page_extraction_status',
             'page_extraction_failed',
+            'sheet_discipline',
+            'disciplines',
         ]
 
     def get_drawing_file_url(self, obj):
@@ -78,3 +83,6 @@ class DrawingNoteReadSerializer(serializers.ModelSerializer):
 
     def get_page_extraction_failed(self, obj):
         return obj.section.page.extraction_status == DrawingPageExtractionStatus.FAILED
+
+    def get_sheet_discipline(self, obj):
+        return obj.section.page.sheet_discipline

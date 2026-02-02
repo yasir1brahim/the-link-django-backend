@@ -3,6 +3,7 @@ from enum import Enum
 from datetime import datetime, timedelta, timezone
 from typing import List
 
+from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
@@ -853,6 +854,38 @@ class DrawingPageExtractionStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
+class Discipline(models.TextChoices):
+    """NCS (US National CAD Standard) discipline designators"""
+    GENERAL = "general", "General"
+    HAZARDOUS_MATERIALS = "hazardous_materials", "Hazardous Materials"
+    SURVEY_MAPPING = "survey_mapping", "Survey/Mapping"
+    GEOTECHNICAL = "geotechnical", "Geotechnical"
+    CIVIL = "civil", "Civil"
+    LANDSCAPE = "landscape", "Landscape"
+    STRUCTURAL = "structural", "Structural"
+    ARCHITECTURAL = "architectural", "Architectural"
+    INTERIORS = "interiors", "Interiors"
+    EQUIPMENT = "equipment", "Equipment"
+    FIRE_PROTECTION = "fire_protection", "Fire Protection"
+    PLUMBING = "plumbing", "Plumbing"
+    PROCESS = "process", "Process"
+    MECHANICAL = "mechanical", "Mechanical"
+    ELECTRICAL = "electrical", "Electrical"
+    DISTRIBUTED_ENERGY = "distributed_energy", "Distributed Energy"
+    TELECOMMUNICATIONS = "telecommunications", "Telecommunications"
+    RESOURCE = "resource", "Resource"
+    OTHER = "other", "Other"
+    CONTRACTOR_SHOP = "contractor_shop", "Contractor/Shop"
+    OPERATIONS = "operations", "Operations"
+
+
+class DisciplineConfidence(models.TextChoices):
+    """Confidence level of discipline classification"""
+    HIGH = "high", "High"
+    MEDIUM = "medium", "Medium"
+    LOW = "low", "Low"
+
+
 class DrawingFile(BaseModel):
     """Uploaded drawing document (e.g., mechanical drawings PDF)"""
 
@@ -973,6 +1006,21 @@ class DrawingPage(BaseModel):
         db_index=True,
         help_text="The sheet title from the drawing title block (e.g., 'FLOOR PLAN - DRAINAGE - MAIN')"
     )
+    sheet_discipline = models.CharField(
+        max_length=32,
+        choices=Discipline.choices,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Primary discipline of the sheet based on sheet number prefix (e.g., M-101 → mechanical)",
+    )
+    sheet_discipline_confidence = models.CharField(
+        max_length=16,
+        choices=DisciplineConfidence.choices,
+        null=True,
+        blank=True,
+        help_text="Confidence level of the discipline classification",
+    )
 
     class Meta:
         ordering = ['page_number']
@@ -1020,6 +1068,19 @@ class DrawingNote(BaseModel):
     unrotated_bounding_box = models.JSONField(null=True, blank=True)
     source_blocks = models.JSONField(null=True, blank=True)
     drawing_references = models.JSONField(null=True, blank=True)
+    disciplines = ArrayField(
+        models.CharField(max_length=32, choices=Discipline.choices),
+        default=list,
+        blank=True,
+        help_text="List of disciplines this note relates to (can be multiple)",
+    )
+    discipline_confidence = models.CharField(
+        max_length=16,
+        choices=DisciplineConfidence.choices,
+        null=True,
+        blank=True,
+        help_text="Confidence level of the discipline classification",
+    )
 
     class Meta:
         ordering = ['note_number']

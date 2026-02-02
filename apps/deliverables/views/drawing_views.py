@@ -178,6 +178,8 @@ def _create_drawing_records(extraction, data):
             spec_content=page_data.get('spec_content'),
             sheet_number=page_data.get('sheet_number'),
             sheet_title=page_data.get('sheet_title'),
+            sheet_discipline=page_data.get('sheet_discipline'),
+            sheet_discipline_confidence=page_data.get('sheet_discipline_confidence'),
         ))
 
     created_pages = DrawingPage.objects.bulk_create(page_objects)
@@ -226,6 +228,8 @@ def _create_drawing_records(extraction, data):
                 unrotated_bounding_box=note_data.get('unrotated_bounding_box'),
                 source_blocks=note_data.get('source_blocks'),
                 drawing_references=note_data.get('drawing_references'),
+                disciplines=note_data.get('disciplines', []),
+                discipline_confidence=note_data.get('discipline_confidence'),
             ))
 
     DrawingNote.objects.bulk_create(note_objects)
@@ -350,6 +354,16 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         if search:
             queryset = queryset.filter(text__icontains=search)
 
+        # Filter by sheet_discipline
+        sheet_discipline = self.request.query_params.get('sheet_discipline')
+        if sheet_discipline:
+            queryset = queryset.filter(section__page__sheet_discipline=sheet_discipline)
+
+        # Filter by disciplines (notes containing this discipline)
+        disciplines = self.request.query_params.get('disciplines')
+        if disciplines:
+            queryset = queryset.filter(disciplines__contains=[disciplines])
+
         # Apply sorting based on query parameters
         queryset = self.apply_sorting(queryset)
 
@@ -437,6 +451,21 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         has_null_sheet_number = None in sheet_numbers_raw
         has_null_sheet_title = None in sheet_titles_raw
 
+        # Get unique discipline values from notes (flatten ArrayField)
+        disciplines_raw = queryset.values_list('disciplines', flat=True)
+        disciplines_set = set()
+        for disc_list in disciplines_raw:
+            if disc_list:
+                disciplines_set.update(disc_list)
+        disciplines = sorted(disciplines_set)
+
+        # Get unique sheet_discipline values from pages (use set to deduplicate)
+        sheet_disciplines_raw = set(queryset.values_list(
+            'section__page__sheet_discipline', flat=True
+        ))
+        sheet_disciplines = sorted([sd for sd in sheet_disciplines_raw if sd is not None])
+        has_null_sheet_discipline = None in sheet_disciplines_raw
+
         all_filter_vals = {
             'category': sorted(queryset.order_by().values_list('category', flat=True).distinct()),
             'drawing_files': [{'id': df['id'], 'name': df['file_name']} for df in drawing_files_qs],
@@ -444,6 +473,9 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
             'sheet_titles': sheet_titles,
             'has_null_sheet_number': has_null_sheet_number,
             'has_null_sheet_title': has_null_sheet_title,
+            'disciplines': disciplines,
+            'sheet_disciplines': sheet_disciplines,
+            'has_null_sheet_discipline': has_null_sheet_discipline,
         }
 
         # Get processing status

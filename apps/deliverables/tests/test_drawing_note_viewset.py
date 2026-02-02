@@ -781,3 +781,192 @@ class TestDrawingNoteViewSetSheetFields(TestCase):
 
         # Should only have header + 1 row
         self.assertEqual(worksheet.max_row, 2)
+
+
+class TestDrawingNoteViewSetDisciplineFiltering(TestCase):
+    """Tests for discipline filtering in DrawingNoteViewSet"""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user('test@example.com', password='testpass')
+        self.team = Team.objects.create(name="Test Team", slug="test-team")
+        self.project = Project.objects.create(
+            name="Test Project",
+            project_number="P-001",
+            team=self.team,
+            created_by=self.user
+        )
+        self.project_version = self.project.versions.first()
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role=ROLE_PROJECT_MEMBER
+        )
+
+        # Create drawing file
+        self.drawing_file = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name="Mixed.pdf",
+            file_s3_key="drawings/mixed.pdf",
+            md5="abc123",
+        )
+        self.extraction = DrawingExtraction.objects.create(
+            drawing_file=self.drawing_file,
+            status=DrawingExtractionStatus.SUCCESS,
+        )
+
+        # Create mechanical page with notes
+        self.mech_page = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=1,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+            sheet_discipline="mechanical",
+        )
+        self.mech_section = DrawingNoteSection.objects.create(
+            page=self.mech_page, header="MECHANICAL NOTES:"
+        )
+        self.mech_note = DrawingNote.objects.create(
+            section=self.mech_section,
+            note_number=1,
+            category="MECHANICAL",
+            text="Mechanical note",
+            disciplines=["mechanical"],
+        )
+
+        # Create electrical page with notes
+        self.elec_page = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=2,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+            sheet_discipline="electrical",
+        )
+        self.elec_section = DrawingNoteSection.objects.create(
+            page=self.elec_page, header="ELECTRICAL NOTES:"
+        )
+        self.elec_note = DrawingNote.objects.create(
+            section=self.elec_section,
+            note_number=1,
+            category="ELECTRICAL",
+            text="Electrical note",
+            disciplines=["electrical"],
+        )
+
+        # Create cross-discipline note (on mechanical page, references plumbing)
+        self.cross_note = DrawingNote.objects.create(
+            section=self.mech_section,
+            note_number=2,
+            category="COORDINATION",
+            text="Coordinate with plumbing",
+            disciplines=["mechanical", "plumbing"],
+        )
+
+        self.client.force_authenticate(user=self.user)
+
+    def test_filter_by_sheet_discipline(self):
+        """Test filtering by sheet_discipline"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'sheet_discipline': 'mechanical'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 2)  # Both notes on mech page
+        for note in response.data['results']:
+            self.assertEqual(note['sheet_discipline'], 'mechanical')
+
+    def test_filter_by_disciplines_contains(self):
+        """Test filtering notes that contain a specific discipline"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'disciplines': 'plumbing'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['text'], "Coordinate with plumbing")
+
+    def test_filter_by_disciplines_returns_cross_discipline_notes(self):
+        """Test that filtering by discipline returns notes with multiple disciplines"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url, {'disciplines': 'mechanical'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Should return mech_note and cross_note (both have mechanical in disciplines)
+        self.assertEqual(len(response.data['results']), 2)
+        texts = {r['text'] for r in response.data['results']}
+        self.assertIn("Mechanical note", texts)
+        self.assertIn("Coordinate with plumbing", texts)
+
+    def test_disciplines_field_in_response(self):
+        """Test that disciplines array appears in API response"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(len(response.data['results']) > 0)
+
+        # Find the cross-discipline note
+        cross_note = next(
+            r for r in response.data['results']
+            if r['text'] == "Coordinate with plumbing"
+        )
+        self.assertEqual(cross_note['disciplines'], ["mechanical", "plumbing"])
+
+    def test_all_filter_vals_includes_disciplines(self):
+        """Test that all_filter_vals includes deduplicated disciplines list"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        all_filter_vals = response.data['all_filter_vals']
+
+        # Should have disciplines key with deduplicated values
+        self.assertIn('disciplines', all_filter_vals)
+        disciplines = all_filter_vals['disciplines']
+        # Should include: electrical, mechanical, plumbing (sorted)
+        self.assertEqual(disciplines, ['electrical', 'mechanical', 'plumbing'])
+
+    def test_all_filter_vals_includes_sheet_disciplines(self):
+        """Test that all_filter_vals includes sheet_disciplines list"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        all_filter_vals = response.data['all_filter_vals']
+
+        # Should have sheet_disciplines key
+        self.assertIn('sheet_disciplines', all_filter_vals)
+        sheet_disciplines = all_filter_vals['sheet_disciplines']
+        # Should include: electrical, mechanical (sorted)
+        self.assertEqual(sheet_disciplines, ['electrical', 'mechanical'])
+
+    def test_all_filter_vals_has_null_sheet_discipline_flag(self):
+        """Test that has_null_sheet_discipline flag is correctly set"""
+        # Create page with null sheet_discipline
+        page_no_disc = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=3,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+            sheet_discipline=None,
+        )
+        section_no_disc = DrawingNoteSection.objects.create(
+            page=page_no_disc, header="NOTES:"
+        )
+        DrawingNote.objects.create(
+            section=section_no_disc,
+            note_number=1,
+            category="GENERAL",
+            text="Note without discipline",
+        )
+
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        all_filter_vals = response.data['all_filter_vals']
+
+        self.assertIn('has_null_sheet_discipline', all_filter_vals)
+        self.assertTrue(all_filter_vals['has_null_sheet_discipline'])
