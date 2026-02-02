@@ -450,6 +450,21 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
         has_null_sheet_number = None in sheet_numbers_raw
         has_null_sheet_title = None in sheet_titles_raw
 
+        # Get unique discipline values from notes (flatten ArrayField)
+        disciplines_raw = queryset.values_list('disciplines', flat=True)
+        disciplines_set = set()
+        for disc_list in disciplines_raw:
+            if disc_list:
+                disciplines_set.update(disc_list)
+        disciplines = sorted(disciplines_set)
+
+        # Get unique sheet_discipline values from pages (use set to deduplicate)
+        sheet_disciplines_raw = set(queryset.values_list(
+            'section__page__sheet_discipline', flat=True
+        ))
+        sheet_disciplines = sorted([sd for sd in sheet_disciplines_raw if sd is not None])
+        has_null_sheet_discipline = None in sheet_disciplines_raw
+
         all_filter_vals = {
             'category': list(set(queryset.values_list('category', flat=True))),
             'drawing_files': [{'id': df['id'], 'name': df['file_name']} for df in drawing_files_qs],
@@ -457,6 +472,9 @@ class DrawingNoteViewSet(viewsets.ReadOnlyModelViewSet):
             'sheet_titles': sheet_titles,
             'has_null_sheet_number': has_null_sheet_number,
             'has_null_sheet_title': has_null_sheet_title,
+            'disciplines': disciplines,
+            'sheet_disciplines': sheet_disciplines,
+            'has_null_sheet_discipline': has_null_sheet_discipline,
         }
 
         # Get processing status

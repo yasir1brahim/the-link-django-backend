@@ -912,3 +912,61 @@ class TestDrawingNoteViewSetDisciplineFiltering(TestCase):
             if r['text'] == "Coordinate with plumbing"
         )
         self.assertEqual(cross_note['disciplines'], ["mechanical", "plumbing"])
+
+    def test_all_filter_vals_includes_disciplines(self):
+        """Test that all_filter_vals includes deduplicated disciplines list"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        all_filter_vals = response.data['all_filter_vals']
+
+        # Should have disciplines key with deduplicated values
+        self.assertIn('disciplines', all_filter_vals)
+        disciplines = all_filter_vals['disciplines']
+        # Should include: electrical, mechanical, plumbing (sorted)
+        self.assertEqual(disciplines, ['electrical', 'mechanical', 'plumbing'])
+
+    def test_all_filter_vals_includes_sheet_disciplines(self):
+        """Test that all_filter_vals includes sheet_disciplines list"""
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        all_filter_vals = response.data['all_filter_vals']
+
+        # Should have sheet_disciplines key
+        self.assertIn('sheet_disciplines', all_filter_vals)
+        sheet_disciplines = all_filter_vals['sheet_disciplines']
+        # Should include: electrical, mechanical (sorted)
+        self.assertEqual(sheet_disciplines, ['electrical', 'mechanical'])
+
+    def test_all_filter_vals_has_null_sheet_discipline_flag(self):
+        """Test that has_null_sheet_discipline flag is correctly set"""
+        # Create page with null sheet_discipline
+        page_no_disc = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=3,
+            page_type=DrawingPageType.DRAWING,
+            extraction_status=DrawingPageExtractionStatus.SUCCESS,
+            sheet_discipline=None,
+        )
+        section_no_disc = DrawingNoteSection.objects.create(
+            page=page_no_disc, header="NOTES:"
+        )
+        DrawingNote.objects.create(
+            section=section_no_disc,
+            note_number=1,
+            category="GENERAL",
+            text="Note without discipline",
+        )
+
+        url = reverse('deliverables:drawing-note-list', kwargs={'project_id': self.project.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        all_filter_vals = response.data['all_filter_vals']
+
+        self.assertIn('has_null_sheet_discipline', all_filter_vals)
+        self.assertTrue(all_filter_vals['has_null_sheet_discipline'])

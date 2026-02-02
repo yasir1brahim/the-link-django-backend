@@ -97,6 +97,20 @@ This will return all notes where the `disciplines` array contains `"electrical"`
 
 ---
 
+## New Filter Options in `all_filter_vals`
+
+The `all_filter_vals` object now includes discipline options for populating filter dropdowns:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `disciplines` | `string[]` | Sorted, deduplicated list of all discipline codes found in notes |
+| `sheet_disciplines` | `string[]` | Sorted, deduplicated list of all sheet disciplines found in pages |
+| `has_null_sheet_discipline` | `boolean` | True if any page has `sheet_discipline: null` |
+
+Use these to populate discipline filter dropdowns in the UI.
+
+---
+
 ## Sample Requests & Responses
 
 ### Request: List All Notes
@@ -168,7 +182,10 @@ Authorization: Bearer <token>
     "sheet_numbers": ["E-101", "M-101", "M-102"],
     "sheet_titles": ["ELECTRICAL PLAN - LEVEL 1", "MECHANICAL FLOOR PLAN - LEVEL 1"],
     "has_null_sheet_number": false,
-    "has_null_sheet_title": false
+    "has_null_sheet_title": false,
+    "disciplines": ["electrical", "fire_protection", "general", "mechanical"],
+    "sheet_disciplines": ["electrical", "mechanical"],
+    "has_null_sheet_discipline": false
   },
   "total_count": 150,
   "processing_status": {
