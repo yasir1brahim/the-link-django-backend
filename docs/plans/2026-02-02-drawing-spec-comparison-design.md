@@ -32,7 +32,7 @@ User triggers comparison
 │ 6. Gather DrawingNotes          │
 │ 7. Gather SpecSections          │
 │ 8. Upload payload to S3         │
-│ 9. Invoke lambda (IAM auth)     │
+│ 9. Invoke lambda                │
 │10. Set status: PROCESSING       │
 │    (or FAILED if invoke fails)  │
 └─────────────────────────────────┘
@@ -41,7 +41,6 @@ User triggers comparison
 ┌─────────────────────────────────┐
 │  Lambda processes comparison    │
 │  Posts result to webhook        │
-│  (includes HMAC signature)      │
 │  (only sends terminal status)   │
 └─────────────────────────────────┘
         │
@@ -49,9 +48,8 @@ User triggers comparison
 ┌─────────────────────────────────┐
 │  POST /webhooks/spec-comparison/│
 ├─────────────────────────────────┤
-│ 1. Verify HMAC signature        │
-│ 2. Validate payload via serial. │
-│ 3. select_for_update comparison │
+│ 1. Validate payload via serial. │
+│ 2. select_for_update comparison │
 │ 4. Create webhook event (unique)│
 │ 5. Update SpecComparison status │
 │ 6. If SUCCESS/PARTIAL_SUCCESS:  │
@@ -266,11 +264,7 @@ Initiates a new spec comparison for the project.
 
 Receives comparison results from the lambda.
 
-**Authentication:** HMAC signature verification (see Security section)
-
-**Request Headers:**
-- `X-Signature`: HMAC-SHA256 signature (hex-encoded)
-- `X-Timestamp`: Unix timestamp of request (for replay protection)
+**Authentication:** AllowAny (lambda callback)
 
 **Request Body:** (from lambda - only terminal statuses)
 ```json
@@ -419,111 +413,6 @@ Lists comparison runs for history/debugging.
 }
 ```
 
-## Security
-
-### Lambda Invocation Authentication
-
-The Lambda function URL must be protected with IAM authentication:
-
-1. **Lambda Configuration:** Set `AuthType: AWS_IAM` on the function URL
-2. **Backend IAM Role:** The Django backend's IAM role needs `lambda:InvokeFunctionUrl` permission
-3. **Invocation:** Use SigV4 signing when calling the Lambda URL (via `boto3` or `requests-aws4auth`)
-4. **S3 Bucket Policy:** Restrict the payload S3 bucket to only allow read access from the Lambda's execution role
-
-```python
-# Example invocation with SigV4
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
-import requests
-
-def invoke_lambda_with_sigv4(payload, lambda_url):
-    session = boto3.Session()
-    credentials = session.get_credentials()
-
-    request = AWSRequest(method='POST', url=lambda_url, data=json.dumps(payload))
-    SigV4Auth(credentials, 'lambda', 'us-east-1').add_auth(request)
-
-    response = requests.post(
-        lambda_url,
-        headers=dict(request.headers),
-        data=request.body,
-        timeout=5
-    )
-    return response
-```
-
-### Webhook HMAC Authentication
-
-The webhook endpoint verifies requests using HMAC-SHA256 signatures to prevent spoofing.
-
-**Shared Secret:**
-```python
-# settings.py
-SPEC_COMPARISON_WEBHOOK_SECRET = env("SPEC_COMPARISON_WEBHOOK_SECRET")
-```
-
-**Lambda Configuration:** The webhook secret is configured as a Lambda environment variable (not passed in the invocation payload) to prevent accidental logging.
-
-**Signature Format (canonical):**
-- Message: `{timestamp}.{raw_body_bytes}` (timestamp as string, dot separator, raw UTF-8 body bytes)
-- Algorithm: HMAC-SHA256
-- Output: Lowercase hex encoding
-
-**CRITICAL: Byte-exact signing requirement:**
-The lambda MUST sign the exact bytes it sends in the HTTP body. If using `requests.post(json=payload)`, the body may be re-serialized. Instead:
-
-```python
-# Lambda: Correct signing approach
-body = json.dumps(payload, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
-timestamp = str(int(time.time()))
-message = f"{timestamp}.".encode('utf-8') + body
-signature = hmac.new(secret.encode('utf-8'), message, hashlib.sha256).hexdigest()
-
-response = requests.post(
-    callback_url,
-    data=body,  # Use pre-serialized body
-    headers={
-        'Content-Type': 'application/json',
-        'X-Signature': signature,
-        'X-Timestamp': timestamp,
-    }
-)
-```
-
-**Backend Verification Logic:**
-```python
-import hmac
-import hashlib
-import time
-
-def verify_webhook_signature(request):
-    signature = request.headers.get('X-Signature')
-    timestamp = request.headers.get('X-Timestamp')
-
-    if not signature or not timestamp:
-        return False
-
-    # Reject requests older than 5 minutes (replay protection)
-    try:
-        ts = int(timestamp)
-    except ValueError:
-        return False
-
-    if abs(time.time() - ts) > 300:
-        return False
-
-    # Compute expected signature using raw body bytes
-    raw_body = request.body  # bytes
-    message = f"{timestamp}.".encode('utf-8') + raw_body
-    expected = hmac.new(
-        settings.SPEC_COMPARISON_WEBHOOK_SECRET.encode('utf-8'),
-        message,
-        hashlib.sha256
-    ).hexdigest()  # lowercase hex
-
-    return hmac.compare_digest(signature.lower(), expected)
-```
-
 ## Feature Flag & Settings
 
 ### Feature Flag
@@ -553,9 +442,6 @@ SPEC_COMPARISON_LAMBDA_FUNCTION_URL = env(
 )
 
 BACKEND_SPEC_COMPARISON_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/webhooks/spec-comparison/"
-
-# Webhook secret - also configured as Lambda env var (not passed in payload)
-SPEC_COMPARISON_WEBHOOK_SECRET = env("SPEC_COMPARISON_WEBHOOK_SECRET")
 ```
 
 ## Lambda Payload Construction
@@ -609,7 +495,7 @@ def trigger_spec_comparison(project, project_version, user):
         )
         comparison.payload_s3_key = payload_s3_key
 
-        # Invoke lambda with S3 pointer using SigV4 auth
+        # Invoke lambda with S3 pointer
         lambda_payload = {
             "payload_s3_uri": f"s3://{settings.S3_BUCKET}/{payload_s3_key}",
             "callback_url": settings.BACKEND_SPEC_COMPARISON_CALLBACK_URL,
@@ -617,7 +503,7 @@ def trigger_spec_comparison(project, project_version, user):
             "event_id": event_id,
         }
 
-        invoke_lambda_with_sigv4(lambda_payload, settings.SPEC_COMPARISON_LAMBDA_FUNCTION_URL)
+        invoke_lambda(lambda_payload, settings.SPEC_COMPARISON_LAMBDA_FUNCTION_URL)
 
         # Update to PROCESSING on successful invocation
         comparison.status = SpecComparisonStatus.PROCESSING
@@ -788,16 +674,9 @@ def safe_int(value: str) -> int | None:
         return None
 
 
-from rest_framework.authentication import BaseAuthentication
-
 @api_view(['POST'])
-@authentication_classes([])  # Disable DRF auth (including SessionAuthentication CSRF)
 @permission_classes([AllowAny])
 def spec_comparison_webhook(request):
-    # Verify HMAC signature
-    if not verify_webhook_signature(request):
-        return Response({"error": "Invalid signature"}, status=401)
-
     # Validate payload
     serializer = SpecComparisonWebhookSerializer(data=request.data)
     if not serializer.is_valid():
@@ -909,10 +788,10 @@ def spec_comparison_webhook(request):
 |------|---------|
 | `apps/deliverables/models.py` | Add `SpecComparisonStatus`, `SkipReason`, `SpecComparison`, `SpecComparisonWebhookEvent`, `SpecConflict`, `SkippedNote` with indexes |
 | `apps/deliverables/serializers/spec_comparison_serializers.py` | New file with read serializers and webhook payload serializers |
-| `apps/deliverables/views/spec_comparison_views.py` | New file with views including HMAC verification and SigV4 invocation |
+| `apps/deliverables/views/spec_comparison_views.py` | New file with views |
 | `apps/deliverables/urls.py` | Add routes for new endpoints |
 | `apps/utils/feature_flags.py` | Add `is_drawing_spec_comparison_active()` |
-| `the_link/settings.py` | Add feature flag name, lambda URL, webhook secret settings |
+| `the_link/settings.py` | Add feature flag name and lambda URL settings |
 | `apps/deliverables/admin.py` | Register new models |
 | `apps/deliverables/migrations/XXXX_add_spec_comparison_models.py` | New migration with indexes |
 
@@ -935,9 +814,6 @@ def spec_comparison_webhook(request):
 **Utilities:**
 - Test `parse_s3_uri_to_key` with various URI formats
 - Test `safe_int` with valid/invalid inputs
-- Test HMAC signature verification with valid/invalid signatures
-- Test HMAC with non-ASCII characters in payload (Unicode note text)
-- Test HMAC with byte-exact body matching
 
 ### API Tests
 
@@ -952,10 +828,6 @@ def spec_comparison_webhook(request):
 - Test lambda invocation failure sets FAILED status with completed_at
 
 **Webhook Endpoint:**
-- Test valid HMAC signature accepted
-- Test invalid HMAC signature returns 401
-- Test stale timestamp (>5 min) returns 401
-- Test missing X-Signature header returns 401
 - Test valid payload processing returns 200
 - Test invalid payload returns 400
 - Test invalid spec_source_file format (non-s3://) returns 400
@@ -968,8 +840,6 @@ def spec_comparison_webhook(request):
 - Test note FK linking works when note exists
 - Test note FK is null when note ID not found
 - Test non-integer note_id is handled gracefully (stored in note_id_from_lambda, FK is null)
-- Test HMAC verification with non-ASCII payload
-- Test webhook succeeds without CSRF token (authentication_classes=[] bypasses SessionAuthentication)
 
 **Read Endpoints:**
 - Test authentication required
@@ -985,7 +855,6 @@ def spec_comparison_webhook(request):
 
 - Test full flow: trigger → lambda invocation → webhook → read results
 - Test with realistic payload sizes (many notes/specs)
-- Test Lambda IAM authentication (SigV4)
 
 ## Edge Cases
 
@@ -1004,8 +873,6 @@ def spec_comparison_webhook(request):
 | Note ID not found | Store conflict/skipped note with null FK, keep note_id_from_lambda |
 | Note ID not an integer | Safely skip FK linking, store note_id_from_lambda |
 | Invalid spec_source_file format | Return 400 Bad Request (must be s3:// URI) |
-| Invalid HMAC signature | Return 401 Unauthorized |
-| Stale timestamp (>5 min) | Return 401 Unauthorized (replay protection) |
 | comparison_id doesn't belong to project | Return 404 on read endpoints |
 | No successful comparisons | Return empty results with null comparison metadata |
 | Only FAILED comparisons exist | "Latest" returns empty (FAILED excluded) |
@@ -1025,56 +892,18 @@ def spec_comparison_webhook(request):
 
 ---
 
-**v1**: Addressed review feedback:
-- Added HMAC signature verification for webhook security
+**Design reviewed through iterative external AI review process. Key design decisions:**
 - Made event_id server-generated and required; validates match on webhook
-- Added idempotency via terminal status check (prevents duplicate results on retries)
+- Added idempotency via SpecComparisonWebhookEvent table + select_for_update (race-safe)
 - Added status transitions: PENDING → PROCESSING on invoke, FAILED on invoke error
 - Added S3 payload upload to handle large payloads (>6MB limit)
 - Refined extraction query to select latest successful extraction per drawing file
 - Added webhook payload validation via serializer
-- Enforced project scoping on read endpoints; defined "latest" as latest completed
+- Enforced project scoping on read endpoints; defined "latest" as latest successful
 - Added database indexes on comparison, conflict, and skipped note tables
 - Set FK on_delete=SET_NULL for note references
 - Documented spec_file_url as computed presigned URL (not stored)
-
-**v2**: Addressed review feedback:
-- Added Prerequisites section clarifying discipline fields from develop branch
-- Added SpecComparisonWebhookEvent model for race-safe idempotency (matches DrawingExtractionWebhookEvent pattern)
-- Changed to select_for_update + IntegrityError handling for concurrent webhook protection
-- Clarified models use integer IDs (Django default) not UUIDs
-- Added optional project_version_id parameter; defaults to project.current_version
-- Added pre-validation of notes/specs before creating comparison
-- Added comprehensive Test Plan section
-- Removed webhook secret from lambda payload (use Lambda env var instead)
-- Clarified lambda only sends terminal statuses
-
-**v3**: Addressed review feedback:
-- Added Lambda invocation authentication section (SigV4/IAM auth required)
-- Fixed webhook signature canonicalization to use raw bytes with explicit UTF-8 encoding
-- Added safe_int() helper for note FK lookup to handle non-integer IDs gracefully
-- Standardized terminology: spec file vs SpecSection, spec_file_s3_key storage format
-- Added index on (project, status, completed_at) for latest queries
-- Set completed_at on FAILED status (all terminal states get completed_at)
-- Clarified "latest" excludes FAILED comparisons (only SUCCESS/PARTIAL_SUCCESS)
-- Removed payload storage from SpecComparisonWebhookEvent to avoid DB bloat
-- Added batch_size=500 to bulk_create calls for large result sets
-- Added parse_s3_uri_to_key helper for consistent S3 key storage
-- Added test cases for non-ASCII payloads and invalid note IDs
-
-**v4**: Addressed review feedback:
-- Documented byte-exact HMAC signing requirement for lambda (use pre-serialized body, not json= param)
-- FAILED status now only updates metadata; conflicts/skipped notes NOT stored for failed runs
-- Added memory considerations note for large projects; suggested future streaming optimization
-- Added payload lifecycle note: recommend S3 lifecycle policy or cleanup after terminal webhook
-- Added spec_source_file serializer validation to enforce s3:// URI format contract
-- Updated parse_s3_uri_to_key to only accept validated s3:// URIs
-- Added test case for invalid spec_source_file format
-
-**v5**: Addressed review feedback:
-- Added `@authentication_classes([])` to webhook to bypass DRF SessionAuthentication CSRF checks
-- Strengthened spec_source_file validation to require full s3://bucket/key format (rejects s3://bucket, s3://bucket/, s3:///key)
-- Added explicit `ordering = ['id']` to SpecConflict and SkippedNote models for deterministic pagination
+- Added explicit model ordering for deterministic pagination
+- FAILED status only updates metadata; conflicts/skipped notes NOT stored for failed runs
+- Strengthened spec_source_file validation to require full s3://bucket/key format
 - Added 400 handling when project.current_version is None
-- Added note about memoizing presigned URLs for large result sets
-- Added test cases for: CSRF bypass, malformed S3 URIs, pagination stability, missing current_version
