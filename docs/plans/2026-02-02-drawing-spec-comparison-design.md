@@ -4,6 +4,15 @@
 
 This feature enables comparison of drawing notes against project specifications to detect conflicts. When the `drawing_spec_comparison` feature flag is active, users can trigger a project-wide comparison that invokes an AWS Lambda function. The lambda analyzes notes against specs and posts results back to a webhook, where we store detected conflicts and skipped notes for retrieval via read endpoints.
 
+## Prerequisites
+
+This feature depends on the discipline classification feature (merged in PR #238 `note-discipline`), which adds:
+- `DrawingNote.disciplines` - ArrayField of discipline values
+- `DrawingNote.discipline_confidence` - confidence level
+- `DrawingPage.sheet_discipline` - single discipline from sheet number prefix
+
+Ensure the codebase is based on `develop` branch with these fields available.
+
 ## Data Flow
 
 ```
@@ -15,28 +24,39 @@ User triggers comparison
 │  trigger-spec-comparison/       │
 ├─────────────────────────────────┤
 │ 1. Check feature flag           │
-│ 2. Create SpecComparison        │
+│ 2. Resolve project_version      │
+│ 3. Validate notes/specs exist   │
+│ 4. Create SpecComparison        │
 │    (status: PENDING)            │
-│ 3. Gather DrawingNotes          │
-│ 4. Gather SpecSections          │
-│ 5. Build payload, invoke lambda │
+│ 5. Generate event_id            │
+│ 6. Gather DrawingNotes          │
+│ 7. Gather SpecSections          │
+│ 8. Upload payload to S3         │
+│ 9. Invoke lambda (IAM auth)     │
+│10. Set status: PROCESSING       │
+│    (or FAILED if invoke fails)  │
 └─────────────────────────────────┘
         │
         ▼ (async)
 ┌─────────────────────────────────┐
 │  Lambda processes comparison    │
 │  Posts result to webhook        │
+│  (includes HMAC signature)      │
+│  (only sends terminal status)   │
 └─────────────────────────────────┘
         │
         ▼
 ┌─────────────────────────────────┐
 │  POST /webhooks/spec-comparison/│
 ├─────────────────────────────────┤
-│ 1. Idempotency check (event_id) │
-│ 2. Update SpecComparison status │
-│ 3. Store SpecConflict records   │
-│ 4. Store SkippedNote records    │
-│ 5. Update summary counts        │
+│ 1. Verify HMAC signature        │
+│ 2. Validate payload via serial. │
+│ 3. select_for_update comparison │
+│ 4. Create webhook event (unique)│
+│ 5. Update SpecComparison status │
+│ 6. If SUCCESS/PARTIAL_SUCCESS:  │
+│    Store conflicts & skipped    │
+│ 7. Update summary counts        │
 └─────────────────────────────────┘
         │
         ▼
@@ -45,11 +65,14 @@ User triggers comparison
 │  spec-conflicts/                │
 ├─────────────────────────────────┤
 │ Returns conflicts from latest   │
-│ comparison (or by comparison_id)│
+│ successful comparison           │
+│ (or by comparison_id if valid)  │
 └─────────────────────────────────┘
 ```
 
 ## Data Models
+
+All new models use integer primary keys (Django default) to match existing deliverables models. `BaseModel` provides `created_at` and `updated_at` timestamps.
 
 ### SpecComparisonStatus (Enum)
 
@@ -78,21 +101,40 @@ Tracks each comparison run (similar to `DrawingExtraction`).
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | UUID | Primary key (from BaseModel) |
+| `id` | Integer | Primary key (Django default) |
 | `project` | FK(Project) | Project being compared |
 | `project_version` | FK(ProjectVersion) | Version being compared |
-| `triggered_by` | FK(User) | User who initiated comparison |
+| `triggered_by` | FK(User, on_delete=SET_NULL, null=True) | User who initiated comparison |
 | `status` | CharField | SpecComparisonStatus choices |
+| `event_id` | CharField(max_length=64, unique=True) | Server-generated event ID for idempotency |
 | `started_at` | DateTimeField | When processing began (nullable) |
-| `completed_at` | DateTimeField | When processing finished (nullable) |
-| `notes_processed` | IntegerField | Count of notes analyzed |
-| `notes_skipped` | IntegerField | Count of notes skipped |
-| `specs_processed` | IntegerField | Count of spec files processed |
-| `notes_with_mismatch` | IntegerField | Notes where discipline differs from sheet |
+| `completed_at` | DateTimeField | When processing finished - set for all terminal states including FAILED (nullable) |
+| `notes_processed` | IntegerField(default=0) | Count of notes analyzed |
+| `notes_skipped` | IntegerField(default=0) | Count of notes skipped |
+| `spec_files_processed` | IntegerField(default=0) | Count of spec files (SpecSection PDFs) processed |
+| `notes_with_mismatch` | IntegerField(default=0) | Notes where discipline differs from sheet |
 | `error_message` | TextField | Error details on failure (nullable) |
-| `event_id` | CharField | Webhook event ID for idempotency (unique, nullable) |
+| `payload_s3_key` | CharField(max_length=1024) | S3 key for uploaded payload (nullable) |
 | `created_at` | DateTimeField | From BaseModel |
 | `updated_at` | DateTimeField | From BaseModel |
+
+**Indexes:**
+- `(project, project_version, created_at)` - For finding comparisons by project
+- `(project, status, completed_at)` - For finding latest successful comparison
+
+### SpecComparisonWebhookEvent
+
+Tracks webhook deliveries for idempotency (mirrors `DrawingExtractionWebhookEvent` pattern).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Primary key |
+| `comparison` | FK(SpecComparison, on_delete=CASCADE) | Parent comparison |
+| `event_id` | CharField(max_length=64, unique=True) | Event ID from webhook payload |
+| `new_status` | CharField(max_length=32) | Status reported by webhook |
+| `created_at` | DateTimeField | From BaseModel |
+
+**Note:** Full payload is NOT stored to avoid DB bloat. If debugging is needed, payloads can be retrieved from CloudWatch logs.
 
 ### SpecConflict
 
@@ -100,19 +142,24 @@ Stores each detected conflict with full fidelity for future UI highlighting.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | UUID | Primary key |
-| `comparison` | FK(SpecComparison) | Parent comparison run |
-| `note` | FK(DrawingNote) | Link to source note (nullable) |
-| `note_id_from_lambda` | CharField | Note ID as sent to/from lambda |
+| `id` | Integer | Primary key |
+| `comparison` | FK(SpecComparison, on_delete=CASCADE) | Parent comparison run |
+| `note` | FK(DrawingNote, on_delete=SET_NULL, null=True) | Link to source note |
+| `note_id_from_lambda` | CharField(max_length=64) | Note ID as sent to/from lambda |
 | `note_text` | TextField | The note text content |
 | `spec_text` | TextField | Conflicting spec text |
-| `spec_source_file` | CharField | S3 URI of spec PDF |
+| `spec_file_s3_key` | CharField(max_length=1024) | S3 key of spec PDF (without bucket prefix) |
 | `spec_page_number` | IntegerField | 1-indexed page number |
-| `spec_masterformat_number` | CharField | MasterFormat number (e.g., "220500") |
+| `spec_masterformat_number` | CharField(max_length=32) | MasterFormat number (e.g., "220500") |
 | `confidence` | FloatField | Confidence score (0-1) |
 | `reason` | TextField | Explanation of the conflict |
-| `pdf_locations` | JSONField | Array of bounding boxes for highlighting |
+| `pdf_locations` | JSONField(default=list) | Array of bounding boxes for highlighting |
 | `created_at` | DateTimeField | From BaseModel |
+
+**Indexes:**
+- `(comparison)` - For fetching all conflicts for a comparison
+
+**Ordering:** `class Meta: ordering = ['id']` for deterministic pagination.
 
 **pdf_locations schema:**
 ```json
@@ -133,15 +180,31 @@ Stores why notes were not analyzed.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | UUID | Primary key |
-| `comparison` | FK(SpecComparison) | Parent comparison run |
-| `note` | FK(DrawingNote) | Link to source note (nullable) |
-| `note_id_from_lambda` | CharField | Note ID as sent to/from lambda |
-| `disciplines` | JSONField | Original disciplines array from note |
-| `sheet_discipline` | CharField | Sheet's discipline (nullable) |
-| `reason` | CharField | SkipReason choices |
+| `id` | Integer | Primary key |
+| `comparison` | FK(SpecComparison, on_delete=CASCADE) | Parent comparison run |
+| `note` | FK(DrawingNote, on_delete=SET_NULL, null=True) | Link to source note |
+| `note_id_from_lambda` | CharField(max_length=64) | Note ID as sent to/from lambda |
+| `disciplines` | JSONField(default=list) | Original disciplines array from note |
+| `sheet_discipline` | CharField(max_length=32) | Sheet's discipline (nullable) |
+| `reason` | CharField(max_length=32) | SkipReason choices |
 | `detail` | TextField | Additional context (nullable) |
 | `created_at` | DateTimeField | From BaseModel |
+
+**Indexes:**
+- `(comparison, reason)` - For filtering skipped notes by reason
+
+**Ordering:** `class Meta: ordering = ['id']` for deterministic pagination.
+
+## Terminology
+
+To avoid confusion between data sources and processing units:
+
+| Term | Meaning |
+|------|---------|
+| **SpecSection** | Django model representing a spec PDF file with its MasterFormat classification |
+| **spec file** | The actual PDF file (stored in S3, referenced by `SpecSection.file_s3_key`) |
+| **spec_files_processed** | Count of unique spec PDFs downloaded and analyzed by the lambda |
+| **spec_file_s3_key** | S3 key (path) to the spec PDF, without `s3://bucket/` prefix |
 
 ## API Endpoints
 
@@ -155,16 +218,32 @@ Initiates a new spec comparison for the project.
 
 **Feature Flag:** `drawing_spec_comparison` must be active
 
-**Request Body:** None required (project-wide automatic)
+**Request Body:** (optional)
+```json
+{
+    "project_version_id": 123  // Optional: defaults to latest active version
+}
+```
+
+**Version Selection:**
+- If `project_version_id` provided, use that version (validate it belongs to project)
+- Otherwise, use the project's current active version (`project.current_version`)
+- If `project.current_version` is None, return 400 with message "Project has no active version"
+
+**Pre-validation:**
+- Count notes and specs BEFORE creating comparison
+- Return 400 if either count is zero
 
 **Response (201 Created):**
 ```json
 {
-    "id": "uuid",
-    "status": "PENDING",
+    "id": 123,
+    "status": "PROCESSING",
+    "event_id": "550e8400-e29b-41d4-a716-446655440000",
     "created_at": "2026-02-02T10:30:00Z",
+    "started_at": "2026-02-02T10:30:01Z",
     "triggered_by": {
-        "id": "uuid",
+        "id": 456,
         "display_name": "John Doe"
     }
 }
@@ -172,8 +251,14 @@ Initiates a new spec comparison for the project.
 
 **Error Responses:**
 - `403 Forbidden` - Feature flag not active
-- `400 Bad Request` - No notes or specs in project
+- `400 Bad Request` - No notes or specs in project, invalid project_version_id, or project has no active version
 - `404 Not Found` - Project not found
+
+**Implementation Notes:**
+- Validate notes/specs exist before creating comparison
+- Generate `event_id` server-side (UUID) before invoking lambda
+- After successful lambda invocation, set `status=PROCESSING` and `started_at=now()`
+- If lambda invocation fails, set `status=FAILED`, `error_message`, and `completed_at=now()`
 
 ### Webhook Endpoint
 
@@ -181,39 +266,63 @@ Initiates a new spec comparison for the project.
 
 Receives comparison results from the lambda.
 
-**Authentication:** AllowAny (lambda callback)
+**Authentication:** HMAC signature verification (see Security section)
 
-**Request Body:** (from lambda)
+**Request Headers:**
+- `X-Signature`: HMAC-SHA256 signature (hex-encoded)
+- `X-Timestamp`: Unix timestamp of request (for replay protection)
+
+**Request Body:** (from lambda - only terminal statuses)
 ```json
 {
-    "event_id": "unique-event-id",
-    "comparison_id": "uuid",
+    "event_id": "550e8400-e29b-41d4-a716-446655440000",
+    "comparison_id": 123,
     "status": "SUCCESS",
     "conflicts": [...],
     "skipped_notes": [...],
     "notes_processed": 150,
     "notes_skipped": 12,
-    "specs_processed": 8,
+    "spec_files_processed": 8,
     "notes_with_mismatch": 5,
     "error_message": null
 }
 ```
 
+**Note:** Lambda only sends terminal statuses (SUCCESS, PARTIAL_SUCCESS, FAILED). It does not send intermediate PROCESSING updates.
+
 **Response:** `200 OK`
 
-**Idempotency:** Duplicate `event_id` values are ignored (return 200 OK).
+**Validation:**
+- `event_id` is required and must be non-empty
+- `status` must be a valid terminal `SpecComparisonStatus` value
+- Payload validated via `SpecComparisonWebhookSerializer`
+- `spec_source_file` in conflicts must be `s3://` URI format (validated)
+
+**Idempotency (race-safe):**
+- Use `select_for_update` on comparison within transaction
+- Create `SpecComparisonWebhookEvent` with unique `event_id`
+- If `IntegrityError` on event creation, return 200 OK (duplicate)
+- This pattern matches `DrawingExtractionWebhookEvent`
+
+**Data Storage:**
+- Conflicts and skipped notes are ONLY stored for SUCCESS and PARTIAL_SUCCESS statuses
+- FAILED status only updates comparison metadata and error_message (no partial data)
 
 ### Read Conflicts Endpoint
 
 **`GET /api/deliverables/projects/{project_id}/spec-conflicts/`**
 
-Returns conflicts from the latest comparison (or filtered by comparison_id).
+Returns conflicts from the latest **successful** comparison (SUCCESS or PARTIAL_SUCCESS). FAILED comparisons are excluded from "latest" selection.
 
 **Authentication:** Required
 
 **Query Parameters:**
-- `comparison_id` (optional) - Filter to specific comparison
+- `comparison_id` (optional) - Filter to specific comparison (must belong to this project)
 - `page`, `page_size` - Pagination
+
+**Scoping:**
+- If `comparison_id` provided, verify it belongs to `project_id` (return 404 if not)
+- "Latest" means latest comparison with SUCCESS or PARTIAL_SUCCESS status, ordered by `completed_at` DESC
 
 **Response (200 OK):**
 ```json
@@ -222,17 +331,17 @@ Returns conflicts from the latest comparison (or filtered by comparison_id).
     "next": "...",
     "previous": null,
     "comparison": {
-        "id": "uuid",
+        "id": 123,
         "status": "SUCCESS",
         "completed_at": "2026-02-02T10:35:00Z"
     },
     "results": [
         {
-            "id": "uuid",
-            "note_id": "uuid",
+            "id": 789,
+            "note_id": 456,
             "note_text": "Provide shutoff valves at...",
             "spec_text": "Shutoff valves shall be...",
-            "spec_source_file": "s3://bucket/specs/plumbing.pdf",
+            "spec_file_s3_key": "projects/123/specs/plumbing.pdf",
             "spec_file_url": "https://presigned-url...",
             "spec_page_number": 15,
             "spec_masterformat_number": "220500",
@@ -246,16 +355,20 @@ Returns conflicts from the latest comparison (or filtered by comparison_id).
 }
 ```
 
+**Note on `spec_file_url`:** This is computed in the serializer via `SerializerMethodField`, generating a presigned S3 URL with 1-hour TTL from `spec_file_s3_key`. It is NOT stored in the database. For large result sets, consider memoizing presigned URLs per `spec_file_s3_key` within the serializer context to avoid redundant S3 calls.
+
+**Ordering:** Results are ordered by `id` for deterministic pagination.
+
 ### Read Skipped Notes Endpoint
 
 **`GET /api/deliverables/projects/{project_id}/skipped-notes/`**
 
-Returns skipped notes from the latest comparison.
+Returns skipped notes from the latest successful comparison.
 
 **Authentication:** Required
 
 **Query Parameters:**
-- `comparison_id` (optional) - Filter to specific comparison
+- `comparison_id` (optional) - Filter to specific comparison (must belong to this project)
 - `reason` (optional) - Filter by skip reason
 - `page`, `page_size` - Pagination
 
@@ -265,8 +378,8 @@ Returns skipped notes from the latest comparison.
     "count": 12,
     "results": [
         {
-            "id": "uuid",
-            "note_id": "uuid",
+            "id": 101,
+            "note_id": 456,
             "disciplines": ["plumbing"],
             "sheet_discipline": "mechanical",
             "reason": "no_matching_specs",
@@ -290,18 +403,125 @@ Lists comparison runs for history/debugging.
     "count": 5,
     "results": [
         {
-            "id": "uuid",
+            "id": 123,
             "status": "SUCCESS",
+            "event_id": "550e8400-e29b-41d4-a716-446655440000",
             "created_at": "2026-02-02T10:30:00Z",
+            "started_at": "2026-02-02T10:30:01Z",
             "completed_at": "2026-02-02T10:35:00Z",
             "triggered_by": {"display_name": "John Doe"},
             "notes_processed": 150,
             "notes_skipped": 12,
-            "specs_processed": 8,
+            "spec_files_processed": 8,
             "conflict_count": 42
         }
     ]
 }
+```
+
+## Security
+
+### Lambda Invocation Authentication
+
+The Lambda function URL must be protected with IAM authentication:
+
+1. **Lambda Configuration:** Set `AuthType: AWS_IAM` on the function URL
+2. **Backend IAM Role:** The Django backend's IAM role needs `lambda:InvokeFunctionUrl` permission
+3. **Invocation:** Use SigV4 signing when calling the Lambda URL (via `boto3` or `requests-aws4auth`)
+4. **S3 Bucket Policy:** Restrict the payload S3 bucket to only allow read access from the Lambda's execution role
+
+```python
+# Example invocation with SigV4
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+import requests
+
+def invoke_lambda_with_sigv4(payload, lambda_url):
+    session = boto3.Session()
+    credentials = session.get_credentials()
+
+    request = AWSRequest(method='POST', url=lambda_url, data=json.dumps(payload))
+    SigV4Auth(credentials, 'lambda', 'us-east-1').add_auth(request)
+
+    response = requests.post(
+        lambda_url,
+        headers=dict(request.headers),
+        data=request.body,
+        timeout=5
+    )
+    return response
+```
+
+### Webhook HMAC Authentication
+
+The webhook endpoint verifies requests using HMAC-SHA256 signatures to prevent spoofing.
+
+**Shared Secret:**
+```python
+# settings.py
+SPEC_COMPARISON_WEBHOOK_SECRET = env("SPEC_COMPARISON_WEBHOOK_SECRET")
+```
+
+**Lambda Configuration:** The webhook secret is configured as a Lambda environment variable (not passed in the invocation payload) to prevent accidental logging.
+
+**Signature Format (canonical):**
+- Message: `{timestamp}.{raw_body_bytes}` (timestamp as string, dot separator, raw UTF-8 body bytes)
+- Algorithm: HMAC-SHA256
+- Output: Lowercase hex encoding
+
+**CRITICAL: Byte-exact signing requirement:**
+The lambda MUST sign the exact bytes it sends in the HTTP body. If using `requests.post(json=payload)`, the body may be re-serialized. Instead:
+
+```python
+# Lambda: Correct signing approach
+body = json.dumps(payload, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+timestamp = str(int(time.time()))
+message = f"{timestamp}.".encode('utf-8') + body
+signature = hmac.new(secret.encode('utf-8'), message, hashlib.sha256).hexdigest()
+
+response = requests.post(
+    callback_url,
+    data=body,  # Use pre-serialized body
+    headers={
+        'Content-Type': 'application/json',
+        'X-Signature': signature,
+        'X-Timestamp': timestamp,
+    }
+)
+```
+
+**Backend Verification Logic:**
+```python
+import hmac
+import hashlib
+import time
+
+def verify_webhook_signature(request):
+    signature = request.headers.get('X-Signature')
+    timestamp = request.headers.get('X-Timestamp')
+
+    if not signature or not timestamp:
+        return False
+
+    # Reject requests older than 5 minutes (replay protection)
+    try:
+        ts = int(timestamp)
+    except ValueError:
+        return False
+
+    if abs(time.time() - ts) > 300:
+        return False
+
+    # Compute expected signature using raw body bytes
+    raw_body = request.body  # bytes
+    message = f"{timestamp}.".encode('utf-8') + raw_body
+    expected = hmac.new(
+        settings.SPEC_COMPARISON_WEBHOOK_SECRET.encode('utf-8'),
+        message,
+        hashlib.sha256
+    ).hexdigest()  # lowercase hex
+
+    return hmac.compare_digest(signature.lower(), expected)
 ```
 
 ## Feature Flag & Settings
@@ -333,36 +553,132 @@ SPEC_COMPARISON_LAMBDA_FUNCTION_URL = env(
 )
 
 BACKEND_SPEC_COMPARISON_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/webhooks/spec-comparison/"
+
+# Webhook secret - also configured as Lambda env var (not passed in payload)
+SPEC_COMPARISON_WEBHOOK_SECRET = env("SPEC_COMPARISON_WEBHOOK_SECRET")
 ```
 
 ## Lambda Payload Construction
 
-When triggering a comparison, build the payload as follows:
+### Handling Payload Size Limits
+
+Lambda function URLs have a ~6MB payload limit. To avoid this:
+
+1. Build the payload in memory
+2. Upload to S3 as JSON
+3. Pass S3 pointer to lambda
+
+**Memory considerations:** For very large projects (10k+ notes), building the full payload in memory could be slow. Future optimization could stream notes to S3 in JSONL format or batch the comparison.
+
+**Payload lifecycle:** Add an S3 lifecycle policy to delete payload files after 30 days to prevent accumulation. Alternatively, delete `payload_s3_key` after receiving a terminal webhook.
 
 ```python
-def build_comparison_payload(project, project_version, comparison_id):
-    # Gather all notes from latest successful extractions
-    drawing_notes = DrawingNote.objects.filter(
-        section__page__extraction__drawing_file__project=project,
-        section__page__extraction__drawing_file__project_version=project_version,
-        section__page__extraction__status=DrawingExtractionStatus.SUCCESS,
-    ).select_related(
-        'section__page'
+import json
+import uuid
+
+def trigger_spec_comparison(project, project_version, user):
+    # Pre-validate: count notes and specs
+    notes_count = get_notes_queryset(project, project_version).count()
+    specs_count = get_specs_queryset(project, project_version).count()
+
+    if notes_count == 0:
+        raise ValidationError("No drawing notes found for comparison")
+    if specs_count == 0:
+        raise ValidationError("No spec sections found for comparison")
+
+    # Create comparison with server-generated event_id
+    event_id = str(uuid.uuid4())
+    comparison = SpecComparison.objects.create(
+        project=project,
+        project_version=project_version,
+        triggered_by=user,
+        status=SpecComparisonStatus.PENDING,
+        event_id=event_id,
     )
 
-    # Gather all spec sections
-    spec_sections = SpecSection.objects.filter(
+    try:
+        payload = build_comparison_payload(project, project_version, comparison.id, event_id)
+
+        # Upload payload to S3
+        payload_s3_key = f"spec-comparisons/{comparison.id}/payload.json"
+        s3.put_object(
+            Bucket=settings.S3_BUCKET,
+            Key=payload_s3_key,
+            Body=json.dumps(payload),
+            ContentType='application/json',
+        )
+        comparison.payload_s3_key = payload_s3_key
+
+        # Invoke lambda with S3 pointer using SigV4 auth
+        lambda_payload = {
+            "payload_s3_uri": f"s3://{settings.S3_BUCKET}/{payload_s3_key}",
+            "callback_url": settings.BACKEND_SPEC_COMPARISON_CALLBACK_URL,
+            "comparison_id": comparison.id,
+            "event_id": event_id,
+        }
+
+        invoke_lambda_with_sigv4(lambda_payload, settings.SPEC_COMPARISON_LAMBDA_FUNCTION_URL)
+
+        # Update to PROCESSING on successful invocation
+        comparison.status = SpecComparisonStatus.PROCESSING
+        comparison.started_at = timezone.now()
+        comparison.save()
+
+    except Exception as e:
+        comparison.status = SpecComparisonStatus.FAILED
+        comparison.error_message = str(e)
+        comparison.completed_at = timezone.now()  # Set completed_at for FAILED too
+        comparison.save()
+        raise
+
+    return comparison
+```
+
+### Payload Building with Precise Selection
+
+```python
+def get_notes_queryset(project, project_version):
+    """Get notes from the latest successful extraction per drawing file."""
+    from django.db.models import Subquery, OuterRef
+
+    # Subquery: latest successful extraction ID per drawing file
+    latest_extraction_subquery = DrawingExtraction.objects.filter(
+        drawing_file=OuterRef('section__page__extraction__drawing_file'),
+        drawing_file__project=project,
+        drawing_file__project_version=project_version,
+        status=DrawingExtractionStatus.SUCCESS,
+    ).order_by('-created_at').values('id')[:1]
+
+    return DrawingNote.objects.filter(
+        section__page__extraction__drawing_file__project=project,
+        section__page__extraction__drawing_file__project_version=project_version,
+        section__page__extraction__id=Subquery(latest_extraction_subquery),
+    ).select_related('section__page')
+
+
+def get_specs_queryset(project, project_version):
+    """Get spec sections with valid S3 keys."""
+    return SpecSection.objects.filter(
         document__project=project,
         document__project_version=project_version,
         file_s3_key__isnull=False,
+    ).exclude(
+        file_s3_key=''
     ).select_related('masterformat_section')
 
+
+def build_comparison_payload(project, project_version, comparison_id, event_id):
+    drawing_notes = get_notes_queryset(project, project_version)
+    spec_sections = get_specs_queryset(project, project_version)
+
     payload = {
+        "comparison_id": comparison_id,
+        "event_id": event_id,
         "notes": [
             {
                 "id": str(note.id),
                 "text": note.text,
-                "disciplines": note.disciplines,
+                "disciplines": note.disciplines or [],
                 "sheet_discipline": note.section.page.sheet_discipline,
                 "sheet_number": note.section.page.sheet_number,
                 "sheet_title": note.section.page.sheet_title,
@@ -372,11 +688,12 @@ def build_comparison_payload(project, project_version, comparison_id):
         "spec_files": [
             {
                 "s3_uri": f"s3://{settings.S3_BUCKET}/{spec.file_s3_key}",
+                "s3_key": spec.file_s3_key,  # Also include raw key for backend storage
                 "masterformat_number": spec.masterformat_section.masterformat_number,
             }
             for spec in spec_sections
         ],
-        "callback_url": f"{settings.BACKEND_SPEC_COMPARISON_CALLBACK_URL}?comparison_id={comparison_id}",
+        "callback_url": settings.BACKEND_SPEC_COMPARISON_CALLBACK_URL,
     }
 
     return payload
@@ -384,83 +701,204 @@ def build_comparison_payload(project, project_version, comparison_id):
 
 ## Webhook Handler Logic
 
+### Webhook Payload Serializer
+
 ```python
-@api_view(['POST'])
-@permission_classes([AllowAny])
-@transaction.atomic
-def spec_comparison_webhook(request):
-    payload = request.data
-    event_id = payload.get('event_id')
-    comparison_id = request.query_params.get('comparison_id') or payload.get('comparison_id')
+class PdfLocationSerializer(serializers.Serializer):
+    page_no = serializers.IntegerField()
+    x = serializers.FloatField()
+    y = serializers.FloatField()
+    width = serializers.FloatField()
+    height = serializers.FloatField()
 
-    # Idempotency check
-    if SpecComparison.objects.filter(event_id=event_id).exists():
-        return Response({"status": "already_processed"}, status=200)
 
-    # Fetch comparison
+class SpecConflictPayloadSerializer(serializers.Serializer):
+    note_id = serializers.CharField()
+    note_text = serializers.CharField()
+    spec_text = serializers.CharField()
+    spec_source_file = serializers.CharField()  # Must be s3://bucket/key format
+    spec_page_number = serializers.IntegerField()
+    spec_masterformat_number = serializers.CharField()
+    confidence = serializers.FloatField()
+    reason = serializers.CharField()
+    pdf_locations = PdfLocationSerializer(many=True, required=False, default=list)
+
+    def validate_spec_source_file(self, value):
+        """Enforce s3://{bucket}/{key} URI format contract."""
+        if not value.startswith('s3://'):
+            raise serializers.ValidationError(
+                f"spec_source_file must be an s3:// URI, got: {value[:50]}"
+            )
+        # Validate format: s3://bucket/key (must have bucket AND key)
+        parts = value[5:].split('/', 1)  # Remove 's3://'
+        if len(parts) < 2 or not parts[0] or not parts[1]:
+            raise serializers.ValidationError(
+                f"spec_source_file must be s3://bucket/key format, got: {value[:50]}"
+            )
+        return value
+
+
+class SkippedNotePayloadSerializer(serializers.Serializer):
+    note_id = serializers.CharField()
+    disciplines = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    sheet_discipline = serializers.CharField(required=False, allow_null=True)
+    reason = serializers.ChoiceField(choices=SkipReason.choices)
+    detail = serializers.CharField(required=False, allow_null=True)
+
+
+class SpecComparisonWebhookSerializer(serializers.Serializer):
+    event_id = serializers.CharField(required=True, allow_blank=False)
+    comparison_id = serializers.IntegerField(required=True)
+    status = serializers.ChoiceField(choices=[
+        SpecComparisonStatus.SUCCESS,
+        SpecComparisonStatus.PARTIAL_SUCCESS,
+        SpecComparisonStatus.FAILED,
+    ])  # Only terminal statuses allowed
+    conflicts = SpecConflictPayloadSerializer(many=True, required=False, default=list)
+    skipped_notes = SkippedNotePayloadSerializer(many=True, required=False, default=list)
+    notes_processed = serializers.IntegerField(required=False, default=0)
+    notes_skipped = serializers.IntegerField(required=False, default=0)
+    spec_files_processed = serializers.IntegerField(required=False, default=0)
+    notes_with_mismatch = serializers.IntegerField(required=False, default=0)
+    error_message = serializers.CharField(required=False, allow_null=True)
+```
+
+### Webhook View
+
+```python
+from django.db import IntegrityError
+
+def parse_s3_uri_to_key(s3_uri: str) -> str:
+    """Extract S3 key from s3://bucket/key URI.
+
+    Only accepts s3:// URIs (validated by serializer).
+    """
+    # s3://bucket/path/to/file.pdf -> path/to/file.pdf
+    parts = s3_uri[5:].split('/', 1)  # Remove 's3://'
+    if len(parts) > 1:
+        return parts[1]
+    raise ValueError(f"Invalid S3 URI format: {s3_uri}")
+
+
+def safe_int(value: str) -> int | None:
+    """Safely convert string to int, return None if invalid."""
     try:
-        comparison = SpecComparison.objects.get(id=comparison_id)
-    except SpecComparison.DoesNotExist:
-        return Response({"error": "Comparison not found"}, status=404)
+        return int(value)
+    except (ValueError, TypeError):
+        return None
 
-    # Update status
-    new_status = payload.get('status')
-    comparison.status = new_status
-    comparison.event_id = event_id
-    comparison.notes_processed = payload.get('notes_processed', 0)
-    comparison.notes_skipped = payload.get('notes_skipped', 0)
-    comparison.specs_processed = payload.get('specs_processed', 0)
-    comparison.notes_with_mismatch = payload.get('notes_with_mismatch', 0)
 
-    if new_status in [SpecComparisonStatus.SUCCESS, SpecComparisonStatus.PARTIAL_SUCCESS, SpecComparisonStatus.FAILED]:
+from rest_framework.authentication import BaseAuthentication
+
+@api_view(['POST'])
+@authentication_classes([])  # Disable DRF auth (including SessionAuthentication CSRF)
+@permission_classes([AllowAny])
+def spec_comparison_webhook(request):
+    # Verify HMAC signature
+    if not verify_webhook_signature(request):
+        return Response({"error": "Invalid signature"}, status=401)
+
+    # Validate payload
+    serializer = SpecComparisonWebhookSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({"error": "Invalid payload", "details": serializer.errors}, status=400)
+
+    data = serializer.validated_data
+    event_id = data['event_id']
+    comparison_id = data['comparison_id']
+    new_status = data['status']
+
+    with transaction.atomic():
+        # Lock comparison row to prevent races
+        try:
+            comparison = SpecComparison.objects.select_for_update().get(id=comparison_id)
+        except SpecComparison.DoesNotExist:
+            return Response({"error": "Comparison not found"}, status=404)
+
+        # Verify event_id matches
+        if comparison.event_id != event_id:
+            return Response({"error": "Event ID mismatch"}, status=400)
+
+        # Create webhook event for idempotency (unique constraint on event_id)
+        try:
+            SpecComparisonWebhookEvent.objects.create(
+                comparison=comparison,
+                event_id=event_id,
+                new_status=new_status,
+            )
+        except IntegrityError:
+            # Duplicate event_id - already processed
+            return Response({"status": "already_processed"}, status=200)
+
+        # Update comparison metadata
+        comparison.status = new_status
+        comparison.notes_processed = data['notes_processed']
+        comparison.notes_skipped = data['notes_skipped']
+        comparison.spec_files_processed = data['spec_files_processed']
+        comparison.notes_with_mismatch = data['notes_with_mismatch']
         comparison.completed_at = timezone.now()
 
-    if new_status == SpecComparisonStatus.FAILED:
-        comparison.error_message = payload.get('error_message')
+        if new_status == SpecComparisonStatus.FAILED:
+            comparison.error_message = data.get('error_message')
+            comparison.save()
+            # FAILED: Do not store conflicts/skipped notes (no partial data)
+            return Response({"status": "processed"}, status=200)
 
-    comparison.save()
+        comparison.save()
 
-    # Build note ID lookup for FK linking
-    note_ids = [c['note_id'] for c in payload.get('conflicts', [])]
-    note_ids += [s['note_id'] for s in payload.get('skipped_notes', [])]
-    notes_by_id = {
-        str(n.id): n
-        for n in DrawingNote.objects.filter(id__in=note_ids)
-    }
+        # SUCCESS/PARTIAL_SUCCESS: Store conflicts and skipped notes
 
-    # Create conflicts
-    conflicts_to_create = [
-        SpecConflict(
-            comparison=comparison,
-            note=notes_by_id.get(c['note_id']),
-            note_id_from_lambda=c['note_id'],
-            note_text=c['note_text'],
-            spec_text=c['spec_text'],
-            spec_source_file=c['spec_source_file'],
-            spec_page_number=c['spec_page_number'],
-            spec_masterformat_number=c['spec_masterformat_number'],
-            confidence=c['confidence'],
-            reason=c['reason'],
-            pdf_locations=c.get('pdf_locations', []),
-        )
-        for c in payload.get('conflicts', [])
-    ]
-    SpecConflict.objects.bulk_create(conflicts_to_create)
+        # Build note ID lookup for FK linking (safely handle non-integer IDs)
+        conflict_note_ids = [c['note_id'] for c in data['conflicts']]
+        skipped_note_ids = [s['note_id'] for s in data['skipped_notes']]
+        all_note_ids_raw = set(conflict_note_ids + skipped_note_ids)
 
-    # Create skipped notes
-    skipped_to_create = [
-        SkippedNote(
-            comparison=comparison,
-            note=notes_by_id.get(s['note_id']),
-            note_id_from_lambda=s['note_id'],
-            disciplines=s.get('disciplines', []),
-            sheet_discipline=s.get('sheet_discipline'),
-            reason=s['reason'],
-            detail=s.get('detail'),
-        )
-        for s in payload.get('skipped_notes', [])
-    ]
-    SkippedNote.objects.bulk_create(skipped_to_create)
+        # Safely convert to integers, filtering out invalid IDs
+        valid_note_ids = [safe_int(nid) for nid in all_note_ids_raw]
+        valid_note_ids = [nid for nid in valid_note_ids if nid is not None]
+
+        notes_by_id = {}
+        if valid_note_ids:
+            notes_by_id = {
+                str(n.id): n
+                for n in DrawingNote.objects.filter(id__in=valid_note_ids)
+            }
+
+        # Create conflicts (with batch_size for large lists)
+        if data['conflicts']:
+            conflicts_to_create = [
+                SpecConflict(
+                    comparison=comparison,
+                    note=notes_by_id.get(c['note_id']),
+                    note_id_from_lambda=c['note_id'],
+                    note_text=c['note_text'],
+                    spec_text=c['spec_text'],
+                    spec_file_s3_key=parse_s3_uri_to_key(c['spec_source_file']),
+                    spec_page_number=c['spec_page_number'],
+                    spec_masterformat_number=c['spec_masterformat_number'],
+                    confidence=c['confidence'],
+                    reason=c['reason'],
+                    pdf_locations=c.get('pdf_locations', []),
+                )
+                for c in data['conflicts']
+            ]
+            SpecConflict.objects.bulk_create(conflicts_to_create, batch_size=500)
+
+        # Create skipped notes (with batch_size for large lists)
+        if data['skipped_notes']:
+            skipped_to_create = [
+                SkippedNote(
+                    comparison=comparison,
+                    note=notes_by_id.get(s['note_id']),
+                    note_id_from_lambda=s['note_id'],
+                    disciplines=s.get('disciplines', []),
+                    sheet_discipline=s.get('sheet_discipline'),
+                    reason=s['reason'],
+                    detail=s.get('detail'),
+                )
+                for s in data['skipped_notes']
+            ]
+            SkippedNote.objects.bulk_create(skipped_to_create, batch_size=500)
 
     return Response({"status": "processed"}, status=200)
 ```
@@ -469,14 +907,85 @@ def spec_comparison_webhook(request):
 
 | File | Changes |
 |------|---------|
-| `apps/deliverables/models.py` | Add `SpecComparisonStatus`, `SkipReason`, `SpecComparison`, `SpecConflict`, `SkippedNote` |
-| `apps/deliverables/serializers/spec_comparison_serializers.py` | New file with serializers |
-| `apps/deliverables/views/spec_comparison_views.py` | New file with views |
+| `apps/deliverables/models.py` | Add `SpecComparisonStatus`, `SkipReason`, `SpecComparison`, `SpecComparisonWebhookEvent`, `SpecConflict`, `SkippedNote` with indexes |
+| `apps/deliverables/serializers/spec_comparison_serializers.py` | New file with read serializers and webhook payload serializers |
+| `apps/deliverables/views/spec_comparison_views.py` | New file with views including HMAC verification and SigV4 invocation |
 | `apps/deliverables/urls.py` | Add routes for new endpoints |
 | `apps/utils/feature_flags.py` | Add `is_drawing_spec_comparison_active()` |
-| `the_link/settings.py` | Add feature flag name and lambda URL settings |
+| `the_link/settings.py` | Add feature flag name, lambda URL, webhook secret settings |
 | `apps/deliverables/admin.py` | Register new models |
-| `apps/deliverables/migrations/XXXX_add_spec_comparison_models.py` | New migration |
+| `apps/deliverables/migrations/XXXX_add_spec_comparison_models.py` | New migration with indexes |
+
+## Test Plan
+
+### Unit Tests
+
+**Models:**
+- Test `SpecComparisonStatus` and `SkipReason` enum values
+- Test model field defaults and constraints
+- Test `on_delete=SET_NULL` behavior for note FKs
+
+**Serializers:**
+- Test `SpecComparisonWebhookSerializer` validation (required fields, terminal status only)
+- Test nested `PdfLocationSerializer` validation
+- Test `SkippedNotePayloadSerializer` with valid/invalid `SkipReason`
+- Test `spec_source_file` validation rejects non-s3:// URIs
+- Test `spec_source_file` validation rejects malformed URIs (`s3://bucket`, `s3://bucket/`, `s3:///key`)
+
+**Utilities:**
+- Test `parse_s3_uri_to_key` with various URI formats
+- Test `safe_int` with valid/invalid inputs
+- Test HMAC signature verification with valid/invalid signatures
+- Test HMAC with non-ASCII characters in payload (Unicode note text)
+- Test HMAC with byte-exact body matching
+
+### API Tests
+
+**Trigger Endpoint:**
+- Test successful trigger returns 201 with PROCESSING status
+- Test 403 when feature flag inactive
+- Test 400 when no notes exist
+- Test 400 when no specs exist
+- Test 404 for non-existent project
+- Test optional `project_version_id` parameter
+- Test 400 when `project.current_version` is None and no version_id provided
+- Test lambda invocation failure sets FAILED status with completed_at
+
+**Webhook Endpoint:**
+- Test valid HMAC signature accepted
+- Test invalid HMAC signature returns 401
+- Test stale timestamp (>5 min) returns 401
+- Test missing X-Signature header returns 401
+- Test valid payload processing returns 200
+- Test invalid payload returns 400
+- Test invalid spec_source_file format (non-s3://) returns 400
+- Test event_id mismatch returns 400
+- Test comparison not found returns 404
+- Test idempotency: duplicate event_id returns 200 without re-processing
+- Test race condition: concurrent requests only process once (via select_for_update + unique constraint)
+- Test SUCCESS status creates conflicts and skipped notes
+- Test FAILED status does NOT create conflicts/skipped notes
+- Test note FK linking works when note exists
+- Test note FK is null when note ID not found
+- Test non-integer note_id is handled gracefully (stored in note_id_from_lambda, FK is null)
+- Test HMAC verification with non-ASCII payload
+- Test webhook succeeds without CSRF token (authentication_classes=[] bypasses SessionAuthentication)
+
+**Read Endpoints:**
+- Test authentication required
+- Test pagination works correctly
+- Test `comparison_id` filter validates project ownership
+- Test "latest" selection uses most recent SUCCESS/PARTIAL_SUCCESS (excludes FAILED)
+- Test empty results when no comparisons exist
+- Test `spec_file_url` is a valid presigned URL
+- Test `reason` filter on skipped notes endpoint
+- Test pagination is stable/deterministic (ordered by id)
+
+### Integration Tests
+
+- Test full flow: trigger → lambda invocation → webhook → read results
+- Test with realistic payload sizes (many notes/specs)
+- Test Lambda IAM authentication (SigV4)
 
 ## Edge Cases
 
@@ -485,9 +994,24 @@ def spec_comparison_webhook(request):
 | No notes in project | Return 400 with message "No drawing notes found for comparison" |
 | No specs in project | Return 400 with message "No spec sections found for comparison" |
 | Comparison already in progress | Allow parallel runs; user can manage via comparison list |
+| Lambda invocation fails | Set status to FAILED with error_message and completed_at |
 | Lambda timeout | Comparison stays PROCESSING; consider adding stale check later |
-| Duplicate webhook delivery | Idempotency via event_id; return 200 OK |
+| Duplicate webhook delivery | Return 200 OK via unique event_id constraint (race-safe) |
+| Concurrent webhook deliveries | select_for_update + IntegrityError handling prevents double-processing |
+| event_id missing in webhook | Return 400 Bad Request (serializer validation) |
+| comparison_id not found | Return 404 |
+| event_id mismatch | Return 400 Bad Request |
 | Note ID not found | Store conflict/skipped note with null FK, keep note_id_from_lambda |
+| Note ID not an integer | Safely skip FK linking, store note_id_from_lambda |
+| Invalid spec_source_file format | Return 400 Bad Request (must be s3:// URI) |
+| Invalid HMAC signature | Return 401 Unauthorized |
+| Stale timestamp (>5 min) | Return 401 Unauthorized (replay protection) |
+| comparison_id doesn't belong to project | Return 404 on read endpoints |
+| No successful comparisons | Return empty results with null comparison metadata |
+| Only FAILED comparisons exist | "Latest" returns empty (FAILED excluded) |
+| FAILED webhook status | Update metadata only, no conflicts/skipped notes stored |
+| project.current_version is None | Return 400 with message "Project has no active version" |
+| Malformed spec_source_file (s3://bucket only) | Return 400 Bad Request (serializer validation) |
 
 ## Future Considerations
 
@@ -495,3 +1019,62 @@ def spec_comparison_webhook(request):
 - **Comparison history:** Model supports multiple runs; UI can show history when needed
 - **Partial re-runs:** Could add ability to re-compare specific notes or disciplines
 - **Notifications:** Could notify user when comparison completes
+- **Stale comparison cleanup:** Background job to mark old PROCESSING comparisons as FAILED
+- **Payload streaming:** For very large projects, stream notes to S3 in JSONL format
+- **Payload cleanup:** Delete payload_s3_key after terminal webhook or add S3 lifecycle policy (30 days)
+
+---
+
+**v1**: Addressed review feedback:
+- Added HMAC signature verification for webhook security
+- Made event_id server-generated and required; validates match on webhook
+- Added idempotency via terminal status check (prevents duplicate results on retries)
+- Added status transitions: PENDING → PROCESSING on invoke, FAILED on invoke error
+- Added S3 payload upload to handle large payloads (>6MB limit)
+- Refined extraction query to select latest successful extraction per drawing file
+- Added webhook payload validation via serializer
+- Enforced project scoping on read endpoints; defined "latest" as latest completed
+- Added database indexes on comparison, conflict, and skipped note tables
+- Set FK on_delete=SET_NULL for note references
+- Documented spec_file_url as computed presigned URL (not stored)
+
+**v2**: Addressed review feedback:
+- Added Prerequisites section clarifying discipline fields from develop branch
+- Added SpecComparisonWebhookEvent model for race-safe idempotency (matches DrawingExtractionWebhookEvent pattern)
+- Changed to select_for_update + IntegrityError handling for concurrent webhook protection
+- Clarified models use integer IDs (Django default) not UUIDs
+- Added optional project_version_id parameter; defaults to project.current_version
+- Added pre-validation of notes/specs before creating comparison
+- Added comprehensive Test Plan section
+- Removed webhook secret from lambda payload (use Lambda env var instead)
+- Clarified lambda only sends terminal statuses
+
+**v3**: Addressed review feedback:
+- Added Lambda invocation authentication section (SigV4/IAM auth required)
+- Fixed webhook signature canonicalization to use raw bytes with explicit UTF-8 encoding
+- Added safe_int() helper for note FK lookup to handle non-integer IDs gracefully
+- Standardized terminology: spec file vs SpecSection, spec_file_s3_key storage format
+- Added index on (project, status, completed_at) for latest queries
+- Set completed_at on FAILED status (all terminal states get completed_at)
+- Clarified "latest" excludes FAILED comparisons (only SUCCESS/PARTIAL_SUCCESS)
+- Removed payload storage from SpecComparisonWebhookEvent to avoid DB bloat
+- Added batch_size=500 to bulk_create calls for large result sets
+- Added parse_s3_uri_to_key helper for consistent S3 key storage
+- Added test cases for non-ASCII payloads and invalid note IDs
+
+**v4**: Addressed review feedback:
+- Documented byte-exact HMAC signing requirement for lambda (use pre-serialized body, not json= param)
+- FAILED status now only updates metadata; conflicts/skipped notes NOT stored for failed runs
+- Added memory considerations note for large projects; suggested future streaming optimization
+- Added payload lifecycle note: recommend S3 lifecycle policy or cleanup after terminal webhook
+- Added spec_source_file serializer validation to enforce s3:// URI format contract
+- Updated parse_s3_uri_to_key to only accept validated s3:// URIs
+- Added test case for invalid spec_source_file format
+
+**v5**: Addressed review feedback:
+- Added `@authentication_classes([])` to webhook to bypass DRF SessionAuthentication CSRF checks
+- Strengthened spec_source_file validation to require full s3://bucket/key format (rejects s3://bucket, s3://bucket/, s3:///key)
+- Added explicit `ordering = ['id']` to SpecConflict and SkippedNote models for deterministic pagination
+- Added 400 handling when project.current_version is None
+- Added note about memoizing presigned URLs for large result sets
+- Added test cases for: CSRF bypass, malformed S3 URIs, pagination stability, missing current_version
