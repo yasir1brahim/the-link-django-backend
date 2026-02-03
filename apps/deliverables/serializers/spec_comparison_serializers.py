@@ -111,6 +111,12 @@ class SpecConflictReadSerializer(serializers.ModelSerializer):
     """Serializer for reading conflict data via API"""
     note_id = serializers.SerializerMethodField()
     spec_file_url = serializers.SerializerMethodField()
+    # Drawing-related fields
+    sheet_number = serializers.SerializerMethodField()
+    sheet_title = serializers.SerializerMethodField()
+    drawing_file_url = serializers.SerializerMethodField()
+    drawing_page_number = serializers.SerializerMethodField()
+    drawing_bounding_box = serializers.SerializerMethodField()
 
     class Meta:
         model = SpecConflict
@@ -119,6 +125,13 @@ class SpecConflictReadSerializer(serializers.ModelSerializer):
             'note_id',
             'note_id_from_lambda',
             'note_text',
+            # Drawing fields
+            'sheet_number',
+            'sheet_title',
+            'drawing_file_url',
+            'drawing_page_number',
+            'drawing_bounding_box',
+            # Spec fields
             'spec_text',
             'spec_file_s3_key',
             'spec_file_url',
@@ -136,11 +149,58 @@ class SpecConflictReadSerializer(serializers.ModelSerializer):
         # Fall back to lambda-provided ID (may be string for non-integer IDs)
         return obj.note_id_from_lambda
 
+    def get_sheet_number(self, obj):
+        """Get sheet number from the drawing page."""
+        if obj.note and obj.note.section and obj.note.section.page:
+            return obj.note.section.page.sheet_number
+        return None
+
+    def get_sheet_title(self, obj):
+        """Get sheet title from the drawing page."""
+        if obj.note and obj.note.section and obj.note.section.page:
+            return obj.note.section.page.sheet_title
+        return None
+
+    def get_drawing_file_url(self, obj):
+        """Generate presigned S3 URL for drawing file access."""
+        if not obj.note or not obj.note.section or not obj.note.section.page:
+            return None
+
+        drawing_file = obj.note.section.page.drawing_file
+        s3_key = drawing_file.file_s3_key
+
+        # Memoize URLs per s3_key within request context
+        context = self.context
+        cache_key = 'presigned_urls'
+        if cache_key not in context:
+            context[cache_key] = {}
+
+        if s3_key not in context[cache_key]:
+            context[cache_key][s3_key] = s3.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': settings.S3_BUCKET, 'Key': s3_key},
+                ExpiresIn=3600,
+            )
+        return context[cache_key][s3_key]
+
+    def get_drawing_page_number(self, obj):
+        """Get page number from the drawing page."""
+        if obj.note and obj.note.section and obj.note.section.page:
+            return obj.note.section.page.page_number
+        return None
+
+    def get_drawing_bounding_box(self, obj):
+        """Get bounding box for the note in the drawing."""
+        if obj.note:
+            # Prefer unrotated_bounding_box, fall back to bounding_box
+            return obj.note.unrotated_bounding_box or obj.note.bounding_box
+        return None
+
     def get_spec_file_url(self, obj):
         """Generate presigned S3 URL for spec file access."""
         # Memoize URLs per s3_key within request context to avoid redundant S3 calls
         context = self.context
-        cache_key = f'presigned_urls'
+        cache_key = 'presigned_urls'
         if cache_key not in context:
             context[cache_key] = {}
 

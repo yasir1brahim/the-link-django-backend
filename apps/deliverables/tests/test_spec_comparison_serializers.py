@@ -260,3 +260,167 @@ class TestSpecComparisonWebhookSerializer(TestCase):
         serializer = SpecComparisonWebhookSerializer(data=data)
         self.assertFalse(serializer.is_valid())
         self.assertIn('conflicts', serializer.errors)
+
+
+@override_settings(S3_BUCKET='bucket')
+class TestSpecConflictReadSerializerDrawingFields(TestCase):
+    """Test drawing-related fields in SpecConflictReadSerializer"""
+
+    def setUp(self):
+        from unittest.mock import patch, MagicMock
+        from apps.deliverables.models import (
+            Project,
+            SpecComparison,
+            SpecComparisonStatus,
+            SpecConflict,
+            DrawingFile,
+            DrawingExtraction,
+            DrawingExtractionStatus,
+            DrawingPage,
+            DrawingNoteSection,
+            DrawingNote,
+        )
+        from apps.teams.models import Team
+        from apps.users.models import CustomUser
+
+        self.user = CustomUser.objects.create_user('test@example.com', password='test')
+        self.team = Team.objects.create(name='Test Team', slug='test-team')
+        self.project = Project.objects.create(
+            name='Test Project',
+            project_number='P-001',
+            team=self.team,
+            created_by=self.user
+        )
+        self.project_version = self.project.versions.first()
+
+        # Create drawing structures
+        self.drawing_file = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name='P-201.pdf',
+            file_s3_key='projects/123/drawings/P-201.pdf',
+            md5='abc123',
+        )
+        self.extraction = DrawingExtraction.objects.create(
+            drawing_file=self.drawing_file,
+            status=DrawingExtractionStatus.SUCCESS,
+        )
+        self.page = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=3,
+            page_type='drawing',
+            extraction_status='success',
+            sheet_number='P-201',
+            sheet_title='Plumbing Riser Diagram',
+        )
+        self.section = DrawingNoteSection.objects.create(
+            page=self.page,
+            header='GENERAL NOTES',
+        )
+        self.note = DrawingNote.objects.create(
+            section=self.section,
+            note_number=1,
+            category='general',
+            text='Test note',
+            unrotated_bounding_box=[120.5, 340.2, 280.0, 360.8],
+        )
+
+        # Create comparison and conflict
+        self.comparison = SpecComparison.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            status=SpecComparisonStatus.SUCCESS,
+            event_id='test-event',
+        )
+        self.conflict = SpecConflict.objects.create(
+            comparison=self.comparison,
+            note=self.note,
+            note_id_from_lambda=str(self.note.id),
+            note_text='Test note',
+            spec_text='Spec text',
+            spec_file_s3_key='specs/test.pdf',
+            spec_page_number=15,
+            spec_masterformat_number='220500',
+            confidence=0.85,
+            reason='Test conflict',
+        )
+
+    def test_includes_sheet_number(self):
+        """Test serializer includes sheet_number from drawing page"""
+        from unittest.mock import patch
+        with patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url') as mock_presigned:
+            mock_presigned.return_value = 'https://presigned-url.com'
+            from apps.deliverables.serializers.spec_comparison_serializers import SpecConflictReadSerializer
+
+            serializer = SpecConflictReadSerializer(self.conflict, context={})
+            self.assertEqual(serializer.data['sheet_number'], 'P-201')
+
+    def test_includes_sheet_title(self):
+        """Test serializer includes sheet_title from drawing page"""
+        from unittest.mock import patch
+        with patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url') as mock_presigned:
+            mock_presigned.return_value = 'https://presigned-url.com'
+            from apps.deliverables.serializers.spec_comparison_serializers import SpecConflictReadSerializer
+
+            serializer = SpecConflictReadSerializer(self.conflict, context={})
+            self.assertEqual(serializer.data['sheet_title'], 'Plumbing Riser Diagram')
+
+    def test_includes_drawing_file_url(self):
+        """Test serializer includes presigned drawing file URL"""
+        from unittest.mock import patch
+        with patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url') as mock_presigned:
+            mock_presigned.return_value = 'https://presigned-url.com/drawing.pdf'
+            from apps.deliverables.serializers.spec_comparison_serializers import SpecConflictReadSerializer
+
+            serializer = SpecConflictReadSerializer(self.conflict, context={})
+            self.assertEqual(serializer.data['drawing_file_url'], 'https://presigned-url.com/drawing.pdf')
+
+    def test_includes_drawing_page_number(self):
+        """Test serializer includes drawing page number"""
+        from unittest.mock import patch
+        with patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url') as mock_presigned:
+            mock_presigned.return_value = 'https://presigned-url.com'
+            from apps.deliverables.serializers.spec_comparison_serializers import SpecConflictReadSerializer
+
+            serializer = SpecConflictReadSerializer(self.conflict, context={})
+            self.assertEqual(serializer.data['drawing_page_number'], 3)
+
+    def test_includes_drawing_bounding_box(self):
+        """Test serializer includes drawing bounding box"""
+        from unittest.mock import patch
+        with patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url') as mock_presigned:
+            mock_presigned.return_value = 'https://presigned-url.com'
+            from apps.deliverables.serializers.spec_comparison_serializers import SpecConflictReadSerializer
+
+            serializer = SpecConflictReadSerializer(self.conflict, context={})
+            self.assertEqual(serializer.data['drawing_bounding_box'], [120.5, 340.2, 280.0, 360.8])
+
+    def test_drawing_fields_null_when_note_missing(self):
+        """Test drawing fields are null when note FK is null"""
+        from unittest.mock import patch
+        from apps.deliverables.models import SpecConflict
+        with patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url') as mock_presigned:
+            mock_presigned.return_value = 'https://presigned-url.com'
+            from apps.deliverables.serializers.spec_comparison_serializers import SpecConflictReadSerializer
+
+            # Create conflict without note FK
+            conflict_no_note = SpecConflict.objects.create(
+                comparison=self.comparison,
+                note=None,
+                note_id_from_lambda='999',
+                note_text='Orphan note',
+                spec_text='Spec text',
+                spec_file_s3_key='specs/test.pdf',
+                spec_page_number=1,
+                spec_masterformat_number='220500',
+                confidence=0.5,
+                reason='Test',
+            )
+
+            serializer = SpecConflictReadSerializer(conflict_no_note, context={})
+            self.assertIsNone(serializer.data['sheet_number'])
+            self.assertIsNone(serializer.data['sheet_title'])
+            self.assertIsNone(serializer.data['drawing_file_url'])
+            self.assertIsNone(serializer.data['drawing_page_number'])
+            self.assertIsNone(serializer.data['drawing_bounding_box'])
