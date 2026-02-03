@@ -27,6 +27,7 @@ from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
     AiGeneratedLog, ExtractedData, CustomItemType, ExtractionNote,
     DrawingFile, DrawingExtraction, DrawingPage, DrawingNoteSection,
     DrawingNote, DrawingExtractionWebhookEvent,
+    SpecComparison, SpecComparisonWebhookEvent, SpecConflict, SkippedNote,
 )
 
 
@@ -594,4 +595,40 @@ class DrawingExtractionWebhookEventAdmin(admin.ModelAdmin):
     list_filter = ['new_status']
     search_fields = ['event_id']
     raw_id_fields = ['extraction']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(SpecComparison)
+class SpecComparisonAdmin(admin.ModelAdmin):
+    list_display = ['id', 'project', 'status', 'triggered_by', 'notes_processed', 'created_at', 'completed_at']
+    list_filter = ['status', 'project']
+    search_fields = ['project__name', 'event_id']
+    raw_id_fields = ['project', 'project_version', 'triggered_by']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(SpecComparisonWebhookEvent)
+class SpecComparisonWebhookEventAdmin(admin.ModelAdmin):
+    list_display = ['id', 'event_id', 'comparison', 'new_status', 'created_at']
+    list_filter = ['new_status']
+    search_fields = ['event_id']
+    raw_id_fields = ['comparison']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(SpecConflict)
+class SpecConflictAdmin(admin.ModelAdmin):
+    list_display = ['id', 'comparison', 'note_id_from_lambda', 'spec_masterformat_number', 'confidence', 'created_at']
+    list_filter = ['comparison__status']
+    search_fields = ['note_text', 'spec_text', 'note_id_from_lambda']
+    raw_id_fields = ['comparison', 'note']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(SkippedNote)
+class SkippedNoteAdmin(admin.ModelAdmin):
+    list_display = ['id', 'comparison', 'note_id_from_lambda', 'reason', 'sheet_discipline', 'created_at']
+    list_filter = ['reason', 'comparison__status']
+    search_fields = ['note_id_from_lambda', 'detail']
+    raw_id_fields = ['comparison', 'note']
     readonly_fields = ['created_at', 'updated_at']
