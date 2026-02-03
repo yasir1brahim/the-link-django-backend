@@ -5,7 +5,7 @@ import requests
 import boto3
 from django.conf import settings
 from django.db import transaction, IntegrityError
-from django.db.models import Subquery, OuterRef, Count
+from django.db.models import Subquery, OuterRef, Count, Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -561,6 +561,27 @@ def get_spec_conflicts(request, project_id):
     conflicts = SpecConflict.objects.filter(comparison=comparison).select_related(
         'note__section__page__drawing_file'
     )
+
+    # Apply filters
+    search = request.query_params.get('search')
+    if search:
+        conflicts = conflicts.filter(
+            Q(note_text__icontains=search) |
+            Q(spec_text__icontains=search) |
+            Q(reason__icontains=search)
+        )
+
+    sheet_number_filter = request.query_params.get('sheet_number')
+    if sheet_number_filter:
+        conflicts = conflicts.filter(note__section__page__sheet_number=sheet_number_filter)
+
+    spec_masterformat_filter = request.query_params.get('spec_masterformat_number')
+    if spec_masterformat_filter:
+        conflicts = conflicts.filter(spec_masterformat_number=spec_masterformat_filter)
+
+    reason_filter = request.query_params.get('reason')
+    if reason_filter:
+        conflicts = conflicts.filter(reason=reason_filter)
 
     # Apply sorting
     sort_column = request.query_params.get('sort_column')

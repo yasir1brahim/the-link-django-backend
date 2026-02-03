@@ -464,3 +464,202 @@ class TestSpecConflictsSorting(APITestCase):
         })
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
+class TestSpecConflictsFiltering(APITestCase):
+    """Test filtering on spec conflicts endpoint"""
+
+    def setUp(self):
+        from apps.deliverables.models import (
+            DrawingFile,
+            DrawingExtraction,
+            DrawingExtractionStatus,
+            DrawingPage,
+            DrawingNoteSection,
+            DrawingNote,
+        )
+
+        self.user = User.objects.create_user(
+            'test@example.com',
+            password='testpass123'
+        )
+        self.team = Team.objects.create(name='Test Team', slug='test-team')
+        self.project = Project.objects.create(
+            name='Test Project',
+            project_number='P-001',
+            team=self.team,
+            created_by=self.user
+        )
+        self.project_version = self.project.versions.first()
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role='project_member'
+        )
+
+        # Create drawing structures for sheet_number filtering
+        self.drawing_file = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name='test.pdf',
+            file_s3_key='drawings/test.pdf',
+            md5='abc123',
+        )
+        self.extraction = DrawingExtraction.objects.create(
+            drawing_file=self.drawing_file,
+            status=DrawingExtractionStatus.SUCCESS,
+        )
+        self.page1 = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=1,
+            page_type='drawing',
+            extraction_status='success',
+            sheet_number='P-201',
+        )
+        self.page2 = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=2,
+            page_type='drawing',
+            extraction_status='success',
+            sheet_number='M-101',
+        )
+        self.section1 = DrawingNoteSection.objects.create(page=self.page1, header='NOTES')
+        self.section2 = DrawingNoteSection.objects.create(page=self.page2, header='NOTES')
+        self.note1 = DrawingNote.objects.create(
+            section=self.section1, note_number=1, category='general', text='Valve note'
+        )
+        self.note2 = DrawingNote.objects.create(
+            section=self.section2, note_number=1, category='general', text='Duct note'
+        )
+
+        self.comparison = SpecComparison.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            status=SpecComparisonStatus.SUCCESS,
+            event_id='test-event',
+        )
+
+        self.conflict1 = SpecConflict.objects.create(
+            comparison=self.comparison,
+            note=self.note1,
+            note_id_from_lambda='1',
+            note_text='Ball valve required',
+            spec_text='Gate valve specified',
+            spec_file_s3_key='specs/plumbing.pdf',
+            spec_page_number=1,
+            spec_masterformat_number='220500',
+            confidence=0.9,
+            reason='Valve type mismatch',
+        )
+        self.conflict2 = SpecConflict.objects.create(
+            comparison=self.comparison,
+            note=self.note2,
+            note_id_from_lambda='2',
+            note_text='Duct size 12 inch',
+            spec_text='Duct size 10 inch',
+            spec_file_s3_key='specs/mechanical.pdf',
+            spec_page_number=2,
+            spec_masterformat_number='230500',
+            confidence=0.8,
+            reason='Dimension mismatch',
+        )
+
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse('deliverables:spec-conflicts', kwargs={'project_id': self.project.id})
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_filter_by_search_in_note_text(self, mock_presigned):
+        """Test search filter matches note_text"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {
+            'project_version_id': self.project_version.id,
+            'search': 'valve'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['note_text'], 'Ball valve required')
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_filter_by_search_in_spec_text(self, mock_presigned):
+        """Test search filter matches spec_text"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {
+            'project_version_id': self.project_version.id,
+            'search': 'Gate'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_filter_by_search_in_reason(self, mock_presigned):
+        """Test search filter matches reason"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {
+            'project_version_id': self.project_version.id,
+            'search': 'Dimension'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertIn('Dimension', response.data['results'][0]['reason'])
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_filter_by_sheet_number(self, mock_presigned):
+        """Test filtering by exact sheet_number"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {
+            'project_version_id': self.project_version.id,
+            'sheet_number': 'P-201'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['sheet_number'], 'P-201')
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_filter_by_spec_masterformat_number(self, mock_presigned):
+        """Test filtering by exact spec_masterformat_number"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {
+            'project_version_id': self.project_version.id,
+            'spec_masterformat_number': '220500'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_filter_by_reason(self, mock_presigned):
+        """Test filtering by exact reason"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {
+            'project_version_id': self.project_version.id,
+            'reason': 'Valve type mismatch'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_combined_filters(self, mock_presigned):
+        """Test combining multiple filters"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {
+            'project_version_id': self.project_version.id,
+            'sheet_number': 'P-201',
+            'search': 'valve'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
