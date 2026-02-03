@@ -5,11 +5,12 @@ import requests
 import boto3
 from django.conf import settings
 from django.db import transaction, IntegrityError
-from django.db.models import Subquery, OuterRef
+from django.db.models import Subquery, OuterRef, Count
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from ..models import (
@@ -29,6 +30,10 @@ from ..serializers.spec_comparison_serializers import (
     SpecComparisonWebhookSerializer,
     TriggerSpecComparisonSerializer,
     TriggerSpecComparisonResponseSerializer,
+    SpecComparisonSummarySerializer,
+    SpecConflictReadSerializer,
+    SkippedNoteReadSerializer,
+    SpecComparisonListSerializer,
 )
 from apps.utils.feature_flags import is_drawing_spec_comparison_active
 
@@ -448,3 +453,244 @@ def trigger_spec_comparison(request, project_id):
 
     response_serializer = TriggerSpecComparisonResponseSerializer(comparison)
     return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+# --- Read Endpoints ---
+
+
+class SpecComparisonPagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = 'limit'  # Use 'limit' for consistency with DrawingNotePagination
+    max_page_size = 100
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_spec_conflicts(request, project_id):
+    """
+    Get spec conflicts from the latest successful comparison.
+
+    GET /api/deliverables/projects/{project_id}/spec-conflicts/
+    Query params:
+        - comparison_id: Filter to specific comparison
+        - project_version_id: Required - the version to query
+        - page, limit: Pagination
+    """
+    # Get project and check access
+    try:
+        project = Project.objects.get(id=project_id)
+    except Project.DoesNotExist:
+        return Response(
+            {"error": "Project not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if not request.user.is_member_of_project(project_id):
+        return Response(
+            {"error": "Not authorized to access this project"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Get version filter (required)
+    project_version_id = request.query_params.get('project_version_id')
+    if not project_version_id:
+        return Response(
+            {"error": "project_version_id is required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    try:
+        project_version = ProjectVersion.objects.get(
+            id=int(project_version_id),
+            project=project
+        )
+    except (ValueError, ProjectVersion.DoesNotExist):
+        return Response(
+            {"error": "Invalid project_version_id"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Get comparison
+    comparison_id = request.query_params.get('comparison_id')
+    if comparison_id:
+        try:
+            comparison_id_int = int(comparison_id)
+        except (ValueError, TypeError):
+            return Response(
+                {"error": "comparison_id must be an integer"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            comparison = SpecComparison.objects.get(
+                id=comparison_id_int,
+                project=project,
+                project_version=project_version
+            )
+        except SpecComparison.DoesNotExist:
+            return Response(
+                {"error": "Comparison not found or does not belong to this project/version"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    else:
+        # Get latest successful comparison for this version
+        comparison = SpecComparison.objects.filter(
+            project=project,
+            project_version=project_version,
+            status__in=[SpecComparisonStatus.SUCCESS, SpecComparisonStatus.PARTIAL_SUCCESS],
+        ).order_by('-completed_at').first()
+
+    if not comparison:
+        return Response({
+            'count': 0,
+            'next': None,
+            'previous': None,
+            'comparison': None,
+            'results': [],
+        })
+
+    # Get conflicts with pagination (select_related to avoid N+1 on note access)
+    conflicts = SpecConflict.objects.filter(comparison=comparison).select_related('note').order_by('id')
+
+    paginator = SpecComparisonPagination()
+    page = paginator.paginate_queryset(conflicts, request)
+
+    serializer = SpecConflictReadSerializer(page, many=True, context={'request': request})
+
+    response = paginator.get_paginated_response(serializer.data)
+    response.data['comparison'] = SpecComparisonSummarySerializer(comparison).data
+
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_skipped_notes(request, project_id):
+    """
+    Get skipped notes from the latest successful comparison.
+
+    GET /api/deliverables/projects/{project_id}/skipped-notes/
+    Query params:
+        - comparison_id: Filter to specific comparison
+        - project_version_id: Required - the version to query
+        - reason: Filter by skip reason
+        - page, limit: Pagination
+    """
+    # Get project and check access
+    try:
+        project = Project.objects.get(id=project_id)
+    except Project.DoesNotExist:
+        return Response(
+            {"error": "Project not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if not request.user.is_member_of_project(project_id):
+        return Response(
+            {"error": "Not authorized to access this project"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Get version filter (required)
+    project_version_id = request.query_params.get('project_version_id')
+    if not project_version_id:
+        return Response(
+            {"error": "project_version_id is required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    try:
+        project_version = ProjectVersion.objects.get(
+            id=int(project_version_id),
+            project=project
+        )
+    except (ValueError, ProjectVersion.DoesNotExist):
+        return Response(
+            {"error": "Invalid project_version_id"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Get comparison
+    comparison_id = request.query_params.get('comparison_id')
+    if comparison_id:
+        try:
+            comparison_id_int = int(comparison_id)
+        except (ValueError, TypeError):
+            return Response(
+                {"error": "comparison_id must be an integer"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            comparison = SpecComparison.objects.get(
+                id=comparison_id_int,
+                project=project,
+                project_version=project_version
+            )
+        except SpecComparison.DoesNotExist:
+            return Response(
+                {"error": "Comparison not found or does not belong to this project/version"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    else:
+        # Get latest successful comparison for this version
+        comparison = SpecComparison.objects.filter(
+            project=project,
+            project_version=project_version,
+            status__in=[SpecComparisonStatus.SUCCESS, SpecComparisonStatus.PARTIAL_SUCCESS],
+        ).order_by('-completed_at').first()
+
+    if not comparison:
+        return Response({
+            'count': 0,
+            'next': None,
+            'previous': None,
+            'results': [],
+        })
+
+    # Get skipped notes with optional reason filter (select_related to avoid N+1 on note access)
+    skipped_notes = SkippedNote.objects.filter(comparison=comparison).select_related('note').order_by('id')
+
+    reason_filter = request.query_params.get('reason')
+    if reason_filter:
+        skipped_notes = skipped_notes.filter(reason=reason_filter)
+
+    paginator = SpecComparisonPagination()
+    page = paginator.paginate_queryset(skipped_notes, request)
+
+    serializer = SkippedNoteReadSerializer(page, many=True)
+
+    return paginator.get_paginated_response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def list_spec_comparisons(request, project_id):
+    """
+    List all spec comparisons for a project.
+
+    GET /api/deliverables/projects/{project_id}/spec-comparisons/
+    """
+    # Get project and check access
+    try:
+        project = Project.objects.get(id=project_id)
+    except Project.DoesNotExist:
+        return Response(
+            {"error": "Project not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if not request.user.is_member_of_project(project_id):
+        return Response(
+            {"error": "Not authorized to access this project"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    comparisons = SpecComparison.objects.filter(
+        project=project
+    ).order_by('-created_at').annotate(
+        conflict_count_annotated=Count('conflicts')
+    ).select_related('triggered_by')
+
+    paginator = SpecComparisonPagination()
+    page = paginator.paginate_queryset(comparisons, request)
+
+    serializer = SpecComparisonListSerializer(page, many=True)
+
+    return paginator.get_paginated_response(serializer.data)
