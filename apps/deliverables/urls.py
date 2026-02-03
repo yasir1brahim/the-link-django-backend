@@ -11,7 +11,7 @@ from .views.user_highlight_preference_views import UserHighlightPreferenceViewSe
 from .views import extraction_note_views
 from .views import drawing_views
 from .views.drawing_views import DrawingNoteViewSet
-from .views.spec_comparison_views import spec_comparison_webhook
+from .views.spec_comparison_views import spec_comparison_webhook, trigger_spec_comparison
 
 
 app_name = "deliverables"
@@ -134,6 +134,7 @@ urlpatterns = [
     path('webhooks/ai-log-generation/', views.ai_log_generation_webhook, name='webhook-ai-log-generation'),
     path('webhooks/drawing-extraction/', drawing_views.drawing_extraction_webhook, name='drawing-extraction-webhook'),
     path('webhooks/spec-comparison/', spec_comparison_webhook, name='spec-comparison-webhook'),
+    path('projects/<int:project_id>/trigger-spec-comparison/', trigger_spec_comparison, name='trigger-spec-comparison'),
     path('projects/<int:project_id>/spec-sections/', views.get_project_spec_sections, name='get-project-spec-sections'),
     path('spec-sections/<int:section_id>/download/', views.download_spec_section, name='download-spec-section'),
     path('spec-sections/download-multiple/', views.bulk_download_spec_sections, name='download-multiple-spec-sections'),
