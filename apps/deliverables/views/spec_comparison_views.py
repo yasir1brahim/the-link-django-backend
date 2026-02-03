@@ -3,9 +3,12 @@ import logging
 import uuid
 import requests
 import boto3
+import openpyxl
+from openpyxl.styles import Alignment, Font, PatternFill
 from django.conf import settings
 from django.db import transaction, IntegrityError
 from django.db.models import Subquery, OuterRef, Count, Q
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -764,3 +767,168 @@ def list_spec_comparisons(request, project_id):
     serializer = SpecComparisonListSerializer(page, many=True)
 
     return paginator.get_paginated_response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_spec_conflicts(request, project_id):
+    """
+    Export spec conflicts to Excel file.
+
+    GET /api/deliverables/projects/{project_id}/spec-conflicts/export/
+    Query params: Same as get_spec_conflicts (filters apply)
+    """
+    # Get project and check access
+    try:
+        project = Project.objects.get(id=project_id)
+    except Project.DoesNotExist:
+        return Response(
+            {"error": "Project not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if not request.user.is_member_of_project(project_id):
+        return Response(
+            {"error": "Not authorized to access this project"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Get version filter (required)
+    project_version_id = request.query_params.get('project_version_id')
+    if not project_version_id:
+        return Response(
+            {"error": "project_version_id is required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    try:
+        project_version = ProjectVersion.objects.get(
+            id=int(project_version_id),
+            project=project
+        )
+    except (ValueError, ProjectVersion.DoesNotExist):
+        return Response(
+            {"error": "Invalid project_version_id"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Get comparison
+    comparison_id = request.query_params.get('comparison_id')
+    if comparison_id:
+        try:
+            comparison = SpecComparison.objects.get(
+                id=int(comparison_id),
+                project=project,
+                project_version=project_version
+            )
+        except (ValueError, SpecComparison.DoesNotExist):
+            return Response(
+                {"error": "Comparison not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    else:
+        comparison = SpecComparison.objects.filter(
+            project=project,
+            project_version=project_version,
+            status__in=[SpecComparisonStatus.SUCCESS, SpecComparisonStatus.PARTIAL_SUCCESS],
+        ).order_by('-completed_at').first()
+
+    if not comparison:
+        # Return empty Excel file
+        workbook = openpyxl.Workbook()
+        worksheet = workbook.active
+        worksheet.title = "Spec Conflicts"
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename=spec_conflicts.xlsx'
+        workbook.save(response)
+        return response
+
+    # Get conflicts with filters
+    conflicts = SpecConflict.objects.filter(comparison=comparison).select_related(
+        'note__section__page__drawing_file'
+    )
+
+    # Apply filters (same as get_spec_conflicts)
+    search = request.query_params.get('search')
+    if search:
+        conflicts = conflicts.filter(
+            Q(note_text__icontains=search) |
+            Q(spec_text__icontains=search) |
+            Q(reason__icontains=search)
+        )
+
+    sheet_number_filter = request.query_params.get('sheet_number')
+    if sheet_number_filter:
+        conflicts = conflicts.filter(note__section__page__sheet_number=sheet_number_filter)
+
+    spec_masterformat_filter = request.query_params.get('spec_masterformat_number')
+    if spec_masterformat_filter:
+        conflicts = conflicts.filter(spec_masterformat_number=spec_masterformat_filter)
+
+    reason_filter = request.query_params.get('reason')
+    if reason_filter:
+        conflicts = conflicts.filter(reason=reason_filter)
+
+    conflicts = conflicts.order_by('id')
+
+    # Create workbook
+    workbook = openpyxl.Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Spec Conflicts"
+
+    # Define styles
+    header_font = Font(bold=True, color='FFFFFF')
+    header_fill = PatternFill(start_color='202a44', end_color='202a44', fill_type='solid')
+    header_alignment = Alignment(wrap_text=True, vertical='center')
+    text_alignment = Alignment(wrap_text=True, vertical='center')
+
+    # Headers
+    headers = [
+        'Drawing #', 'Sheet Title', 'Drawing Content', 'Related Spec Content',
+        'Spec Section', 'Spec Page', 'Reason', 'Confidence'
+    ]
+    for col, header in enumerate(headers, start=1):
+        cell = worksheet.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+
+    # Data rows
+    for row_idx, conflict in enumerate(conflicts, start=2):
+        # Get drawing info
+        sheet_number = None
+        sheet_title = None
+        if conflict.note and conflict.note.section and conflict.note.section.page:
+            page = conflict.note.section.page
+            sheet_number = page.sheet_number
+            sheet_title = page.sheet_title
+
+        row_data = [
+            sheet_number,
+            sheet_title,
+            conflict.note_text,
+            conflict.spec_text,
+            conflict.spec_masterformat_number,
+            conflict.spec_page_number,
+            conflict.reason,
+            f"{int(conflict.confidence * 100)}%",
+        ]
+
+        for col, value in enumerate(row_data, start=1):
+            cell = worksheet.cell(row=row_idx, column=col, value=value)
+            cell.alignment = text_alignment
+
+    # Set column widths
+    column_widths = [15, 30, 50, 50, 15, 12, 40, 12]
+    for col, width in enumerate(column_widths, start=1):
+        worksheet.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
+
+    # Create response
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    response['Content-Disposition'] = 'attachment; filename=spec_conflicts.xlsx'
+    workbook.save(response)
+
+    return response

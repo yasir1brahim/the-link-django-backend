@@ -17,6 +17,7 @@ from .views.spec_comparison_views import (
     get_spec_conflicts,
     get_skipped_notes,
     list_spec_comparisons,
+    export_spec_conflicts,
 )
 
 
@@ -141,6 +142,7 @@ urlpatterns = [
     path('webhooks/drawing-extraction/', drawing_views.drawing_extraction_webhook, name='drawing-extraction-webhook'),
     path('webhooks/spec-comparison/', spec_comparison_webhook, name='spec-comparison-webhook'),
     path('projects/<int:project_id>/trigger-spec-comparison/', trigger_spec_comparison, name='trigger-spec-comparison'),
+    path('projects/<int:project_id>/spec-conflicts/export/', export_spec_conflicts, name='spec-conflicts-export'),
     path('projects/<int:project_id>/spec-conflicts/', get_spec_conflicts, name='spec-conflicts'),
     path('projects/<int:project_id>/skipped-notes/', get_skipped_notes, name='skipped-notes'),
     path('projects/<int:project_id>/spec-comparisons/', list_spec_comparisons, name='spec-comparisons-list'),
