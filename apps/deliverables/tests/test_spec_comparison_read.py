@@ -663,3 +663,143 @@ class TestSpecConflictsFiltering(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], 1)
+
+
+class TestSpecConflictsFilterOptions(APITestCase):
+    """Test filter_options in spec conflicts response"""
+
+    def setUp(self):
+        from apps.deliverables.models import (
+            DrawingFile,
+            DrawingExtraction,
+            DrawingExtractionStatus,
+            DrawingPage,
+            DrawingNoteSection,
+            DrawingNote,
+        )
+
+        self.user = User.objects.create_user('test@example.com', password='testpass123')
+        self.team = Team.objects.create(name='Test Team', slug='test-team')
+        self.project = Project.objects.create(
+            name='Test Project',
+            project_number='P-001',
+            team=self.team,
+            created_by=self.user
+        )
+        self.project_version = self.project.versions.first()
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role='project_member'
+        )
+
+        self.comparison = SpecComparison.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            status=SpecComparisonStatus.SUCCESS,
+            event_id='test-event',
+        )
+
+        # Create drawing structures
+        self.drawing_file = DrawingFile.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            file_name='test.pdf',
+            file_s3_key='drawings/test.pdf',
+            md5='abc123',
+        )
+        self.extraction = DrawingExtraction.objects.create(
+            drawing_file=self.drawing_file,
+            status=DrawingExtractionStatus.SUCCESS,
+        )
+        page1 = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=1,
+            page_type='drawing',
+            extraction_status='success',
+            sheet_number='P-201',
+        )
+        page2 = DrawingPage.objects.create(
+            drawing_file=self.drawing_file,
+            extraction=self.extraction,
+            page_number=2,
+            page_type='drawing',
+            extraction_status='success',
+            sheet_number='M-101',
+        )
+        section1 = DrawingNoteSection.objects.create(page=page1, header='NOTES')
+        section2 = DrawingNoteSection.objects.create(page=page2, header='NOTES')
+        note1 = DrawingNote.objects.create(section=section1, note_number=1, category='general', text='Note 1')
+        note2 = DrawingNote.objects.create(section=section2, note_number=1, category='general', text='Note 2')
+
+        SpecConflict.objects.create(
+            comparison=self.comparison,
+            note=note1,
+            note_id_from_lambda='1',
+            note_text='Note 1',
+            spec_text='Spec 1',
+            spec_file_s3_key='specs/a.pdf',
+            spec_page_number=1,
+            spec_masterformat_number='220500',
+            confidence=0.9,
+            reason='Reason A',
+        )
+        SpecConflict.objects.create(
+            comparison=self.comparison,
+            note=note2,
+            note_id_from_lambda='2',
+            note_text='Note 2',
+            spec_text='Spec 2',
+            spec_file_s3_key='specs/b.pdf',
+            spec_page_number=2,
+            spec_masterformat_number='230500',
+            confidence=0.8,
+            reason='Reason B',
+        )
+
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse('deliverables:spec-conflicts', kwargs={'project_id': self.project.id})
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_includes_filter_options(self, mock_presigned):
+        """Test response includes filter_options"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {'project_version_id': self.project_version.id})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('filter_options', response.data)
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_filter_options_contains_sheet_numbers(self, mock_presigned):
+        """Test filter_options includes unique sheet numbers"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {'project_version_id': self.project_version.id})
+
+        sheet_numbers = response.data['filter_options']['sheet_numbers']
+        self.assertIn('P-201', sheet_numbers)
+        self.assertIn('M-101', sheet_numbers)
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_filter_options_contains_spec_masterformat_numbers(self, mock_presigned):
+        """Test filter_options includes unique spec masterformat numbers"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {'project_version_id': self.project_version.id})
+
+        spec_numbers = response.data['filter_options']['spec_masterformat_numbers']
+        self.assertIn('220500', spec_numbers)
+        self.assertIn('230500', spec_numbers)
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_filter_options_contains_reasons(self, mock_presigned):
+        """Test filter_options includes unique reasons"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {'project_version_id': self.project_version.id})
+
+        reasons = response.data['filter_options']['reasons']
+        self.assertIn('Reason A', reasons)
+        self.assertIn('Reason B', reasons)

@@ -554,8 +554,32 @@ def get_spec_conflicts(request, project_id):
             'next': None,
             'previous': None,
             'comparison': None,
+            'filter_options': {
+                'sheet_numbers': [],
+                'spec_masterformat_numbers': [],
+                'reasons': [],
+            },
             'results': [],
         })
+
+    # Get filter options from unfiltered queryset (for dropdown population)
+    all_conflicts = SpecConflict.objects.filter(comparison=comparison).select_related(
+        'note__section__page'
+    )
+
+    filter_options = {
+        'sheet_numbers': sorted(list(
+            all_conflicts.exclude(note__section__page__sheet_number__isnull=True)
+            .values_list('note__section__page__sheet_number', flat=True)
+            .distinct()
+        )),
+        'spec_masterformat_numbers': sorted(list(
+            all_conflicts.values_list('spec_masterformat_number', flat=True).distinct()
+        )),
+        'reasons': sorted(list(
+            all_conflicts.values_list('reason', flat=True).distinct()
+        )),
+    }
 
     # Get conflicts with pagination (select_related to avoid N+1 on note access)
     conflicts = SpecConflict.objects.filter(comparison=comparison).select_related(
@@ -602,6 +626,7 @@ def get_spec_conflicts(request, project_id):
 
     response = paginator.get_paginated_response(serializer.data)
     response.data['comparison'] = SpecComparisonSummarySerializer(comparison).data
+    response.data['filter_options'] = filter_options
 
     return response
 
