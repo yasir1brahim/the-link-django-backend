@@ -458,6 +458,16 @@ def trigger_spec_comparison(request, project_id):
 # --- Read Endpoints ---
 
 
+# Sortable columns mapping for spec conflicts
+SORTABLE_COLUMNS = {
+    'sheet_number': 'note__section__page__sheet_number',
+    'note_text': 'note_text',
+    'spec_text': 'spec_text',
+    'spec_masterformat_number': 'spec_masterformat_number',
+    'reason': 'reason',
+}
+
+
 class SpecComparisonPagination(PageNumberPagination):
     page_size = 50
     page_size_query_param = 'limit'  # Use 'limit' for consistency with DrawingNotePagination
@@ -548,7 +558,21 @@ def get_spec_conflicts(request, project_id):
         })
 
     # Get conflicts with pagination (select_related to avoid N+1 on note access)
-    conflicts = SpecConflict.objects.filter(comparison=comparison).select_related('note').order_by('id')
+    conflicts = SpecConflict.objects.filter(comparison=comparison).select_related(
+        'note__section__page__drawing_file'
+    )
+
+    # Apply sorting
+    sort_column = request.query_params.get('sort_column')
+    sort_direction = request.query_params.get('sort_direction', 'asc')
+
+    if sort_column and sort_column in SORTABLE_COLUMNS:
+        order_field = SORTABLE_COLUMNS[sort_column]
+        if sort_direction == 'desc':
+            order_field = f'-{order_field}'
+        conflicts = conflicts.order_by(order_field, 'id')  # Secondary sort by id for stability
+    else:
+        conflicts = conflicts.order_by('id')
 
     paginator = SpecComparisonPagination()
     page = paginator.paginate_queryset(conflicts, request)

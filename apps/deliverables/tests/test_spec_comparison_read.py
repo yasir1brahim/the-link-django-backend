@@ -347,3 +347,120 @@ class TestSpecComparisonsListEndpoint(APITestCase):
         )
         self.assertIsNotNone(comparison_with_user)
         self.assertIsNotNone(comparison_with_user['triggered_by'])
+
+
+class TestSpecConflictsSorting(APITestCase):
+    """Test sorting on spec conflicts endpoint"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            'test@example.com',
+            password='testpass123'
+        )
+        self.team = Team.objects.create(name='Test Team', slug='test-team')
+        self.project = Project.objects.create(
+            name='Test Project',
+            project_number='P-001',
+            team=self.team,
+            created_by=self.user
+        )
+        self.project_version = self.project.versions.first()
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role='project_member'
+        )
+
+        self.comparison = SpecComparison.objects.create(
+            project=self.project,
+            project_version=self.project_version,
+            status=SpecComparisonStatus.SUCCESS,
+            event_id='test-event',
+        )
+
+        # Create conflicts with different values for sorting
+        self.conflict_a = SpecConflict.objects.create(
+            comparison=self.comparison,
+            note_id_from_lambda='1',
+            note_text='Alpha note',
+            spec_text='Spec A',
+            spec_file_s3_key='specs/a.pdf',
+            spec_page_number=1,
+            spec_masterformat_number='220500',
+            confidence=0.9,
+            reason='Reason A',
+        )
+        self.conflict_b = SpecConflict.objects.create(
+            comparison=self.comparison,
+            note_id_from_lambda='2',
+            note_text='Beta note',
+            spec_text='Spec B',
+            spec_file_s3_key='specs/b.pdf',
+            spec_page_number=2,
+            spec_masterformat_number='230500',
+            confidence=0.8,
+            reason='Reason B',
+        )
+
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse('deliverables:spec-conflicts', kwargs={'project_id': self.project.id})
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_sort_by_note_text_asc(self, mock_presigned):
+        """Test sorting by note_text ascending"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {
+            'project_version_id': self.project_version.id,
+            'sort_column': 'note_text',
+            'sort_direction': 'asc'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        self.assertEqual(results[0]['note_text'], 'Alpha note')
+        self.assertEqual(results[1]['note_text'], 'Beta note')
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_sort_by_note_text_desc(self, mock_presigned):
+        """Test sorting by note_text descending"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {
+            'project_version_id': self.project_version.id,
+            'sort_column': 'note_text',
+            'sort_direction': 'desc'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        self.assertEqual(results[0]['note_text'], 'Beta note')
+        self.assertEqual(results[1]['note_text'], 'Alpha note')
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_sort_by_spec_masterformat_number(self, mock_presigned):
+        """Test sorting by spec_masterformat_number"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {
+            'project_version_id': self.project_version.id,
+            'sort_column': 'spec_masterformat_number',
+            'sort_direction': 'asc'
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results']
+        self.assertEqual(results[0]['spec_masterformat_number'], '220500')
+        self.assertEqual(results[1]['spec_masterformat_number'], '230500')
+
+    @patch('apps.deliverables.serializers.spec_comparison_serializers.s3.generate_presigned_url')
+    def test_invalid_sort_column_ignored(self, mock_presigned):
+        """Test invalid sort column is ignored (falls back to default)"""
+        mock_presigned.return_value = 'https://presigned-url.com'
+
+        response = self.client.get(self.url, {
+            'project_version_id': self.project_version.id,
+            'sort_column': 'invalid_column',
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
