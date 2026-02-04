@@ -1879,7 +1879,10 @@ def spec_status_webhook(request):
                 masterformat_section=masterformat_section,
                 file_s3_key=subsection.get('file_s3_key')
             )
+            # Initialize processing and embedding status for the newly created section
             section.processing_status = DocProcessingStatus.PENDING_PROCESSING
+            if created and not section.specgpt_embedding_status:
+                section.specgpt_embedding_status = UploadedFile.SpecgptProcessingStatusChoices.NONE
             section.save()
     elif request_data['new_status'] == 'PROCESSED_SECTION':
         print(f"SPEC STATUS WEBHOOK: saving submittals")
@@ -3619,8 +3622,14 @@ def trigger_compass_processing(request, project_id):
                 doc.specgpt_processing_status = UploadedFile.SpecgptProcessingStatusChoices.IN_QUEUE
                 doc.save()
                 
-                # Delete existing submittals before reprocessing (same as reprocess_document)
-                delete_submittals_for_document(doc.id)
+                # Delete existing spec sections before reprocessing to ensure clean state for webhook processing
+                # This prevents stale or partially reused records from interfering with status transitions
+                spec_sections_to_delete = SpecSection.objects.filter(document_id=doc.id)
+                spec_sections_deleted, _ = spec_sections_to_delete.delete()
+                logging.info(f"Deleted {spec_sections_deleted} spec section(s) for document_id={doc.id} before reprocessing")
+                
+                # Note: Submittals are intentionally preserved to maintain user-created Spec Item Editing data
+                # during reprocessing. The parse_spec process will create new submittals as needed.
                 
                 # Get feature flags (same as reprocess_document)
                 is_notices_flag_active = is_notices_feature_flag_active(request.user, project.team)
