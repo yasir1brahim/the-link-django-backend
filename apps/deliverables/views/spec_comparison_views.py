@@ -296,6 +296,10 @@ def build_comparison_payload(project, project_version, comparison_id, event_id):
                 "category": note.category,
                 "sheet_number": note.section.page.sheet_number,
                 "sheet_title": note.section.page.sheet_title,
+                "disciplines": note.disciplines or [],
+                "discipline_confidence": note.discipline_confidence,
+                "sheet_discipline": note.section.page.sheet_discipline,
+                "sheet_discipline_confidence": note.section.page.sheet_discipline_confidence,
             }
             for note in drawing_notes
         ],
