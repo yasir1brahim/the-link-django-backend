@@ -140,3 +140,22 @@ def is_drawings_feature_flag_active(user, team, project=None):
     return (settings.DRAWINGS_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or
             settings.DRAWINGS_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or
             (project and settings.DRAWINGS_FEATURE_FLAG_NAME in get_active_flags_for_project(project)))
+
+
+def is_drawing_spec_comparison_active(user, team, project=None):
+    """
+    Check if the drawing spec comparison feature flag is active.
+
+    Args:
+        user: User object
+        team: Team object
+        project: Optional Project object
+
+    Returns:
+        bool: True if flag is active, False otherwise
+    """
+    return (
+        settings.DRAWING_SPEC_COMPARISON_FEATURE_FLAG_NAME in get_active_flags_for_user(user) or
+        settings.DRAWING_SPEC_COMPARISON_FEATURE_FLAG_NAME in get_active_flags_for_team(team) or
+        (project and settings.DRAWING_SPEC_COMPARISON_FEATURE_FLAG_NAME in get_active_flags_for_project(project))
+    )

@@ -1123,3 +1123,155 @@ class DrawingExtractionWebhookEvent(BaseModel):
 
 
 # endregion Drawing Parser Models
+
+
+# region Spec Comparison Models
+
+
+class SpecComparisonStatus(models.TextChoices):
+    """Status of a spec comparison run"""
+    PENDING = "PENDING", "Pending"
+    PROCESSING = "PROCESSING", "Processing"
+    SUCCESS = "SUCCESS", "Success"
+    PARTIAL_SUCCESS = "PARTIAL_SUCCESS", "Partial Success"
+    FAILED = "FAILED", "Failed"
+
+
+class SkipReason(models.TextChoices):
+    """Reason why a note was skipped during comparison"""
+    UNKNOWN_DISCIPLINE = "unknown_discipline", "Unknown Discipline"
+    SKIP_BY_POLICY = "skip_by_policy", "Skip by Policy"
+    NO_MATCHING_SPECS = "no_matching_specs", "No Matching Specs"
+    MALFORMED_DISCIPLINE = "malformed_discipline", "Malformed Discipline"
+
+
+class SpecComparison(BaseModel):
+    """Tracks each spec comparison run for a project"""
+
+    project = models.ForeignKey(
+        "Project",
+        on_delete=models.CASCADE,
+        related_name="spec_comparisons"
+    )
+    project_version = models.ForeignKey(
+        "ProjectVersion",
+        on_delete=models.CASCADE,
+        related_name="spec_comparisons"
+    )
+    triggered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="triggered_spec_comparisons"
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=SpecComparisonStatus.choices,
+        default=SpecComparisonStatus.PENDING
+    )
+    event_id = models.CharField(max_length=64, unique=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    notes_processed = models.IntegerField(default=0)
+    notes_skipped = models.IntegerField(default=0)
+    spec_files_processed = models.IntegerField(default=0)
+    notes_with_mismatch = models.IntegerField(default=0)
+    error_message = models.TextField(null=True, blank=True)
+    payload_s3_key = models.CharField(max_length=1024, null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['project', 'project_version', 'created_at']),
+            models.Index(fields=['project', 'status', 'completed_at']),
+        ]
+
+    def __str__(self):
+        return f"SpecComparison {self.id} ({self.status})"
+
+
+class SpecComparisonWebhookEvent(BaseModel):
+    """Tracks webhook deliveries for idempotency"""
+
+    comparison = models.ForeignKey(
+        "SpecComparison",
+        on_delete=models.CASCADE,
+        related_name="webhook_events"
+    )
+    event_id = models.CharField(max_length=64, unique=True)
+    new_status = models.CharField(
+        max_length=32,
+        choices=SpecComparisonStatus.choices
+    )
+
+    def __str__(self):
+        return f"WebhookEvent {self.event_id} -> {self.new_status}"
+
+
+class SpecConflict(BaseModel):
+    """Stores each detected conflict between a drawing note and spec"""
+
+    comparison = models.ForeignKey(
+        "SpecComparison",
+        on_delete=models.CASCADE,
+        related_name="conflicts"
+    )
+    note = models.ForeignKey(
+        "DrawingNote",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="spec_conflicts"
+    )
+    note_id_from_lambda = models.CharField(max_length=64)
+    note_text = models.TextField()
+    spec_text = models.TextField()
+    spec_file_s3_key = models.CharField(max_length=1024)
+    spec_page_number = models.IntegerField()
+    spec_masterformat_number = models.CharField(max_length=256)  # Match MasterFormatSection.masterformat_number
+    confidence = models.FloatField()
+    reason = models.TextField()
+    pdf_locations = models.JSONField(default=list)
+
+    class Meta:
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['comparison']),
+        ]
+
+    def __str__(self):
+        return f"Conflict {self.id}: {self.note_text[:50]}..."
+
+
+class SkippedNote(BaseModel):
+    """Stores why notes were not analyzed during comparison"""
+
+    comparison = models.ForeignKey(
+        "SpecComparison",
+        on_delete=models.CASCADE,
+        related_name="skipped_notes"
+    )
+    note = models.ForeignKey(
+        "DrawingNote",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="skipped_in_comparisons"
+    )
+    note_id_from_lambda = models.CharField(max_length=64)
+    disciplines = models.JSONField(default=list)
+    sheet_discipline = models.CharField(max_length=32, null=True, blank=True)
+    reason = models.CharField(max_length=32, choices=SkipReason.choices)
+    detail = models.TextField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['comparison', 'reason']),
+        ]
+
+    def __str__(self):
+        return f"SkippedNote {self.note_id_from_lambda}: {self.reason}"
+
+
+# endregion Spec Comparison Models
