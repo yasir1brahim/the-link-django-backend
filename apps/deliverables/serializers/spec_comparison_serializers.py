@@ -78,8 +78,34 @@ class SkippedNotePayloadSerializer(serializers.Serializer):
     detail = serializers.CharField(required=False, allow_null=True)
 
 
+class SpecComparisonWebhookDataSerializer(serializers.Serializer):
+    """Validates the nested 'data' object from lambda webhook payload"""
+    conflicts = SpecConflictPayloadSerializer(many=True, required=False, default=list)
+    skipped_notes = SkippedNotePayloadSerializer(many=True, required=False, default=list)
+    notes_processed = serializers.IntegerField(required=False, default=0, min_value=0)
+    notes_skipped = serializers.IntegerField(required=False, default=0, min_value=0)
+    # Lambda sends 'specs_processed', we map to 'spec_files_processed' for model compatibility
+    specs_processed = serializers.IntegerField(required=False, default=0, min_value=0)
+    notes_with_mismatch = serializers.IntegerField(required=False, default=0, min_value=0)
+    error_message = serializers.CharField(required=False, allow_null=True)
+
+
 class SpecComparisonWebhookSerializer(serializers.Serializer):
-    """Validates the complete webhook payload from lambda"""
+    """Validates the complete webhook payload from lambda.
+
+    Lambda sends:
+    {
+        "event_id": "...",
+        "status": "SUCCESS",
+        "comparison_id": 9,
+        "data": {
+            "conflicts": [...],
+            "skipped_notes": [...],
+            "notes_processed": 32,
+            ...
+        }
+    }
+    """
     event_id = serializers.CharField(required=True, allow_blank=False)
     comparison_id = serializers.IntegerField(required=True)
     status = serializers.ChoiceField(choices=[
@@ -87,13 +113,22 @@ class SpecComparisonWebhookSerializer(serializers.Serializer):
         SpecComparisonStatus.PARTIAL_SUCCESS,
         SpecComparisonStatus.FAILED,
     ])  # Only terminal statuses allowed
-    conflicts = SpecConflictPayloadSerializer(many=True, required=False, default=list)
-    skipped_notes = SkippedNotePayloadSerializer(many=True, required=False, default=list)
-    notes_processed = serializers.IntegerField(required=False, default=0, min_value=0)
-    notes_skipped = serializers.IntegerField(required=False, default=0, min_value=0)
-    spec_files_processed = serializers.IntegerField(required=False, default=0, min_value=0)
-    notes_with_mismatch = serializers.IntegerField(required=False, default=0, min_value=0)
-    error_message = serializers.CharField(required=False, allow_null=True)
+    data = SpecComparisonWebhookDataSerializer(required=True)
+
+    def to_internal_value(self, data):
+        """Flatten the nested 'data' field into top-level for easier access in view."""
+        result = super().to_internal_value(data)
+        # Flatten nested data into top-level
+        nested_data = result.pop('data', {})
+        result['conflicts'] = nested_data.get('conflicts', [])
+        result['skipped_notes'] = nested_data.get('skipped_notes', [])
+        result['notes_processed'] = nested_data.get('notes_processed', 0)
+        result['notes_skipped'] = nested_data.get('notes_skipped', 0)
+        # Map 'specs_processed' from lambda to 'spec_files_processed' for model
+        result['spec_files_processed'] = nested_data.get('specs_processed', 0)
+        result['notes_with_mismatch'] = nested_data.get('notes_with_mismatch', 0)
+        result['error_message'] = nested_data.get('error_message')
+        return result
 
 
 # --- Read Serializers (for API responses) ---

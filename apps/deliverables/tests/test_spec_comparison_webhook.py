@@ -132,33 +132,45 @@ class TestSpecComparisonWebhook(APITestCase):
 
         self.webhook_url = reverse('deliverables:spec-comparison-webhook')
 
+    def _make_payload(self, event_id, comparison_id, status, data_fields=None):
+        """Helper to create webhook payload with nested data structure."""
+        payload = {
+            'event_id': event_id,
+            'comparison_id': comparison_id,
+            'status': status,
+            'data': data_fields or {}
+        }
+        return payload
+
     def test_success_webhook_creates_conflicts(self):
         """Test successful webhook creates conflict records"""
-        payload = {
-            'event_id': 'test-event-id-123',
-            'comparison_id': self.comparison.id,
-            'status': 'SUCCESS',
-            'conflicts': [
-                {
-                    'note_id': str(self.note.id),
-                    'note_text': 'Test note text',
-                    'spec_text': 'Conflicting spec text',
-                    'spec_source_file': 's3://bucket/specs/plumbing.pdf',
-                    'spec_page_number': 15,
-                    'spec_masterformat_number': '220500',
-                    'confidence': 0.85,
-                    'reason': 'Ball vs gate valve conflict',
-                    'pdf_locations': [
-                        {'page_no': 15, 'x': 72.0, 'y': 144.5, 'width': 200.0, 'height': 12.0}
-                    ],
-                }
-            ],
-            'skipped_notes': [],
-            'notes_processed': 100,
-            'notes_skipped': 5,
-            'spec_files_processed': 10,
-            'notes_with_mismatch': 3,
-        }
+        payload = self._make_payload(
+            'test-event-id-123',
+            self.comparison.id,
+            'SUCCESS',
+            {
+                'conflicts': [
+                    {
+                        'note_id': str(self.note.id),
+                        'note_text': 'Test note text',
+                        'spec_text': 'Conflicting spec text',
+                        'spec_source_file': 's3://bucket/specs/plumbing.pdf',
+                        'spec_page_number': 15,
+                        'spec_masterformat_number': '220500',
+                        'confidence': 0.85,
+                        'reason': 'Ball vs gate valve conflict',
+                        'pdf_locations': [
+                            {'page_no': 15, 'x': 72.0, 'y': 144.5, 'width': 200.0, 'height': 12.0}
+                        ],
+                    }
+                ],
+                'skipped_notes': [],
+                'notes_processed': 100,
+                'notes_skipped': 5,
+                'specs_processed': 10,
+                'notes_with_mismatch': 3,
+            }
+        )
 
         response = self.client.post(
             self.webhook_url,
@@ -186,25 +198,27 @@ class TestSpecComparisonWebhook(APITestCase):
 
     def test_success_webhook_creates_skipped_notes(self):
         """Test successful webhook creates skipped note records"""
-        payload = {
-            'event_id': 'test-event-id-123',
-            'comparison_id': self.comparison.id,
-            'status': 'SUCCESS',
-            'conflicts': [],
-            'skipped_notes': [
-                {
-                    'note_id': str(self.note.id),
-                    'disciplines': ['plumbing'],
-                    'sheet_discipline': 'mechanical',
-                    'reason': 'no_matching_specs',
-                    'detail': 'Division 22 has no specs uploaded',
-                }
-            ],
-            'notes_processed': 50,
-            'notes_skipped': 10,
-            'spec_files_processed': 5,
-            'notes_with_mismatch': 0,
-        }
+        payload = self._make_payload(
+            'test-event-id-123',
+            self.comparison.id,
+            'SUCCESS',
+            {
+                'conflicts': [],
+                'skipped_notes': [
+                    {
+                        'note_id': str(self.note.id),
+                        'disciplines': ['plumbing'],
+                        'sheet_discipline': 'mechanical',
+                        'reason': 'no_matching_specs',
+                        'detail': 'Division 22 has no specs uploaded',
+                    }
+                ],
+                'notes_processed': 50,
+                'notes_skipped': 10,
+                'specs_processed': 5,
+                'notes_with_mismatch': 0,
+            }
+        )
 
         response = self.client.post(
             self.webhook_url,
@@ -222,24 +236,26 @@ class TestSpecComparisonWebhook(APITestCase):
 
     def test_failed_webhook_does_not_create_conflicts(self):
         """Test FAILED status does not store conflicts/skipped notes"""
-        payload = {
-            'event_id': 'test-event-id-123',
-            'comparison_id': self.comparison.id,
-            'status': 'FAILED',
-            'conflicts': [
-                {
-                    'note_id': '999',
-                    'note_text': 'Should not be stored',
-                    'spec_text': 'Should not be stored',
-                    'spec_source_file': 's3://bucket/specs/test.pdf',
-                    'spec_page_number': 1,
-                    'spec_masterformat_number': '220500',
-                    'confidence': 0.5,
-                    'reason': 'Test',
-                }
-            ],
-            'error_message': 'Lambda timeout',
-        }
+        payload = self._make_payload(
+            'test-event-id-123',
+            self.comparison.id,
+            'FAILED',
+            {
+                'conflicts': [
+                    {
+                        'note_id': '999',
+                        'note_text': 'Should not be stored',
+                        'spec_text': 'Should not be stored',
+                        'spec_source_file': 's3://bucket/specs/test.pdf',
+                        'spec_page_number': 1,
+                        'spec_masterformat_number': '220500',
+                        'confidence': 0.5,
+                        'reason': 'Test',
+                    }
+                ],
+                'error_message': 'Lambda timeout',
+            }
+        )
 
         response = self.client.post(
             self.webhook_url,
@@ -260,14 +276,16 @@ class TestSpecComparisonWebhook(APITestCase):
 
     def test_idempotency_duplicate_event_id(self):
         """Test duplicate event_ids are ignored"""
-        payload = {
-            'event_id': 'test-event-id-123',
-            'comparison_id': self.comparison.id,
-            'status': 'SUCCESS',
-            'conflicts': [],
-            'skipped_notes': [],
-            'notes_processed': 100,
-        }
+        payload = self._make_payload(
+            'test-event-id-123',
+            self.comparison.id,
+            'SUCCESS',
+            {
+                'conflicts': [],
+                'skipped_notes': [],
+                'notes_processed': 100,
+            }
+        )
 
         # First call
         response1 = self.client.post(
@@ -292,11 +310,12 @@ class TestSpecComparisonWebhook(APITestCase):
 
     def test_event_id_mismatch_returns_400(self):
         """Test mismatched event_id returns 400"""
-        payload = {
-            'event_id': 'wrong-event-id',
-            'comparison_id': self.comparison.id,
-            'status': 'SUCCESS',
-        }
+        payload = self._make_payload(
+            'wrong-event-id',
+            self.comparison.id,
+            'SUCCESS',
+            {}
+        )
 
         response = self.client.post(
             self.webhook_url,
@@ -309,11 +328,12 @@ class TestSpecComparisonWebhook(APITestCase):
 
     def test_comparison_not_found_returns_404(self):
         """Test non-existent comparison returns 404"""
-        payload = {
-            'event_id': 'some-event-id',
-            'comparison_id': 99999,
-            'status': 'SUCCESS',
-        }
+        payload = self._make_payload(
+            'some-event-id',
+            99999,
+            'SUCCESS',
+            {}
+        )
 
         response = self.client.post(
             self.webhook_url,
@@ -329,6 +349,7 @@ class TestSpecComparisonWebhook(APITestCase):
             'event_id': '',  # Empty not allowed
             'comparison_id': self.comparison.id,
             'status': 'SUCCESS',
+            'data': {}
         }
 
         response = self.client.post(
@@ -341,23 +362,25 @@ class TestSpecComparisonWebhook(APITestCase):
 
     def test_invalid_spec_source_file_returns_400(self):
         """Test invalid spec_source_file format returns 400"""
-        payload = {
-            'event_id': 'test-event-id-123',
-            'comparison_id': self.comparison.id,
-            'status': 'SUCCESS',
-            'conflicts': [
-                {
-                    'note_id': '1',
-                    'note_text': 'Note',
-                    'spec_text': 'Spec',
-                    'spec_source_file': 'https://not-s3.com/file.pdf',
-                    'spec_page_number': 1,
-                    'spec_masterformat_number': '220500',
-                    'confidence': 0.5,
-                    'reason': 'Reason',
-                }
-            ],
-        }
+        payload = self._make_payload(
+            'test-event-id-123',
+            self.comparison.id,
+            'SUCCESS',
+            {
+                'conflicts': [
+                    {
+                        'note_id': '1',
+                        'note_text': 'Note',
+                        'spec_text': 'Spec',
+                        'spec_source_file': 'https://not-s3.com/file.pdf',
+                        'spec_page_number': 1,
+                        'spec_masterformat_number': '220500',
+                        'confidence': 0.5,
+                        'reason': 'Reason',
+                    }
+                ],
+            }
+        )
 
         response = self.client.post(
             self.webhook_url,
@@ -369,23 +392,25 @@ class TestSpecComparisonWebhook(APITestCase):
 
     def test_note_fk_null_when_not_found(self):
         """Test note FK is null when note_id not found"""
-        payload = {
-            'event_id': 'test-event-id-123',
-            'comparison_id': self.comparison.id,
-            'status': 'SUCCESS',
-            'conflicts': [
-                {
-                    'note_id': '999999',  # Non-existent
-                    'note_text': 'Note text',
-                    'spec_text': 'Spec text',
-                    'spec_source_file': 's3://bucket/specs/test.pdf',
-                    'spec_page_number': 1,
-                    'spec_masterformat_number': '220500',
-                    'confidence': 0.5,
-                    'reason': 'Reason',
-                }
-            ],
-        }
+        payload = self._make_payload(
+            'test-event-id-123',
+            self.comparison.id,
+            'SUCCESS',
+            {
+                'conflicts': [
+                    {
+                        'note_id': '999999',  # Non-existent
+                        'note_text': 'Note text',
+                        'spec_text': 'Spec text',
+                        'spec_source_file': 's3://bucket/specs/test.pdf',
+                        'spec_page_number': 1,
+                        'spec_masterformat_number': '220500',
+                        'confidence': 0.5,
+                        'reason': 'Reason',
+                    }
+                ],
+            }
+        )
 
         response = self.client.post(
             self.webhook_url,
@@ -400,23 +425,25 @@ class TestSpecComparisonWebhook(APITestCase):
 
     def test_non_integer_note_id_handled_gracefully(self):
         """Test non-integer note_id is handled gracefully"""
-        payload = {
-            'event_id': 'test-event-id-123',
-            'comparison_id': self.comparison.id,
-            'status': 'SUCCESS',
-            'conflicts': [
-                {
-                    'note_id': 'not-an-integer',
-                    'note_text': 'Note text',
-                    'spec_text': 'Spec text',
-                    'spec_source_file': 's3://bucket/specs/test.pdf',
-                    'spec_page_number': 1,
-                    'spec_masterformat_number': '220500',
-                    'confidence': 0.5,
-                    'reason': 'Reason',
-                }
-            ],
-        }
+        payload = self._make_payload(
+            'test-event-id-123',
+            self.comparison.id,
+            'SUCCESS',
+            {
+                'conflicts': [
+                    {
+                        'note_id': 'not-an-integer',
+                        'note_text': 'Note text',
+                        'spec_text': 'Spec text',
+                        'spec_source_file': 's3://bucket/specs/test.pdf',
+                        'spec_page_number': 1,
+                        'spec_masterformat_number': '220500',
+                        'confidence': 0.5,
+                        'reason': 'Reason',
+                    }
+                ],
+            }
+        )
 
         response = self.client.post(
             self.webhook_url,
@@ -431,31 +458,33 @@ class TestSpecComparisonWebhook(APITestCase):
 
     def test_partial_success_stores_data(self):
         """Test PARTIAL_SUCCESS status stores conflicts and skipped notes"""
-        payload = {
-            'event_id': 'test-event-id-123',
-            'comparison_id': self.comparison.id,
-            'status': 'PARTIAL_SUCCESS',
-            'conflicts': [
-                {
-                    'note_id': str(self.note.id),
-                    'note_text': 'Note',
-                    'spec_text': 'Spec',
-                    'spec_source_file': 's3://bucket/specs/test.pdf',
-                    'spec_page_number': 1,
-                    'spec_masterformat_number': '220500',
-                    'confidence': 0.5,
-                    'reason': 'Reason',
-                }
-            ],
-            'skipped_notes': [
-                {
-                    'note_id': '456',
-                    'reason': 'unknown_discipline',
-                }
-            ],
-            'notes_processed': 50,
-            'notes_skipped': 20,
-        }
+        payload = self._make_payload(
+            'test-event-id-123',
+            self.comparison.id,
+            'PARTIAL_SUCCESS',
+            {
+                'conflicts': [
+                    {
+                        'note_id': str(self.note.id),
+                        'note_text': 'Note',
+                        'spec_text': 'Spec',
+                        'spec_source_file': 's3://bucket/specs/test.pdf',
+                        'spec_page_number': 1,
+                        'spec_masterformat_number': '220500',
+                        'confidence': 0.5,
+                        'reason': 'Reason',
+                    }
+                ],
+                'skipped_notes': [
+                    {
+                        'note_id': '456',
+                        'reason': 'unknown_discipline',
+                    }
+                ],
+                'notes_processed': 50,
+                'notes_skipped': 20,
+            }
+        )
 
         response = self.client.post(
             self.webhook_url,
@@ -472,11 +501,12 @@ class TestSpecComparisonWebhook(APITestCase):
     @override_settings(SPEC_COMPARISON_WEBHOOK_SECRET='test-secret-key')
     def test_invalid_signature_returns_401(self):
         """Test invalid HMAC signature returns 401"""
-        payload = {
-            'event_id': 'test-event-id-123',
-            'comparison_id': self.comparison.id,
-            'status': 'SUCCESS',
-        }
+        payload = self._make_payload(
+            'test-event-id-123',
+            self.comparison.id,
+            'SUCCESS',
+            {}
+        )
 
         response = self.client.post(
             self.webhook_url,
@@ -490,11 +520,12 @@ class TestSpecComparisonWebhook(APITestCase):
     @override_settings(SPEC_COMPARISON_WEBHOOK_SECRET='test-secret-key')
     def test_missing_signature_returns_401(self):
         """Test missing HMAC signature returns 401"""
-        payload = {
-            'event_id': 'test-event-id-123',
-            'comparison_id': self.comparison.id,
-            'status': 'SUCCESS',
-        }
+        payload = self._make_payload(
+            'test-event-id-123',
+            self.comparison.id,
+            'SUCCESS',
+            {}
+        )
 
         response = self.client.post(
             self.webhook_url,
@@ -515,7 +546,9 @@ class TestSpecComparisonWebhook(APITestCase):
             'event_id': 'test-event-id-123',
             'comparison_id': self.comparison.id,
             'status': 'SUCCESS',
-            'notes_processed': 10,
+            'data': {
+                'notes_processed': 10,
+            }
         })
 
         signature = hmac.new(

@@ -161,38 +161,60 @@ class TestSkippedNotePayloadSerializer(TestCase):
 
 @override_settings(S3_BUCKET='bucket')
 class TestSpecComparisonWebhookSerializer(TestCase):
-    """Test SpecComparisonWebhookSerializer validation"""
+    """Test SpecComparisonWebhookSerializer validation.
+
+    Lambda sends nested structure:
+    {
+        "event_id": "...",
+        "comparison_id": 1,
+        "status": "SUCCESS",
+        "data": {
+            "conflicts": [...],
+            "skipped_notes": [...],
+            "notes_processed": 100,
+            ...
+        }
+    }
+    """
 
     def test_valid_success_payload(self):
         data = {
             'event_id': 'evt-123',
             'comparison_id': 1,
             'status': 'SUCCESS',
-            'conflicts': [],
-            'skipped_notes': [],
-            'notes_processed': 100,
-            'notes_skipped': 5,
-            'spec_files_processed': 10,
-            'notes_with_mismatch': 3,
+            'data': {
+                'conflicts': [],
+                'skipped_notes': [],
+                'notes_processed': 100,
+                'notes_skipped': 5,
+                'specs_processed': 10,
+                'notes_with_mismatch': 3,
+            }
         }
         serializer = SpecComparisonWebhookSerializer(data=data)
         self.assertTrue(serializer.is_valid(), serializer.errors)
+        # Verify flattening works
+        self.assertEqual(serializer.validated_data['notes_processed'], 100)
+        self.assertEqual(serializer.validated_data['spec_files_processed'], 10)
 
     def test_valid_failed_payload(self):
         data = {
             'event_id': 'evt-456',
             'comparison_id': 1,
             'status': 'FAILED',
-            'error_message': 'Lambda timeout',
+            'data': {
+                'error_message': 'Lambda timeout',
+            }
         }
         serializer = SpecComparisonWebhookSerializer(data=data)
-        self.assertTrue(serializer.is_valid())
+        self.assertTrue(serializer.is_valid(), serializer.errors)
 
     def test_rejects_empty_event_id(self):
         data = {
             'event_id': '',
             'comparison_id': 1,
             'status': 'SUCCESS',
+            'data': {}
         }
         serializer = SpecComparisonWebhookSerializer(data=data)
         self.assertFalse(serializer.is_valid())
@@ -202,6 +224,7 @@ class TestSpecComparisonWebhookSerializer(TestCase):
         data = {
             'comparison_id': 1,
             'status': 'SUCCESS',
+            'data': {}
         }
         serializer = SpecComparisonWebhookSerializer(data=data)
         self.assertFalse(serializer.is_valid())
@@ -213,6 +236,7 @@ class TestSpecComparisonWebhookSerializer(TestCase):
             'event_id': 'evt-789',
             'comparison_id': 1,
             'status': 'PENDING',
+            'data': {}
         }
         serializer = SpecComparisonWebhookSerializer(data=data)
         self.assertFalse(serializer.is_valid())
@@ -224,6 +248,7 @@ class TestSpecComparisonWebhookSerializer(TestCase):
             'event_id': 'evt-789',
             'comparison_id': 1,
             'status': 'PROCESSING',
+            'data': {}
         }
         serializer = SpecComparisonWebhookSerializer(data=data)
         self.assertFalse(serializer.is_valid())
@@ -234,32 +259,47 @@ class TestSpecComparisonWebhookSerializer(TestCase):
             'event_id': 'evt-partial',
             'comparison_id': 1,
             'status': 'PARTIAL_SUCCESS',
-            'notes_processed': 50,
+            'data': {
+                'notes_processed': 50,
+            }
         }
         serializer = SpecComparisonWebhookSerializer(data=data)
-        self.assertTrue(serializer.is_valid())
+        self.assertTrue(serializer.is_valid(), serializer.errors)
 
     def test_validates_nested_conflicts(self):
         data = {
             'event_id': 'evt-nested',
             'comparison_id': 1,
             'status': 'SUCCESS',
-            'conflicts': [
-                {
-                    'note_id': '1',
-                    'note_text': 'Note',
-                    'spec_text': 'Spec',
-                    'spec_source_file': 'invalid-uri',  # Invalid
-                    'spec_page_number': 1,
-                    'spec_masterformat_number': '220500',
-                    'confidence': 0.9,
-                    'reason': 'Conflict',
-                }
-            ],
+            'data': {
+                'conflicts': [
+                    {
+                        'note_id': '1',
+                        'note_text': 'Note',
+                        'spec_text': 'Spec',
+                        'spec_source_file': 'invalid-uri',  # Invalid
+                        'spec_page_number': 1,
+                        'spec_masterformat_number': '220500',
+                        'confidence': 0.9,
+                        'reason': 'Conflict',
+                    }
+                ],
+            }
         }
         serializer = SpecComparisonWebhookSerializer(data=data)
         self.assertFalse(serializer.is_valid())
-        self.assertIn('conflicts', serializer.errors)
+        self.assertIn('data', serializer.errors)
+
+    def test_rejects_missing_data_field(self):
+        """Data field is required"""
+        data = {
+            'event_id': 'evt-no-data',
+            'comparison_id': 1,
+            'status': 'SUCCESS',
+        }
+        serializer = SpecComparisonWebhookSerializer(data=data)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('data', serializer.errors)
 
 
 @override_settings(S3_BUCKET='bucket')
