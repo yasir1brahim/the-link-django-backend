@@ -73,7 +73,7 @@ class TestUtilityFunctions(TestCase):
         self.assertIsNone(safe_int(None))
 
 
-@override_settings(S3_BUCKET='bucket', SPEC_COMPARISON_WEBHOOK_SECRET='', DEBUG=True)
+@override_settings(S3_BUCKET='bucket', DEBUG=True)
 class TestSpecComparisonWebhook(APITestCase):
     """Test the spec comparison webhook endpoint"""
 
@@ -498,70 +498,3 @@ class TestSpecComparisonWebhook(APITestCase):
         self.assertEqual(SpecConflict.objects.count(), 1)
         self.assertEqual(SkippedNote.objects.count(), 1)
 
-    @override_settings(SPEC_COMPARISON_WEBHOOK_SECRET='test-secret-key')
-    def test_invalid_signature_returns_401(self):
-        """Test invalid HMAC signature returns 401"""
-        payload = self._make_payload(
-            'test-event-id-123',
-            self.comparison.id,
-            'SUCCESS',
-            {}
-        )
-
-        response = self.client.post(
-            self.webhook_url,
-            data=json.dumps(payload),
-            content_type='application/json',
-            HTTP_X_WEBHOOK_SIGNATURE='sha256=invalid-signature'
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
-
-    @override_settings(SPEC_COMPARISON_WEBHOOK_SECRET='test-secret-key')
-    def test_missing_signature_returns_401(self):
-        """Test missing HMAC signature returns 401"""
-        payload = self._make_payload(
-            'test-event-id-123',
-            self.comparison.id,
-            'SUCCESS',
-            {}
-        )
-
-        response = self.client.post(
-            self.webhook_url,
-            data=json.dumps(payload),
-            content_type='application/json'
-            # No X-Webhook-Signature header
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
-
-    @override_settings(SPEC_COMPARISON_WEBHOOK_SECRET='test-secret-key')
-    def test_valid_signature_accepted(self):
-        """Test valid HMAC signature is accepted"""
-        import hmac
-        import hashlib
-
-        payload = json.dumps({
-            'event_id': 'test-event-id-123',
-            'comparison_id': self.comparison.id,
-            'status': 'SUCCESS',
-            'data': {
-                'notes_processed': 10,
-            }
-        })
-
-        signature = hmac.new(
-            b'test-secret-key',
-            payload.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-
-        response = self.client.post(
-            self.webhook_url,
-            data=payload,
-            content_type='application/json',
-            HTTP_X_WEBHOOK_SIGNATURE=f'sha256={signature}'
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)

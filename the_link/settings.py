@@ -649,11 +649,6 @@ SPEC_COMPARISON_LAMBDA_FUNCTION_URL = os.environ.get(
 
 BACKEND_SPEC_COMPARISON_CALLBACK_URL = BACKEND_BASE_URL + "/api/deliverables/webhooks/spec-comparison/"
 
-# Shared secret for webhook HMAC authentication (generate with: python -c "import secrets; print(secrets.token_hex(32))")
-SPEC_COMPARISON_WEBHOOK_SECRET = os.environ.get(
-    "SPEC_COMPARISON_WEBHOOK_SECRET",
-    ""
-)
 
 PROCORE_CLIENT_ID = os.environ.get("PROCORE_CLIENT_ID", default="")
 PROCORE_CLIENT_SECRET = os.environ.get("PROCORE_CLIENT_SECRET", default="")
