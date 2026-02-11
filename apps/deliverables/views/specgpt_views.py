@@ -165,11 +165,16 @@ def specgpt_embedding_webhook(request):
 
     uploaded_file = UploadedFile.objects.get(id=int(request_data['doc_db_record_id']))
     masterformat_section, created = MasterFormatSection.objects.get_or_create(masterformat_number=request_data['master_format_section_number'])
-    section, created = SpecSection.objects.get_or_create(
+    section, section_created = SpecSection.objects.get_or_create(
         document_id=request_data['doc_db_record_id'],
         masterformat_section=masterformat_section,
         file_s3_key=request_data['file_s3_key']
     )
+    
+    # Initialize section status if this is a newly created section
+    if section_created and not section.specgpt_embedding_status:
+        section.specgpt_embedding_status = UploadedFile.SpecgptProcessingStatusChoices.NONE
+        section.save()
 
     if request_data['new_status'] == 'PROCESSING':
         print(f"SPEC GPT EMBEDDING WEBHOOK: setting document {request_data['doc_db_record_id']} section {request_data['master_format_section_number']} with file_s3_key {request_data['file_s3_key']} processing status to PROCESSING")
@@ -186,20 +191,43 @@ def specgpt_embedding_webhook(request):
         section.specgpt_embedding_status = UploadedFile.SpecgptProcessingStatusChoices.FAILED
         section.save()
 
-    """IF document.processing_status == SUBSECTIONS_EXTRACTED or SECTION_PROCESSING_FAILED then we have records of all extracted subsections.
+    """IF document.specgpt_processing_status == SUBSECTIONS_EXTRACTED or SECTION_PROCESSING_FAILED then we have records of all extracted subsections.
     If so, then update document.specgpt_processing_status to PROCESSED if all subsections have been processed"""
     print(f"SPEC GPT EMBEDDING WEBHOOK: checking if all subsections have been processed for document {request_data['doc_db_record_id']}")
     document = uploaded_file
-    if document.specgpt_processing_status in [UploadedFile.SpecgptProcessingStatusChoices.SUBSECTIONS_EXTRACTED, UploadedFile.SpecgptProcessingStatusChoices.SECTION_PROCESSING_FAILED]:
-        print(f"SPEC GPT EMBEDDING WEBHOOK: getting unprocessed section count for document {request_data['doc_db_record_id']}")
-        unprocessed_spec_section_count = SpecSection.objects.filter(document_id=request_data['doc_db_record_id']).exclude(
-            specgpt_embedding_status=UploadedFile.SpecgptProcessingStatusChoices.PROCESSED
-        ).count()
-        print(f"SPEC GPT EMBEDDING WEBHOOK: unprocessed_spec_section_count: {unprocessed_spec_section_count}")
-        if unprocessed_spec_section_count == 0:
-            print(f"SPEC GPT EMBEDDING WEBHOOK: all subsections have been processed for document {request_data['doc_db_record_id']}")
-            document.specgpt_processing_status = UploadedFile.SpecgptProcessingStatusChoices.PROCESSED
-            document.save()
+    document.refresh_from_db()
+
+    # Determine completion by comparing total sections vs processed sections
+    total_sections = SpecSection.objects.filter(document_id=request_data['doc_db_record_id']).count()
+    processed_sections = SpecSection.objects.filter(
+        document_id=request_data['doc_db_record_id'],
+        specgpt_embedding_status=UploadedFile.SpecgptProcessingStatusChoices.PROCESSED
+    ).count()
+    failed_sections = SpecSection.objects.filter(
+        document_id=request_data['doc_db_record_id'],
+        specgpt_embedding_status=UploadedFile.SpecgptProcessingStatusChoices.FAILED
+    ).count()
+
+    print(f"SPEC GPT EMBEDDING WEBHOOK: document {request_data['doc_db_record_id']} prior_status={document.specgpt_processing_status} total_sections={total_sections}, processed_sections={processed_sections}, failed_sections={failed_sections}")
+
+    if total_sections == 0:
+        # No sections to process -> mark processed
+        print(f"SPEC GPT EMBEDDING WEBHOOK: no subsections found for document {request_data['doc_db_record_id']}, marking as processed")
+        document.specgpt_processing_status = UploadedFile.SpecgptProcessingStatusChoices.PROCESSED
+        document.processing_status = DocProcessingStatus.PROCESSED
+        document.save()
+    elif total_sections > 0 and processed_sections == total_sections:
+        # All sections processed successfully
+        print(f"SPEC GPT EMBEDDING WEBHOOK: all subsections have been processed for document {request_data['doc_db_record_id']}")
+        document.specgpt_processing_status = UploadedFile.SpecgptProcessingStatusChoices.PROCESSED
+        document.processing_status = DocProcessingStatus.PROCESSED
+        document.save()
+    elif failed_sections > 0 and (processed_sections + failed_sections) == total_sections:
+        # Some sections failed and all sections are finished (either processed or failed)
+        print(f"SPEC GPT EMBEDDING WEBHOOK: some subsections failed for document {request_data['doc_db_record_id']}")
+        document.specgpt_processing_status = UploadedFile.SpecgptProcessingStatusChoices.SECTION_PROCESSING_FAILED
+        document.processing_status = DocProcessingStatus.SECTION_PROCESSING_FAILED
+        document.save()
 
     return Response(status=status.HTTP_200_OK)
 
