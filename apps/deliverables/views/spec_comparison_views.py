@@ -71,46 +71,6 @@ def safe_int(value: str) -> int | None:
         return None
 
 
-def verify_webhook_signature(request) -> bool:
-    """Verify HMAC signature from lambda webhook.
-
-    Lambda should send signature in X-Webhook-Signature header as:
-    sha256=<hex_digest>
-
-    The signature is computed as HMAC-SHA256 of the request body using
-    SPEC_COMPARISON_WEBHOOK_SECRET as the key.
-
-    SECURITY: Fails closed in production (DEBUG=False) when secret is not configured.
-    """
-    import hmac
-    import hashlib
-
-    secret = settings.SPEC_COMPARISON_WEBHOOK_SECRET
-    if not secret:
-        # Fail closed in production - require secret to be configured
-        if not settings.DEBUG:
-            logger.error("SPEC_COMPARISON_WEBHOOK_SECRET not set in production - rejecting webhook")
-            return False
-        # In development (DEBUG=True), allow requests but warn
-        logger.warning("SPEC_COMPARISON_WEBHOOK_SECRET not set - webhook authentication disabled (dev only)")
-        return True
-
-    signature_header = request.headers.get('X-Webhook-Signature', '')
-    if not signature_header.startswith('sha256='):
-        return False
-
-    expected_signature = signature_header[7:]  # Remove 'sha256=' prefix
-    body = request.body
-
-    computed_signature = hmac.new(
-        secret.encode('utf-8'),
-        body,
-        hashlib.sha256
-    ).hexdigest()
-
-    return hmac.compare_digest(computed_signature, expected_signature)
-
-
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def spec_comparison_webhook(request):
@@ -118,15 +78,7 @@ def spec_comparison_webhook(request):
     Webhook endpoint for receiving spec comparison results from AWS Lambda.
     Idempotent: duplicate event_ids are ignored.
     Atomic: all changes within a single transaction.
-    Authenticated: HMAC signature verified if SPEC_COMPARISON_WEBHOOK_SECRET is set.
     """
-    # Verify webhook signature (HMAC authentication)
-    if not verify_webhook_signature(request):
-        return Response(
-            {"error": "Invalid webhook signature"},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-
     # Validate payload
     serializer = SpecComparisonWebhookSerializer(data=request.data)
     if not serializer.is_valid():
