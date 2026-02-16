@@ -1,6 +1,7 @@
 import re
 import csv
 import io
+from decimal import Decimal
 from typing import List, Optional, Tuple, Union
 from django.db import transaction
 from django.db.models import Max
@@ -8,7 +9,7 @@ from django.db.models import Max
 ANCHOR_REPR_DELIMITER = '$$$'
 
 
-def get_next_submittal_number(project_id: int, project_version_id: int) -> Optional[int]:
+def get_next_submittal_number(project_id: int, project_version_id: int) -> Optional[Decimal]:
     """
     Calculate the next submittal number for a given project and project version.
     
@@ -46,7 +47,7 @@ def get_next_submittal_number(project_id: int, project_version_id: int) -> Optio
         if current_max_number is None:
             return None
 
-        return int(round(current_max_number, 0)) + 1
+        return Decimal(int(round(current_max_number, 0)) + 1)
 
 
 

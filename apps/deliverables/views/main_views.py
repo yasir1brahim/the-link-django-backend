@@ -647,6 +647,8 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         Create a SubmittalItem from a PDF highlight.
         """
         project = get_object_or_404(Project, id=project_id)
+        if not project.members.filter(user=request.user).exists():
+            return Response(status=status.HTTP_403_FORBIDDEN)
         from apps.deliverables.serializers import SubmittalItemFromHighlightSerializer
 
         serializer = SubmittalItemFromHighlightSerializer(

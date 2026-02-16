@@ -674,6 +674,34 @@ class SubmittalItemFromHighlightSerializer(serializers.ModelSerializer):
         allow_null=True
     )
 
+    TEXT_LOCATION_REQUIRED_FIELDS = {"pageIndex", "left", "top", "width", "height"}
+
+    def _validate_text_location(self, location, field_name):
+        """Validate that a text location dict contains the expected fields."""
+        if not isinstance(location, dict):
+            raise serializers.ValidationError({field_name: "Must be a JSON object."})
+        missing = self.TEXT_LOCATION_REQUIRED_FIELDS - location.keys()
+        if missing:
+            raise serializers.ValidationError(
+                {field_name: f"Missing required fields: {', '.join(sorted(missing))}"}
+            )
+
+    def validate(self, attrs):
+        text_location = attrs.get("text_location")
+        if text_location is not None:
+            self._validate_text_location(text_location, "text_location")
+
+        additional = attrs.get("additional_text_locations")
+        if additional is not None:
+            if not isinstance(additional, list):
+                raise serializers.ValidationError(
+                    {"additional_text_locations": "Must be a JSON array."}
+                )
+            for i, loc in enumerate(additional):
+                self._validate_text_location(loc, f"additional_text_locations[{i}]")
+
+        return attrs
+
     def create(self, validated_data):
         # Get the spec section by ID
         spec_section_id = validated_data.pop('spec_section_id')
@@ -692,6 +720,11 @@ class SubmittalItemFromHighlightSerializer(serializers.ModelSerializer):
         # Validate spec_section belongs to the correct project
         if spec_section.document.project_id != project_id:
             raise serializers.ValidationError("SpecSection does not belong to this project")
+
+        # Validate project_version belongs to the correct project
+        project_version = validated_data.get("project_version")
+        if project_version and project_version.project_id != project_id:
+            raise serializers.ValidationError("ProjectVersion does not belong to this project")
 
         # Handle added_under_submittal_id if provided
         added_under_submittal = None
