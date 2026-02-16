@@ -646,6 +646,7 @@ class SubmittalItemViewSet(viewsets.ModelViewSet):
         """
         Create a SubmittalItem from a PDF highlight.
         """
+        project = get_object_or_404(Project, id=project_id)
         from apps.deliverables.serializers import SubmittalItemFromHighlightSerializer
 
         serializer = SubmittalItemFromHighlightSerializer(

@@ -26,6 +26,9 @@ def get_next_submittal_number(project_id: int, project_version_id: int) -> Optio
         >>> next_num = get_next_submittal_number(project_id=1, project_version_id=2)
         >>> # If max submittal_number is 5.0, returns 6
     """
+    if project_version_id is None:
+        return None
+
     # Import here to avoid circular imports
     from .models import SubmittalItem
     
@@ -40,7 +43,7 @@ def get_next_submittal_number(project_id: int, project_version_id: int) -> Optio
     if current_max_number is None:
         return None
     
-    return round(current_max_number, 0) + 1
+    return int(round(current_max_number, 0)) + 1
 
 
 
