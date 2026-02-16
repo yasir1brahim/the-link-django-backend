@@ -2,6 +2,7 @@ import re
 import csv
 import io
 from typing import List, Optional, Tuple, Union
+from django.db import transaction
 from django.db.models import Max
 
 ANCHOR_REPR_DELIMITER = '$$$'
@@ -31,19 +32,21 @@ def get_next_submittal_number(project_id: int, project_version_id: int) -> Optio
 
     # Import here to avoid circular imports
     from .models import SubmittalItem
-    
-    current_max_number = (
-        SubmittalItem.objects
-        .filter(project_id=project_id, project_version_id=project_version_id)
-        .aggregate(Max('submittal_number'))
-    )['submittal_number__max']
-    
-    # If there are no submittal numbers assigned yet, MAX() function
-    # will return None
-    if current_max_number is None:
-        return None
-    
-    return int(round(current_max_number, 0)) + 1
+
+    with transaction.atomic():
+        current_max_number = (
+            SubmittalItem.objects
+            .select_for_update()
+            .filter(project_id=project_id, project_version_id=project_version_id)
+            .aggregate(Max('submittal_number'))
+        )['submittal_number__max']
+
+        # If there are no submittal numbers assigned yet, MAX() function
+        # will return None
+        if current_max_number is None:
+            return None
+
+        return int(round(current_max_number, 0)) + 1
 
 
 
