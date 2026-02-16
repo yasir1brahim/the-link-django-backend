@@ -693,6 +693,10 @@ class SubmittalItemFromHighlightSerializer(serializers.ModelSerializer):
         # Get project_id from context (set by view)
         project_id = self.context.get('project_id')
 
+        # Validate spec_section belongs to the correct project
+        if spec_section.document.project_id != project_id:
+            raise serializers.ValidationError("SpecSection does not belong to this project")
+
         # Handle added_under_submittal_id if provided
         added_under_submittal = None
         if validated_data.get('added_under_submittal_id'):
@@ -701,7 +705,7 @@ class SubmittalItemFromHighlightSerializer(serializers.ModelSerializer):
                     id=validated_data.pop('added_under_submittal_id')
                 )
                 if added_under_submittal.project_id != project_id:
-                    added_under_submittal = None
+                    raise serializers.ValidationError("added_under_submittal does not belong to this project")
             except SubmittalItem.DoesNotExist:
                 validated_data.pop('added_under_submittal_id', None)
                 added_under_submittal = None
