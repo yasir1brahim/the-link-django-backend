@@ -486,8 +486,6 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
     type = serializers.CharField(required=False)
     added_under_submittal_id = serializers.IntegerField(required=False, allow_null=True)
 
-
-
     def create(self, validated_data):
         mf_section, created = MasterFormatSection.objects.get_or_create(
             masterformat_number=validated_data.get('spec_section')
@@ -676,13 +674,11 @@ class SubmittalItemFromHighlightSerializer(serializers.ModelSerializer):
         allow_null=True
     )
 
-
-
     def create(self, validated_data):
         # Get the spec section by ID
         spec_section_id = validated_data.pop('spec_section_id')
         try:
-            spec_section = SpecSection.objects.get(id=spec_section_id)
+            spec_section = SpecSection.objects.select_related("document").get(id=spec_section_id)
         except SpecSection.DoesNotExist:
             raise serializers.ValidationError(f"SpecSection with id {spec_section_id} does not exist")
 
@@ -780,7 +776,6 @@ class FilteredVersionComparisonSerializer(serializers.Serializer):
     new_version = serializers.PrimaryKeyRelatedField(queryset=ProjectVersion.objects.all())
     masterformat_numbers_with_desired_differences = serializers.ListField(child=serializers.CharField(), read_only=True)
     comparison = VersionComparisonSerializer(read_only=True, many=True)
-
 
 
 class ExcelExportHeaderSerializer(serializers.ModelSerializer):

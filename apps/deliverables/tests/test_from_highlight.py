@@ -132,3 +132,95 @@ class CreateFromHighlightTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         item = SubmittalItem.objects.get(id=response.data["id"])
         self.assertEqual(item.added_under_submittal_id, self.submittal_a.id)
+
+    # ── Missing required fields ──────────────────────────────────────
+
+    def test_missing_item_desc_returns_400(self):
+        payload = self._payload()
+        del payload["item_desc"]
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_para_context_returns_400(self):
+        payload = self._payload()
+        del payload["para_context"]
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_type_returns_400(self):
+        payload = self._payload()
+        del payload["type"]
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_spec_section_id_returns_400(self):
+        payload = self._payload()
+        del payload["spec_section_id"]
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    # ── Invalid / non-existent spec_section_id ───────────────────────
+
+    def test_nonexistent_spec_section_id_returns_400(self):
+        response = self.client.post(
+            self.url,
+            self._payload(spec_section_id=999999),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("does not exist", str(response.data))
+
+    # ── text_location and additional_text_locations edge cases ────────
+
+    def test_text_location_null_accepted(self):
+        response = self.client.post(
+            self.url,
+            self._payload(text_location=None),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        item = SubmittalItem.objects.get(id=response.data["id"])
+        self.assertIsNone(item.text_location)
+
+    def test_text_location_with_valid_json_object(self):
+        loc = {"pageIndex": 0, "left": 10.0, "top": 20.0, "width": 100.0, "height": 50.0}
+        response = self.client.post(
+            self.url,
+            self._payload(text_location=loc),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        item = SubmittalItem.objects.get(id=response.data["id"])
+        self.assertEqual(item.text_location, loc)
+
+    def test_additional_text_locations_empty_list(self):
+        response = self.client.post(
+            self.url,
+            self._payload(additional_text_locations=[]),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        item = SubmittalItem.objects.get(id=response.data["id"])
+        self.assertEqual(item.additional_text_locations, [])
+
+    def test_additional_text_locations_with_multiple_entries(self):
+        locs = [
+            {"pageIndex": 0, "left": 10.0, "top": 20.0, "width": 100.0, "height": 50.0},
+            {"pageIndex": 1, "left": 15.0, "top": 25.0, "width": 120.0, "height": 60.0},
+        ]
+        response = self.client.post(
+            self.url,
+            self._payload(additional_text_locations=locs),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        item = SubmittalItem.objects.get(id=response.data["id"])
+        self.assertEqual(item.additional_text_locations, locs)
+
+    def test_additional_text_locations_null_accepted(self):
+        response = self.client.post(
+            self.url,
+            self._payload(additional_text_locations=None),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
