@@ -35,12 +35,22 @@ def get_next_submittal_number(project_id: int, project_version_id: int) -> Optio
     from .models import SubmittalItem
 
     with transaction.atomic():
-        current_max_number = (
+        # Lock the relevant rows first — select_for_update() is ignored
+        # in aggregation queries, so we must evaluate separately to
+        # actually acquire the row-level locks before aggregating.
+        locked_qs = (
             SubmittalItem.objects
             .select_for_update()
             .filter(project_id=project_id, project_version_id=project_version_id)
-            .aggregate(Max('submittal_number'))
-        )['submittal_number__max']
+        )
+        list(locked_qs.values_list("id", flat=True))
+
+        # Now safely aggregate with locks held
+        current_max_number = (
+            SubmittalItem.objects
+            .filter(project_id=project_id, project_version_id=project_version_id)
+            .aggregate(Max("submittal_number"))
+        )["submittal_number__max"]
 
         # If there are no submittal numbers assigned yet, MAX() function
         # will return None
