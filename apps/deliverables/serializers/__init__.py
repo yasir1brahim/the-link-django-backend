@@ -6,6 +6,7 @@ from apps.utils.feature_flags import get_active_flags_for_project
 from apps.users.serializers import CustomUserSerializer
 from apps.users.models import CustomUser
 from apps.teams.models import Team
+from ..utils import get_next_submittal_number
 from ..models import (
     SubmittalItem,
     UploadedFile,
@@ -481,23 +482,9 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
     spec_section_title = serializers.CharField(required=False)
     item_desc = serializers.CharField(required=False)
     para_context = serializers.CharField(required=False)
-    para_no = serializers.CharField(required=False)
+    para_no = serializers.CharField(required=False, allow_null=True)
     type = serializers.CharField(required=False)
     added_under_submittal_id = serializers.IntegerField(required=False, allow_null=True)
-
-    def get_next_submittal_number(self, project_id):
-        current_max_number = (
-            SubmittalItem.objects
-            .filter(project_id=project_id)
-            .aggregate(Max('submittal_number'))
-        )['submittal_number__max']
-
-        # If there are no submittal numbers assigned yet, MAX() function
-        # will return None
-        if current_max_number is None:
-            return None
-
-        return round(current_max_number, 0) + 1
 
     def create(self, validated_data):
         mf_section, created = MasterFormatSection.objects.get_or_create(
@@ -544,7 +531,7 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
                     document=document,
                     custom_section_title=validated_data.get('spec_section_title'),
                 )
-        
+
         return SubmittalItem.objects.create(
             project_id=validated_data.get('project_id'),
             project_version=validated_data.get('project_version'),
@@ -558,7 +545,10 @@ class SubmittalItemWriteSerializer(serializers.ModelSerializer):
             spec_section=spec_section,
             added_under_submittal=added_under_submittal,
             manually_added=True,
-            submittal_number=self.get_next_submittal_number(validated_data.get('project_id')),
+            submittal_number=get_next_submittal_number(
+                validated_data.get('project_id'),
+                validated_data.get('project_version').id if validated_data.get('project_version') else None
+            ),
         )
 
     def update(self, instance, validated_data):
@@ -658,6 +648,136 @@ class SubmittalItemListSerializer(serializers.ModelSerializer):
         fields = ['id', 'project_id', 'name', 'created_by', 'submittals', 'project_version']
 
 
+class SubmittalItemFromHighlightSerializer(serializers.ModelSerializer):
+    """
+    Dedicated serializer for creating SubmittalItems from PDF highlights.
+    Uses existing SpecSection to avoid duplicates.
+    """
+    # Accept SpecSection ID directly
+    spec_section_id = serializers.IntegerField(required=True)
+
+    # Submittal item fields
+    item_desc = serializers.CharField(required=True)
+    para_context = serializers.CharField(required=True)
+    type = serializers.CharField(required=True)
+    para_no = serializers.CharField(required=False, allow_null=True)
+
+    # Text location fields for PDF highlighting
+    text_location = serializers.JSONField(required=False, allow_null=True)
+    additional_text_locations = serializers.JSONField(required=False, allow_null=True)
+
+    # Optional fields
+    added_under_submittal_id = serializers.IntegerField(required=False, allow_null=True)
+    project_version = serializers.PrimaryKeyRelatedField(
+        queryset=ProjectVersion.objects.all(),
+        required=False,
+        allow_null=True
+    )
+
+    TEXT_LOCATION_REQUIRED_FIELDS = {"pageIndex", "left", "top", "width", "height"}
+
+    def _validate_text_location(self, location, field_name):
+        """Validate that a text location dict contains the expected fields."""
+        if not isinstance(location, dict):
+            raise serializers.ValidationError({field_name: "Must be a JSON object."})
+        missing = self.TEXT_LOCATION_REQUIRED_FIELDS - location.keys()
+        if missing:
+            raise serializers.ValidationError(
+                {field_name: f"Missing required fields: {', '.join(sorted(missing))}"}
+            )
+
+    def validate(self, attrs):
+        text_location = attrs.get("text_location")
+        if text_location is not None:
+            self._validate_text_location(text_location, "text_location")
+
+        additional = attrs.get("additional_text_locations")
+        if additional is not None:
+            if not isinstance(additional, list):
+                raise serializers.ValidationError(
+                    {"additional_text_locations": "Must be a JSON array."}
+                )
+            for i, loc in enumerate(additional):
+                self._validate_text_location(loc, f"additional_text_locations[{i}]")
+
+        return attrs
+
+    def create(self, validated_data):
+        # Get the spec section by ID
+        spec_section_id = validated_data.pop('spec_section_id')
+        try:
+            spec_section = SpecSection.objects.select_related("document").get(id=spec_section_id)
+        except SpecSection.DoesNotExist:
+            raise serializers.ValidationError(f"SpecSection with id {spec_section_id} does not exist")
+
+        # Get masterformat_section and document from the spec_section
+        mf_section = spec_section.masterformat_section
+        document = spec_section.document
+
+        # Get project_id from context (set by view)
+        project_id = self.context.get('project_id')
+
+        # Validate spec_section belongs to the correct project
+        if spec_section.document.project_id != project_id:
+            raise serializers.ValidationError("SpecSection does not belong to this project")
+
+        # Validate project_version belongs to the correct project
+        project_version = validated_data.get("project_version")
+        if project_version and project_version.project_id != project_id:
+            raise serializers.ValidationError("ProjectVersion does not belong to this project")
+
+        # Handle added_under_submittal_id if provided
+        added_under_submittal = None
+        if validated_data.get('added_under_submittal_id'):
+            try:
+                added_under_submittal = SubmittalItem.objects.get(
+                    id=validated_data.pop('added_under_submittal_id')
+                )
+                if added_under_submittal.project_id != project_id:
+                    raise serializers.ValidationError("added_under_submittal does not belong to this project")
+            except SubmittalItem.DoesNotExist:
+                validated_data.pop('added_under_submittal_id', None)
+                added_under_submittal = None
+
+        # Create the SubmittalItem
+        return SubmittalItem.objects.create(
+            project_id=project_id,
+            project_version=validated_data.get('project_version'),
+            updated_by=self.context.get('request').user if self.context.get('request') else None,
+            submittal_description=validated_data.get('item_desc'),
+            submittal_content=validated_data.get('para_context'),
+            paragraph_number=validated_data.get('para_no'),
+            submittal_type=validated_data.get('type'),
+            masterformat_section=mf_section,
+            document=document,
+            spec_section=spec_section,
+            added_under_submittal=added_under_submittal,
+            manually_added=True,
+            submittal_number=get_next_submittal_number(
+                project_id,
+                validated_data.get('project_version').id if validated_data.get('project_version') else None
+            ),
+            text_location=validated_data.get('text_location'),
+            additional_text_locations=validated_data.get('additional_text_locations', []),
+            parsing_method='MANUAL_HIGHLIGHT',
+            parsing_version='MANUAL_HIGHLIGHT',
+        )
+
+    class Meta:
+        model = SubmittalItem
+        fields = [
+            'spec_section_id',
+            'item_desc',
+            'para_context',
+            'type',
+            'para_no',
+            'text_location',
+            'additional_text_locations',
+            'added_under_submittal_id',
+            'project_version',
+        ]
+
+
 class TextDiffSerializer(serializers.Serializer):
     type = serializers.CharField()
     value = serializers.CharField()
@@ -689,7 +809,6 @@ class FilteredVersionComparisonSerializer(serializers.Serializer):
     new_version = serializers.PrimaryKeyRelatedField(queryset=ProjectVersion.objects.all())
     masterformat_numbers_with_desired_differences = serializers.ListField(child=serializers.CharField(), read_only=True)
     comparison = VersionComparisonSerializer(read_only=True, many=True)
-
 
 
 class ExcelExportHeaderSerializer(serializers.ModelSerializer):
