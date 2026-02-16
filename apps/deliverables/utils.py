@@ -4,7 +4,6 @@ import io
 from decimal import Decimal
 from typing import List, Optional, Tuple, Union
 from django.db import transaction
-from django.db.models import Max
 
 ANCHOR_REPR_DELIMITER = '$$$'
 
@@ -35,28 +34,17 @@ def get_next_submittal_number(project_id: int, project_version_id: int) -> Optio
     from .models import SubmittalItem
 
     with transaction.atomic():
-        # Lock the relevant rows first — select_for_update() is ignored
-        # in aggregation queries, so we must evaluate separately to
-        # actually acquire the row-level locks before aggregating.
         locked_qs = (
             SubmittalItem.objects
             .select_for_update()
             .filter(project_id=project_id, project_version_id=project_version_id)
+            .values_list("submittal_number", flat=True)
         )
-        list(locked_qs.values_list("id", flat=True))
-
-        # Now safely aggregate with locks held
-        current_max_number = (
-            SubmittalItem.objects
-            .filter(project_id=project_id, project_version_id=project_version_id)
-            .aggregate(Max("submittal_number"))
-        )["submittal_number__max"]
-
-        # If there are no submittal numbers assigned yet, MAX() function
-        # will return None
-        if current_max_number is None:
+        # Evaluate and compute max in Python while locks are held
+        numbers = list(locked_qs)
+        if not numbers or all(n is None for n in numbers):
             return None
-
+        current_max_number = max(n for n in numbers if n is not None)
         return Decimal(int(round(current_max_number, 0)) + 1)
 
 

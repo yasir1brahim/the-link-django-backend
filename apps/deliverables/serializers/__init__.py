@@ -759,8 +759,8 @@ class SubmittalItemFromHighlightSerializer(serializers.ModelSerializer):
             ),
             text_location=validated_data.get('text_location'),
             additional_text_locations=validated_data.get('additional_text_locations', []),
-            parsing_method='UNKNOWN',
-            parsing_version='UNKNOWN',
+            parsing_method='MANUAL_HIGHLIGHT',
+            parsing_version='MANUAL_HIGHLIGHT',
         )
 
     class Meta:
