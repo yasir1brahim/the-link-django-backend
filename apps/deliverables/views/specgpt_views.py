@@ -264,7 +264,7 @@ def _process_log_data(log_data, log_type, markdown_table):
                     # Access InspectionLogRow from ChatViewSet
                     viewset = ChatViewSet()
                     model_class = viewset.InspectionLogRow
-                elif log_type == 'owner_deliverables_log':
+                elif log_type == 'owner_deliverables':
                     # Access OwnerDeliverablesRow from ChatViewSet
                     viewset = ChatViewSet()
                     model_class = viewset.OwnerDeliverablesRow
@@ -384,7 +384,7 @@ def _create_extracted_data_from_log(ai_log):
                 'inspection_frequency': item.get('Inspection Frequency'),
                 'when_due': item.get('Inspection Frequency'),
             })
-        elif ai_log.log_type == 'owner_deliverables_log':
+        elif ai_log.log_type == 'owner_deliverables':
             extracted_data['metadata'].update({
                 'deliverable_type': item.get('Deliverable Type'),
                 'when_due': item.get('When Due'),
@@ -763,9 +763,8 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
         # Get sorting parameters
         order_by = self.request.query_params.get('order_by', 'spec_section_number')
         order_direction = self.request.query_params.get('order', 'asc')
-        
         # Validate sorting parameters
-        valid_sort_fields = self.get_valid_sort_fields()
+        valid_sort_fields = self.get_valid_sort_fields() 
         if order_by not in valid_sort_fields:
             order_by = 'spec_section_number'  # Default
         
@@ -905,7 +904,7 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
             return ['Spec Section #', 'item_type', 'Responsible Party']
         elif log_type == 'inspection_log':
             return ['Spec Section #', 'Responsible Party']
-        elif log_type == 'owner_deliverables_log':
+        elif log_type == 'owner_deliverables':
             return ['Spec Section #', 'Responsible Party', 'Deliverable Type']
         else:
             return []
@@ -930,7 +929,7 @@ class AiGeneratedLogViewSet(viewsets.ReadOnlyModelViewSet):
                 'created_at', 'spec_section_number', 'spec_section_name',
                 'inspection_type_and_requirements', 'inspection_frequency', 'responsible_party'
             ]
-        elif log_type == 'owner_deliverables_log':
+        elif log_type == 'owner_deliverables':
             return [
                 'created_at', 'spec_section_number', 'spec_section_name',
                 'deliverable_type', 'when_due', 'responsible_party', 'exact_requirement_text'

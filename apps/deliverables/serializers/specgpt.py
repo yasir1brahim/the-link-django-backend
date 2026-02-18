@@ -184,8 +184,18 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
             'deliverable_type': 'metadata__deliverable_type',
         }
 
-        db_sort_field = sort_field_mapping.get(sort_field, 'spec_section_number')
-        sort_prefix = '-' if sort_direction == 'desc' else ''
+        # For owner_deliverables, some fields are stored in metadata.raw_item instead of
+        # top-level metadata fields. These require Python-level sorting after formatting.
+        is_owner_deliverables = instance.log_type in ['owner_deliverables_log', 'owner_deliverables']
+        owner_deliverables_python_sort_fields = ['exact_requirement_text', 'deliverable_type', 'when_due']
+        needs_python_sort = is_owner_deliverables and sort_field in owner_deliverables_python_sort_fields
+
+        if needs_python_sort:
+            db_sort_field = 'id'  # Default ordering for now, will sort in Python
+            sort_prefix = ''
+        else:
+            db_sort_field = sort_field_mapping.get(sort_field, 'spec_section_number')
+            sort_prefix = '-' if sort_direction == 'desc' else ''
 
         # Handle None values in sorting by using multiple order_by clauses
         # Always add 'id' as final sort to ensure consistent ordering
@@ -210,6 +220,25 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         # Format items using existing format method
         formatted_data = [self._format_extracted_item(item) for item in paginated_items]
 
+        # Apply Python-level sorting for owner_deliverables fields that aren't in DB metadata
+        if needs_python_sort and formatted_data:
+            # Map sort_field to the key in formatted data
+            python_sort_key_mapping = {
+                'exact_requirement_text': 'Exact Requirement Text',
+                'deliverable_type': 'Deliverable Type',
+                'when_due': 'When Due',
+            }
+            python_sort_key = python_sort_key_mapping.get(sort_field, sort_field)
+            reverse = sort_direction == 'desc'
+        
+            def sort_key_func(item):
+                value = item.get(python_sort_key, '')
+                if value is None:
+                    return '' if reverse else 'zzz'
+                return str(value).lower()
+            
+            formatted_data = sorted(formatted_data, key=sort_key_func, reverse=reverse)
+            
         # Calculate pagination metadata
         total_pages = (total_items + page_size - 1) // page_size
         has_next = page < total_pages
@@ -562,7 +591,7 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
         """
         Sort structured data by the specified field and direction.
         """
-        print("sort_structured_data", sort_field, sort_direction)
+        print("Sort_structured_data", sort_field, sort_direction)
         try:
             # Map field names to the actual keys in the structured data
             field_mapping = {
@@ -591,8 +620,7 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
                 value = item.get(field_key, '')
                 if value is None:
                     return '' if reverse else 'zzz'  # Place None at end for desc, beginning for asc
-                return str(value).lower()
-            
+                return str(value).lower()        
             sorted_data = sorted(log_data, key=sort_key, reverse=reverse)
             
             return sorted_data
