@@ -3,6 +3,7 @@ import logging
 
 from rest_framework import serializers
 from django.db.models import Q
+from django.db.models.fields.json import KeyTextTransform
 from apps.deliverables.models import (
     Chat,
     ChatMessage,
@@ -184,31 +185,44 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
             'deliverable_type': 'metadata__deliverable_type',
         }
 
-        # For owner_deliverables, some fields are stored in metadata.raw_item instead of
-        # top-level metadata fields. These require Python-level sorting after formatting.
+        # For owner_deliverables, some fields are stored in metadata.raw_item (nested JSON)
+        # Use KeyTextTransform to annotate and sort at database level
         is_owner_deliverables = instance.log_type in ['owner_deliverables_log', 'owner_deliverables']
-        owner_deliverables_python_sort_fields = ['exact_requirement_text', 'deliverable_type', 'when_due']
-        needs_python_sort = is_owner_deliverables and sort_field in owner_deliverables_python_sort_fields
+        owner_deliverables_nested_fields = {
+            'exact_requirement_text': 'Exact Requirement Text',
+            'deliverable_type': 'Deliverable Type',
+            'when_due': 'When Due',
+        }
 
-        if needs_python_sort:
-            db_sort_field = 'id'  # Default ordering for now, will sort in Python
-            sort_prefix = ''
+        if is_owner_deliverables and sort_field in owner_deliverables_nested_fields:
+            # Annotate the queryset with the nested JSON value for database-level sorting
+            json_key = owner_deliverables_nested_fields[sort_field]
+            annotation_name = f'annotated_{sort_field}'
+            
+            queryset = queryset.annotate(
+                **{annotation_name: KeyTextTransform(json_key, KeyTextTransform('raw_item', 'metadata'))}
+            )
+            
+            db_sort_field = annotation_name
+            print(f"Sorting by annotated field: {annotation_name} from metadata.raw_item['{json_key}']")
+            logger.debug(f"Annotated queryset with {annotation_name} from metadata.raw_item['{json_key}']")
         else:
             db_sort_field = sort_field_mapping.get(sort_field, 'spec_section_number')
-            sort_prefix = '-' if sort_direction == 'desc' else ''
+        
+        sort_prefix = '-' if sort_direction == 'desc' else ''
 
         # Handle None values in sorting by using multiple order_by clauses
         # Always add 'id' as final sort to ensure consistent ordering
         queryset = queryset.order_by(f'{sort_prefix}{db_sort_field}', 'id')
         logger.debug(f"Sorting by: {sort_prefix}{db_sort_field}")
-
+        print(f"Sorting by: {sort_prefix}{db_sort_field}")
         # Get total count before pagination
         total_items = queryset.count()
         logger.info(f"Total items after all filters: {total_items}")
 
         # Apply pagination
         page = max(1, page)
-        page_size = max(1, min(page_size, 100))  # Limit page size to 100
+        page_size = max(1, min(page_size, 100))  # Limit page size to 100   
 
         start_index = (page - 1) * page_size
         end_index = start_index + page_size
@@ -219,25 +233,6 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
 
         # Format items using existing format method
         formatted_data = [self._format_extracted_item(item) for item in paginated_items]
-
-        # Apply Python-level sorting for owner_deliverables fields that aren't in DB metadata
-        if needs_python_sort and formatted_data:
-            # Map sort_field to the key in formatted data
-            python_sort_key_mapping = {
-                'exact_requirement_text': 'Exact Requirement Text',
-                'deliverable_type': 'Deliverable Type',
-                'when_due': 'When Due',
-            }
-            python_sort_key = python_sort_key_mapping.get(sort_field, sort_field)
-            reverse = sort_direction == 'desc'
-        
-            def sort_key_func(item):
-                value = item.get(python_sort_key, '')
-                if value is None:
-                    return '' if reverse else 'zzz'
-                return str(value).lower()
-            
-            formatted_data = sorted(formatted_data, key=sort_key_func, reverse=reverse)
             
         # Calculate pagination metadata
         total_pages = (total_items + page_size - 1) // page_size
