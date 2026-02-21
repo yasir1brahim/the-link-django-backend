@@ -1271,7 +1271,7 @@ class SpecConflictComment(BaseModel):
         null=True,
         related_name="spec_conflict_comments",
     )
-    text = models.TextField(max_length=5000)
+    text = models.TextField()
 
     class Meta:
         ordering = ['created_at', 'id']
