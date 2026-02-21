@@ -362,6 +362,25 @@ class TestSpecConflictCommentSerializer(TestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn('text', serializer.errors)
 
+    def test_serializer_with_null_user(self):
+        """Serializing a comment whose author was deleted should not 500."""
+        disposable_user = User.objects.create_user('disposable@example.com', password='testpass123')
+        comment = SpecConflictComment.objects.create(
+            conflict=self.conflict,
+            user=disposable_user,
+            text='Comment from deleted user',
+        )
+        # Delete the user — SET_NULL makes comment.user = None
+        disposable_user.delete()
+        comment.refresh_from_db()
+
+        serializer = SpecConflictCommentSerializer(comment)
+        data = serializer.data
+
+        self.assertIsNone(data['user_id'])
+        self.assertIsNone(data['user_full_name'])
+        self.assertEqual(data['text'], 'Comment from deleted user')
+
 
 class TestSpecConflictStatusAndCommentsAPI(APITestCase):
     """Test API endpoints for status updates and comments"""
@@ -541,6 +560,20 @@ class TestSpecConflictStatusAndCommentsAPI(APITestCase):
         url = f'/api/deliverables/projects/{self.project.id}/spec-conflicts/{self.conflict.id}/comments/{comment.id}/'
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_status_update_requires_authentication(self):
+        """PATCH .../status/ should return 403 without auth."""
+        url = f'/api/deliverables/projects/{self.project.id}/spec-conflicts/{self.conflict.id}/status/'
+        response = self.client.patch(url, {'status': 'RFI'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_status_update_missing_status_field(self):
+        """PATCH .../status/ with no status field should return clear error."""
+        self.client.force_authenticate(user=self.user)
+        url = f'/api/deliverables/projects/{self.project.id}/spec-conflicts/{self.conflict.id}/status/'
+        response = self.client.patch(url, {}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('required', response.data['error'].lower())
 
     @patch('apps.deliverables.views.spec_comparison_views.s3')
     def test_get_spec_conflicts_with_status_filter(self, mock_s3):

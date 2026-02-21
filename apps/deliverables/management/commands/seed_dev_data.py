@@ -19,7 +19,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         from apps.users.models import CustomUser
-        from apps.teams.models import Team, Membership
+        from apps.teams.models import Team, Membership, Flag
         from apps.deliverables.models import (
             Project, ProjectVersion, ProjectMembership,
             DrawingFile, DrawingExtraction, DrawingExtractionStatus,
@@ -58,6 +58,10 @@ class Command(BaseCommand):
             team, _ = Team.objects.get_or_create(name='Dev Team', slug='dev-team')
             Membership.objects.get_or_create(team=team, user=user1, defaults={'role': 'admin'})
             Membership.objects.get_or_create(team=team, user=user2, defaults={'role': 'member'})
+
+            # Feature flags
+            flag, _ = Flag.objects.get_or_create(name='drawing_spec_comparison', defaults={'everyone': True})
+            flag.teams.add(team)
 
             # Project (auto-creates ProjectVersion 1 via save())
             project, created = Project.objects.get_or_create(

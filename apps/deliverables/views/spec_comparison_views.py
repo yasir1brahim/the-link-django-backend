@@ -787,6 +787,11 @@ def update_spec_conflict_status(request, project_id, conflict_id):
 
     # Validate status value
     new_status = request.data.get('status')
+    if not new_status:
+        return Response(
+            {"error": "status field is required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
     if new_status not in dict(SpecConflictStatus.choices):
         return Response(
             {"error": f"Invalid status. Must be one of: {list(dict(SpecConflictStatus.choices).keys())}"},

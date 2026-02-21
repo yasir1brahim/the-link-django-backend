@@ -349,10 +349,16 @@ class TriggerSpecComparisonResponseSerializer(serializers.ModelSerializer):
 
 class SpecConflictCommentSerializer(serializers.ModelSerializer):
     """Serializer for spec conflict comments"""
-    user_full_name = serializers.CharField(source='user.get_full_name', read_only=True)
-    user_id = serializers.IntegerField(source='user.id', read_only=True)
+    user_full_name = serializers.SerializerMethodField()
+    user_id = serializers.SerializerMethodField()
 
     class Meta:
         model = SpecConflictComment
         fields = ['id', 'text', 'user_id', 'user_full_name', 'created_at', 'updated_at']
         read_only_fields = ['id', 'user_id', 'user_full_name', 'created_at', 'updated_at']
+
+    def get_user_id(self, obj):
+        return obj.user_id  # FK id available even without join
+
+    def get_user_full_name(self, obj):
+        return obj.user.get_full_name() if obj.user else None
