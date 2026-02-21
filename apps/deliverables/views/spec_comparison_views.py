@@ -744,17 +744,12 @@ def list_spec_comparisons(request, project_id):
 
 def _get_conflict_or_error(request, project_id, conflict_id):
     """Shared helper: validate project access and fetch conflict. Returns (conflict, None) or (None, Response)."""
-    try:
-        project = Project.objects.get(id=project_id)
-    except Project.DoesNotExist:
-        return None, Response({"error": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
-
     if not request.user.is_member_of_project(project_id):
         return None, Response({"error": "Not authorized to access this project"}, status=status.HTTP_403_FORBIDDEN)
 
     try:
         conflict = SpecConflict.objects.select_related('comparison__project').get(
-            id=conflict_id, comparison__project=project
+            id=conflict_id, comparison__project_id=project_id
         )
     except SpecConflict.DoesNotExist:
         return None, Response({"error": "Spec conflict not found or does not belong to this project"}, status=status.HTTP_404_NOT_FOUND)
@@ -792,11 +787,9 @@ def update_spec_conflict_status(request, project_id, conflict_id):
             {"error": "status field is required"},
             status=status.HTTP_400_BAD_REQUEST
         )
-    if new_status not in dict(SpecConflictStatus.choices):
-        return Response(
-            {"error": f"Invalid status. Must be one of: {list(dict(SpecConflictStatus.choices).keys())}"},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+    status_error = _validate_status_param(new_status)
+    if status_error:
+        return status_error
 
     # Update status
     conflict.status = new_status

@@ -575,6 +575,24 @@ class TestSpecConflictStatusAndCommentsAPI(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('required', response.data['error'].lower())
 
+    def test_cross_project_conflict_access_returns_404(self):
+        """Accessing a conflict via a different project's URL should return 404."""
+        other_project = Project.objects.create(
+            name='Other Project', project_number='OP-001',
+            team=self.team, created_by=self.user,
+        )
+        self.client.force_authenticate(user=self.user)
+
+        # Status endpoint
+        url = f'/api/deliverables/projects/{other_project.id}/spec-conflicts/{self.conflict.id}/status/'
+        response = self.client.patch(url, {'status': 'RFI'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+        # Comments endpoint
+        url = f'/api/deliverables/projects/{other_project.id}/spec-conflicts/{self.conflict.id}/comments/'
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
     @patch('apps.deliverables.views.spec_comparison_views.s3')
     def test_get_spec_conflicts_with_status_filter(self, mock_s3):
         mock_s3.generate_presigned_url.return_value = 'https://test-url.com/test.pdf'
