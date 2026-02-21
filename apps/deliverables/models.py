@@ -1274,7 +1274,7 @@ class SpecConflictComment(BaseModel):
     text = models.TextField()
 
     class Meta:
-        ordering = ['created_at']
+        ordering = ['created_at', 'id']
         indexes = [
             models.Index(fields=['conflict', 'created_at']),
         ]

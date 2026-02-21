@@ -578,6 +578,9 @@ def get_spec_conflicts(request, project_id):
 
     status_filter = request.query_params.get('status')
     if status_filter:
+        status_error = _validate_status_param(status_filter)
+        if status_error:
+            return status_error
         conflicts = conflicts.filter(status=status_filter)
 
     # Apply sorting
@@ -739,6 +742,37 @@ def list_spec_comparisons(request, project_id):
     return paginator.get_paginated_response(serializer.data)
 
 
+def _get_conflict_or_error(request, project_id, conflict_id):
+    """Shared helper: validate project access and fetch conflict. Returns (conflict, None) or (None, Response)."""
+    try:
+        project = Project.objects.get(id=project_id)
+    except Project.DoesNotExist:
+        return None, Response({"error": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    if not request.user.is_member_of_project(project_id):
+        return None, Response({"error": "Not authorized to access this project"}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        conflict = SpecConflict.objects.select_related('comparison__project').get(
+            id=conflict_id, comparison__project=project
+        )
+    except SpecConflict.DoesNotExist:
+        return None, Response({"error": "Spec conflict not found or does not belong to this project"}, status=status.HTTP_404_NOT_FOUND)
+
+    return conflict, None
+
+
+def _validate_status_param(status_value):
+    """Validate a status query param. Returns error Response or None."""
+    valid_statuses = dict(SpecConflictStatus.choices)
+    if status_value and status_value not in valid_statuses:
+        return Response(
+            {"error": f"Invalid status. Must be one of: {list(valid_statuses.keys())}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return None
+
+
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def update_spec_conflict_status(request, project_id, conflict_id):
@@ -747,34 +781,9 @@ def update_spec_conflict_status(request, project_id, conflict_id):
 
     PATCH /api/deliverables/projects/{project_id}/spec-conflicts/{conflict_id}/status/
     """
-    # Get project and check access
-    try:
-        project = Project.objects.get(id=project_id)
-    except Project.DoesNotExist:
-        return Response(
-            {"error": "Project not found"},
-            status=status.HTTP_404_NOT_FOUND
-        )
-
-    if not request.user.is_member_of_project(project_id):
-        return Response(
-            {"error": "Not authorized to access this project"},
-            status=status.HTTP_403_FORBIDDEN
-        )
-
-    # Get conflict and check it belongs to project
-    try:
-        conflict = SpecConflict.objects.select_related(
-            'comparison__project'
-        ).get(
-            id=conflict_id,
-            comparison__project=project
-        )
-    except SpecConflict.DoesNotExist:
-        return Response(
-            {"error": "Spec conflict not found or does not belong to this project"},
-            status=status.HTTP_404_NOT_FOUND
-        )
+    conflict, error = _get_conflict_or_error(request, project_id, conflict_id)
+    if error:
+        return error
 
     # Validate status value
     new_status = request.data.get('status')
@@ -788,9 +797,8 @@ def update_spec_conflict_status(request, project_id, conflict_id):
     conflict.status = new_status
     conflict.save(update_fields=['status', 'updated_at'])
 
-    # Return updated conflict
-    serializer = SpecConflictReadSerializer(conflict, context={'request': request})
-    return Response(serializer.data)
+    # Return lightweight response (avoids S3 presigned URL generation)
+    return Response({"id": conflict.id, "status": conflict.status})
 
 
 @api_view(['GET', 'POST'])
@@ -802,43 +810,16 @@ def spec_conflict_comments(request, project_id, conflict_id):
     GET /api/deliverables/projects/{project_id}/spec-conflicts/{conflict_id}/comments/
     POST /api/deliverables/projects/{project_id}/spec-conflicts/{conflict_id}/comments/
     """
-    # Get project and check access
-    try:
-        project = Project.objects.get(id=project_id)
-    except Project.DoesNotExist:
-        return Response(
-            {"error": "Project not found"},
-            status=status.HTTP_404_NOT_FOUND
-        )
-
-    if not request.user.is_member_of_project(project_id):
-        return Response(
-            {"error": "Not authorized to access this project"},
-            status=status.HTTP_403_FORBIDDEN
-        )
-
-    # Get conflict and check it belongs to project
-    try:
-        conflict = SpecConflict.objects.select_related(
-            'comparison__project'
-        ).get(
-            id=conflict_id,
-            comparison__project=project
-        )
-    except SpecConflict.DoesNotExist:
-        return Response(
-            {"error": "Spec conflict not found or does not belong to this project"},
-            status=status.HTTP_404_NOT_FOUND
-        )
+    conflict, error = _get_conflict_or_error(request, project_id, conflict_id)
+    if error:
+        return error
 
     if request.method == 'GET':
-        # List comments
-        comments = conflict.comments.select_related('user').order_by('created_at')
+        comments = conflict.comments.select_related('user').order_by('created_at', 'id')
         serializer = SpecConflictCommentSerializer(comments, many=True)
         return Response(serializer.data)
 
     elif request.method == 'POST':
-        # Create comment
         serializer = SpecConflictCommentSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(conflict=conflict, user=request.user)
@@ -854,39 +835,22 @@ def spec_conflict_comment_detail(request, project_id, conflict_id, comment_id):
 
     DELETE /api/deliverables/projects/{project_id}/spec-conflicts/{conflict_id}/comments/{comment_id}/
     """
-    # Get project and check access
-    try:
-        project = Project.objects.get(id=project_id)
-    except Project.DoesNotExist:
-        return Response(
-            {"error": "Project not found"},
-            status=status.HTTP_404_NOT_FOUND
-        )
+    conflict, error = _get_conflict_or_error(request, project_id, conflict_id)
+    if error:
+        return error
 
-    if not request.user.is_member_of_project(project_id):
-        return Response(
-            {"error": "Not authorized to access this project"},
-            status=status.HTTP_403_FORBIDDEN
-        )
-
-    # Get comment and check permissions
     try:
-        comment = SpecConflictComment.objects.select_related(
-            'conflict__comparison__project',
-            'user'
-        ).get(
-            id=comment_id,
-            conflict_id=conflict_id,
-            conflict__comparison__project=project
+        comment = SpecConflictComment.objects.select_related('user').get(
+            id=comment_id, conflict=conflict
         )
     except SpecConflictComment.DoesNotExist:
         return Response(
-            {"error": "Comment not found or does not belong to this project"},
+            {"error": "Comment not found"},
             status=status.HTTP_404_NOT_FOUND
         )
 
-    # Check if user can delete this comment (only comment author can delete)
-    if comment.user != request.user:
+    # Allow deletion if: comment author, or comment has no author (deleted user)
+    if comment.user is not None and comment.user != request.user:
         return Response(
             {"error": "You can only delete your own comments"},
             status=status.HTTP_403_FORBIDDEN
@@ -999,6 +963,9 @@ def export_spec_conflicts(request, project_id):
 
     status_filter = request.query_params.get('status')
     if status_filter:
+        status_error = _validate_status_param(status_filter)
+        if status_error:
+            return status_error
         conflicts = conflicts.filter(status=status_filter)
 
     conflicts = conflicts.order_by('id')
