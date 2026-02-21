@@ -27,7 +27,7 @@ from .models import (Project, ProjectMembership, Entitlement, SubmittalItem,
     AiGeneratedLog, ExtractedData, CustomItemType, ExtractionNote,
     DrawingFile, DrawingExtraction, DrawingPage, DrawingNoteSection,
     DrawingNote, DrawingExtractionWebhookEvent,
-    SpecComparison, SpecComparisonWebhookEvent, SpecConflict, SkippedNote,
+    SpecComparison, SpecComparisonWebhookEvent, SpecConflict, SpecConflictComment, SkippedNote,
 )
 
 
@@ -618,11 +618,28 @@ class SpecComparisonWebhookEventAdmin(admin.ModelAdmin):
 
 @admin.register(SpecConflict)
 class SpecConflictAdmin(admin.ModelAdmin):
-    list_display = ['id', 'comparison', 'note_id_from_lambda', 'spec_masterformat_number', 'confidence', 'created_at']
-    list_filter = ['comparison__status']
+    list_display = ['id', 'comparison', 'note_id_from_lambda', 'spec_masterformat_number', 'confidence', 'status', 'created_at']
+    list_filter = ['comparison__status', 'status']
     search_fields = ['note_text', 'spec_text', 'note_id_from_lambda']
     raw_id_fields = ['comparison', 'note']
     readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(SpecConflictComment)
+class SpecConflictCommentAdmin(admin.ModelAdmin):
+    list_display = ['id', 'conflict', 'user', 'text_preview', 'created_at']
+    list_filter = ['created_at', 'conflict__comparison__status']
+    search_fields = ['text', 'user__email', 'conflict__note_text']
+    raw_id_fields = ['conflict', 'user']
+    readonly_fields = ['created_at', 'updated_at']
+
+    def text_preview(self, obj):
+        """Show truncated text in list view"""
+        return obj.text[:75] + '...' if len(obj.text) > 75 else obj.text
+    text_preview.short_description = 'Text'
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('conflict', 'user')
 
 
 @admin.register(SkippedNote)
