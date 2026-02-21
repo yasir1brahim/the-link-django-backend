@@ -399,7 +399,7 @@ class TestSpecConflictStatusAndCommentsAPI(APITestCase):
         )
 
         # Mock the project membership check
-        patcher = patch('apps.users.models.User.is_member_of_project')
+        patcher = patch('apps.users.models.CustomUser.is_member_of_project')
         self.mock_is_member = patcher.start()
         self.mock_is_member.return_value = True
         self.addCleanup(patcher.stop)
@@ -531,16 +531,16 @@ class TestSpecConflictStatusAndCommentsAPI(APITestCase):
         # List comments
         url = f'/api/deliverables/projects/{self.project.id}/spec-conflicts/{self.conflict.id}/comments/'
         response = self.client.get(url)
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
         # Create comment
         response = self.client.post(url, {'text': 'New comment'}, format='json')
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
         # Delete comment
         url = f'/api/deliverables/projects/{self.project.id}/spec-conflicts/{self.conflict.id}/comments/{comment.id}/'
         response = self.client.delete(url)
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     @patch('apps.deliverables.views.spec_comparison_views.s3')
     def test_get_spec_conflicts_with_status_filter(self, mock_s3):
