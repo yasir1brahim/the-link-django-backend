@@ -847,7 +847,10 @@ def spec_conflict_comment_detail(request, project_id, conflict_id, comment_id):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    # Allow deletion if: comment author, or comment has no author (deleted user)
+    # Allow deletion if: comment author, or comment has no author (deleted user).
+    # Intentional: orphaned comments (user=None after deletion) are deletable by
+    # any project member as a cleanup affordance. Admin-only restriction not needed
+    # given comments are lightweight text with no access control implications.
     if comment.user is not None and comment.user != request.user:
         return Response(
             {"error": "You can only delete your own comments"},
