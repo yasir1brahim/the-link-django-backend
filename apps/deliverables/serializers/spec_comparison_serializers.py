@@ -6,6 +6,7 @@ from ..models import (
     SpecComparison,
     SpecComparisonStatus,
     SpecConflict,
+    SpecConflictComment,
     SkippedNote,
     SkipReason,
 )
@@ -146,6 +147,7 @@ class SpecConflictReadSerializer(serializers.ModelSerializer):
     """Serializer for reading conflict data via API"""
     note_id = serializers.SerializerMethodField()
     spec_file_url = serializers.SerializerMethodField()
+    comment_count = serializers.SerializerMethodField()
     # Drawing-related fields
     sheet_number = serializers.SerializerMethodField()
     sheet_title = serializers.SerializerMethodField()
@@ -160,6 +162,8 @@ class SpecConflictReadSerializer(serializers.ModelSerializer):
             'note_id',
             'note_id_from_lambda',
             'note_text',
+            'status',
+            'comment_count',
             # Drawing fields
             'sheet_number',
             'sheet_title',
@@ -248,6 +252,14 @@ class SpecConflictReadSerializer(serializers.ModelSerializer):
             )
         return context[cache_key][s3_key]
 
+    def get_comment_count(self, obj):
+        """Get comment count for this conflict."""
+        # Use annotated count if available (from queryset with annotate),
+        # otherwise fall back to counting (less efficient)
+        if hasattr(obj, 'comment_count_annotated'):
+            return obj.comment_count_annotated
+        return obj.comments.count()
+
 
 class SkippedNoteReadSerializer(serializers.ModelSerializer):
     """Serializer for reading skipped note data via API"""
@@ -333,3 +345,17 @@ class TriggerSpecComparisonResponseSerializer(serializers.ModelSerializer):
                 'display_name': obj.triggered_by.get_full_name() or obj.triggered_by.email,
             }
         return None
+
+
+class SpecConflictCommentSerializer(serializers.ModelSerializer):
+    """Serializer for spec conflict comments"""
+    user_id = serializers.IntegerField(read_only=True, allow_null=True)
+    user_full_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SpecConflictComment
+        fields = ['id', 'text', 'user_id', 'user_full_name', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user_id', 'user_full_name', 'created_at', 'updated_at']
+
+    def get_user_full_name(self, obj):
+        return obj.user.get_full_name() if obj.user else None

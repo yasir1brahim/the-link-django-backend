@@ -23,6 +23,8 @@ from ..models import (
     SpecComparisonStatus,
     SpecComparisonWebhookEvent,
     SpecConflict,
+    SpecConflictStatus,
+    SpecConflictComment,
     SkippedNote,
     DrawingNote,
     DrawingExtraction,
@@ -35,6 +37,7 @@ from ..serializers.spec_comparison_serializers import (
     TriggerSpecComparisonResponseSerializer,
     SpecComparisonSummarySerializer,
     SpecConflictReadSerializer,
+    SpecConflictCommentSerializer,
     SkippedNoteReadSerializer,
     SpecComparisonListSerializer,
 )
@@ -424,6 +427,7 @@ SORTABLE_COLUMNS = {
     'spec_text': 'spec_text',
     'spec_masterformat_number': 'spec_masterformat_number',
     'reason': 'reason',
+    'status': 'status',
 }
 
 
@@ -517,6 +521,7 @@ def get_spec_conflicts(request, project_id):
                 'sheet_numbers': [],
                 'spec_masterformat_numbers': [],
                 'reasons': [],
+                'statuses': [],
             },
             'results': [],
         })
@@ -538,11 +543,16 @@ def get_spec_conflicts(request, project_id):
         'reasons': sorted(list(
             all_conflicts.values_list('reason', flat=True).distinct()
         )),
+        'statuses': sorted(list(
+            all_conflicts.values_list('status', flat=True).distinct()
+        )),
     }
 
     # Get conflicts with pagination (select_related to avoid N+1 on note access)
     conflicts = SpecConflict.objects.filter(comparison=comparison).select_related(
         'note__section__page__drawing_file'
+    ).annotate(
+        comment_count_annotated=Count('comments')
     )
 
     # Apply filters
@@ -565,6 +575,13 @@ def get_spec_conflicts(request, project_id):
     reason_filter = request.query_params.get('reason')
     if reason_filter:
         conflicts = conflicts.filter(reason=reason_filter)
+
+    status_filter = request.query_params.get('status')
+    if status_filter:
+        status_error = _validate_status_param(status_filter)
+        if status_error:
+            return status_error
+        conflicts = conflicts.filter(status=status_filter)
 
     # Apply sorting
     sort_column = request.query_params.get('sort_column')
@@ -725,6 +742,125 @@ def list_spec_comparisons(request, project_id):
     return paginator.get_paginated_response(serializer.data)
 
 
+def _get_conflict_or_error(request, project_id, conflict_id):
+    """Shared helper: validate project access and fetch conflict. Returns (conflict, None) or (None, Response)."""
+    if not request.user.is_member_of_project(project_id):
+        return None, Response({"error": "Not authorized to access this project"}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        conflict = SpecConflict.objects.select_related('comparison__project').get(
+            id=conflict_id, comparison__project_id=project_id
+        )
+    except SpecConflict.DoesNotExist:
+        return None, Response({"error": "Spec conflict not found or does not belong to this project"}, status=status.HTTP_404_NOT_FOUND)
+
+    return conflict, None
+
+
+def _validate_status_param(status_value):
+    """Validate a status query param. Returns error Response or None."""
+    valid_statuses = dict(SpecConflictStatus.choices)
+    if status_value and status_value not in valid_statuses:
+        return Response(
+            {"error": f"Invalid status. Must be one of: {list(valid_statuses.keys())}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return None
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def update_spec_conflict_status(request, project_id, conflict_id):
+    """
+    Update the status of a specific spec conflict.
+
+    PATCH /api/deliverables/projects/{project_id}/spec-conflicts/{conflict_id}/status/
+    """
+    conflict, error = _get_conflict_or_error(request, project_id, conflict_id)
+    if error:
+        return error
+
+    # Validate status value
+    new_status = request.data.get('status')
+    if not new_status:
+        return Response(
+            {"error": "status field is required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    status_error = _validate_status_param(new_status)
+    if status_error:
+        return status_error
+
+    # Update status
+    conflict.status = new_status
+    conflict.save(update_fields=['status', 'updated_at'])
+
+    # Return lightweight response (avoids S3 presigned URL generation)
+    return Response({"id": conflict.id, "status": conflict.status})
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def spec_conflict_comments(request, project_id, conflict_id):
+    """
+    List comments or create a new comment for a spec conflict.
+
+    GET /api/deliverables/projects/{project_id}/spec-conflicts/{conflict_id}/comments/
+    POST /api/deliverables/projects/{project_id}/spec-conflicts/{conflict_id}/comments/
+    """
+    conflict, error = _get_conflict_or_error(request, project_id, conflict_id)
+    if error:
+        return error
+
+    if request.method == 'GET':
+        comments = conflict.comments.select_related('user').order_by('created_at', 'id')
+        serializer = SpecConflictCommentSerializer(comments, many=True)
+        return Response(serializer.data)
+
+    elif request.method == 'POST':
+        serializer = SpecConflictCommentSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(conflict=conflict, user=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def spec_conflict_comment_detail(request, project_id, conflict_id, comment_id):
+    """
+    Delete a comment on a spec conflict.
+
+    DELETE /api/deliverables/projects/{project_id}/spec-conflicts/{conflict_id}/comments/{comment_id}/
+    """
+    conflict, error = _get_conflict_or_error(request, project_id, conflict_id)
+    if error:
+        return error
+
+    try:
+        comment = SpecConflictComment.objects.select_related('user').get(
+            id=comment_id, conflict=conflict
+        )
+    except SpecConflictComment.DoesNotExist:
+        return Response(
+            {"error": "Comment not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Allow deletion if: comment author, or comment has no author (deleted user).
+    # Intentional: orphaned comments (user=None after deletion) are deletable by
+    # any project member as a cleanup affordance. Admin-only restriction not needed
+    # given comments are lightweight text with no access control implications.
+    if comment.user is not None and comment.user != request.user:
+        return Response(
+            {"error": "You can only delete your own comments"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    comment.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_spec_conflicts(request, project_id):
@@ -826,6 +962,13 @@ def export_spec_conflicts(request, project_id):
     if reason_filter:
         conflicts = conflicts.filter(reason=reason_filter)
 
+    status_filter = request.query_params.get('status')
+    if status_filter:
+        status_error = _validate_status_param(status_filter)
+        if status_error:
+            return status_error
+        conflicts = conflicts.filter(status=status_filter)
+
     conflicts = conflicts.order_by('id')
 
     # Create workbook
@@ -842,7 +985,7 @@ def export_spec_conflicts(request, project_id):
     # Headers
     headers = [
         'Drawing #', 'Sheet Title', 'Drawing Content', 'Related Spec Content',
-        'Spec Section', 'Spec Page', 'Reason', 'Confidence'
+        'Spec Section', 'Spec Page', 'Reason', 'Confidence', 'Status'
     ]
     for col, header in enumerate(headers, start=1):
         cell = worksheet.cell(row=1, column=col, value=header)
@@ -869,6 +1012,7 @@ def export_spec_conflicts(request, project_id):
             conflict.spec_page_number,
             conflict.reason,
             f"{int(conflict.confidence * 100)}%",
+            conflict.get_status_display(),
         ]
 
         for col, value in enumerate(row_data, start=1):
@@ -876,7 +1020,7 @@ def export_spec_conflicts(request, project_id):
             cell.alignment = text_alignment
 
     # Set column widths
-    column_widths = [15, 30, 50, 50, 15, 12, 40, 12]
+    column_widths = [15, 30, 50, 50, 15, 12, 40, 12, 15]
     for col, width in enumerate(column_widths, start=1):
         worksheet.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
 
