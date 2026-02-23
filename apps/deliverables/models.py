@@ -1208,6 +1208,14 @@ class SpecComparisonWebhookEvent(BaseModel):
         return f"WebhookEvent {self.event_id} -> {self.new_status}"
 
 
+class SpecConflictStatus(models.TextChoices):
+    UNREVIEWED = "UNREVIEWED", "Unreviewed"
+    RFI = "RFI", "RFI"
+    ACCEPT = "ACCEPT", "Accept"
+    NEEDS_REVIEW = "NEEDS_REVIEW", "Needs Review"
+    REVISION_INCOMING = "REVISION_INCOMING", "Revision Incoming"
+
+
 class SpecConflict(BaseModel):
     """Stores each detected conflict between a drawing note and spec"""
 
@@ -1232,6 +1240,12 @@ class SpecConflict(BaseModel):
     confidence = models.FloatField()
     reason = models.TextField()
     pdf_locations = models.JSONField(default=list)
+    status = models.CharField(
+        max_length=32,
+        choices=SpecConflictStatus.choices,
+        default=SpecConflictStatus.UNREVIEWED,
+        db_index=True,
+    )
 
     class Meta:
         ordering = ['id']
@@ -1241,6 +1255,34 @@ class SpecConflict(BaseModel):
 
     def __str__(self):
         return f"Conflict {self.id}: {self.note_text[:50]}..."
+
+
+class SpecConflictComment(BaseModel):
+    """User comment on a spec conflict row."""
+
+    conflict = models.ForeignKey(
+        "SpecConflict",
+        on_delete=models.CASCADE,
+        related_name="comments",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="spec_conflict_comments",
+    )
+    text = models.TextField()
+
+    class Meta:
+        ordering = ['created_at', 'id']
+        indexes = [
+            models.Index(fields=['conflict', 'created_at']),
+        ]
+
+    def __str__(self):
+        user_display = self.user.email if self.user else "Unknown user"
+        preview = self.text[:50] + '...' if len(self.text) > 50 else self.text
+        return f"Comment by {user_display}: {preview}"
 
 
 class SkippedNote(BaseModel):
