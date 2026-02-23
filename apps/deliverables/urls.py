@@ -18,6 +18,9 @@ from .views.spec_comparison_views import (
     get_skipped_notes,
     list_spec_comparisons,
     export_spec_conflicts,
+    update_spec_conflict_status,
+    spec_conflict_comments,
+    spec_conflict_comment_detail,
 )
 
 
@@ -144,6 +147,9 @@ urlpatterns = [
     path('projects/<int:project_id>/trigger-spec-comparison/', trigger_spec_comparison, name='trigger-spec-comparison'),
     path('projects/<int:project_id>/spec-conflicts/export/', export_spec_conflicts, name='spec-conflicts-export'),
     path('projects/<int:project_id>/spec-conflicts/', get_spec_conflicts, name='spec-conflicts'),
+    path('projects/<int:project_id>/spec-conflicts/<int:conflict_id>/status/', update_spec_conflict_status, name='spec-conflict-status-update'),
+    path('projects/<int:project_id>/spec-conflicts/<int:conflict_id>/comments/', spec_conflict_comments, name='spec-conflict-comments'),
+    path('projects/<int:project_id>/spec-conflicts/<int:conflict_id>/comments/<int:comment_id>/', spec_conflict_comment_detail, name='spec-conflict-comment-detail'),
     path('projects/<int:project_id>/skipped-notes/', get_skipped_notes, name='skipped-notes'),
     path('projects/<int:project_id>/spec-comparisons/', list_spec_comparisons, name='spec-comparisons-list'),
     path('projects/<int:project_id>/spec-sections/', views.get_project_spec_sections, name='get-project-spec-sections'),
