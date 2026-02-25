@@ -1,8 +1,9 @@
+import re
 from collections.abc import Mapping
 import logging
 
 from rest_framework import serializers
-from django.db.models import Q
+from django.db.models import Q, Func, Value, CharField
 from django.db.models.fields.json import KeyTextTransform
 from apps.deliverables.models import (
     Chat,
@@ -192,6 +193,8 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
             'exact_requirement_text': 'Exact Requirement Text',
             'deliverable_type': 'Deliverable Type',
             'when_due': 'When Due',
+            'responsible_party': 'Responsible Party',
+            'spec_section_name': 'Spec Section Name',
         }
 
         if is_owner_deliverables and sort_field in owner_deliverables_nested_fields:
@@ -208,7 +211,27 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
             logger.debug(f"Annotated queryset with {annotation_name} from metadata.raw_item['{json_key}']")
         else:
             db_sort_field = sort_field_mapping.get(sort_field, 'spec_section_number')
-        
+
+        # Normalize spec_section_number for sorting by stripping non-digit characters.
+        if db_sort_field == 'spec_section_number':
+            queryset = queryset.annotate(
+                normalized_spec_section=Func(
+                    Func(
+                        'spec_section_number',
+                        Value(r'[^0-9]'),
+                        Value(''),
+                        Value('g'),
+                        function='REGEXP_REPLACE',
+                        output_field=CharField(),
+                    ),
+                    Value(10),  # Pad to 10 characters
+                    Value('0'),  # Pad character
+                    function='LPAD',
+                    output_field=CharField(),
+                )
+            )
+            db_sort_field = 'normalized_spec_section'
+
         sort_prefix = '-' if sort_direction == 'desc' else ''
 
         # Handle None values in sorting by using multiple order_by clauses
@@ -615,7 +638,16 @@ class AiGeneratedLogSerializer(serializers.ModelSerializer):
                 value = item.get(field_key, '')
                 if value is None:
                     return '' if reverse else 'zzz'  # Place None at end for desc, beginning for asc
-                return str(value).lower()        
+                
+                value_str = str(value).lower()
+                
+                # Normalize spec section numbers by extracting digits only
+                if field_key == 'Spec Section #':
+                    normalized = re.sub(r'[^0-9]', '', value_str)
+                    return normalized.zfill(10) if normalized else ('zzz' if not reverse else '')
+                
+                return value_str
+            
             sorted_data = sorted(log_data, key=sort_key, reverse=reverse)
             
             return sorted_data
